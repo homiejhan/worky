@@ -618,11 +618,10 @@ function timerCardHTML(t, pfx) {
     <div class="timer-header">
       <div class="color-swatch" style="background:${t.color}">
         <input type="color" value="${t.color}"
-          oninput="changeTimerColor(${t.id},this.value)"
-          onchange="changeTimerColor(${t.id},this.value)">
+          oninput="changeTimerColor(${t.id},this.value); saveToLocal();">
       </div>
       <input class="timer-title-input" value="${t.label}" placeholder="Timer name"
-        onchange="timers[${t.id}].label=this.value">
+        oninput="timers[${t.id}].label=this.value; saveToLocal();">
     </div>
     <div class="timer-body">
       <div class="timer-accent-bar tbar-${t.id}" style="background:${t.color}"></div>
@@ -666,6 +665,7 @@ function toggleTimer(id) {
     t.startedAt = Date.now(); t.secondsAtStart = t.seconds; t.running = true;
   }
   updateTimerUI(id);
+  saveToLocal();
 }
 function updateTimerUI(id) {
   const t = timers[id];
@@ -696,6 +696,7 @@ function commitEditTimer(id, pfx) {
     edit.style.display = 'none';
   }
   document.querySelectorAll(`.tdisp-${id}`).forEach(el => { el.style.display = 'block'; el.textContent = fmt(t.seconds); });
+  saveToLocal();
 }
 function resetTimer(id) {
   const t = timers[id];
@@ -703,6 +704,7 @@ function resetTimer(id) {
   document.querySelectorAll(`.tedit-${id}-d, .tedit-${id}-m`).forEach(el => el.style.display = 'none');
   document.querySelectorAll(`.tdisp-${id}`).forEach(el => { el.style.display = 'block'; el.textContent = fmt(t.seconds); });
   updateTimerUI(id);
+  saveToLocal();
 }
 
 /* ─────────── WAKEUP ─────────── */
@@ -714,6 +716,7 @@ function toggleWakeup() {
     if (row) row.classList.toggle('done', wokenUp);
     if (box) box.classList.toggle('checked', wokenUp);
   });
+  saveToLocal();
 }
 
 /* ─────────── TODO LISTS ─────────── */
@@ -721,10 +724,11 @@ function addTodoList() {
   const id = todoIdCounter++;
   todoLists.push({ id, title: '', color: '#5DCAA5', tasks: [], isDefault: false });
   renderTodos();
+  saveToLocal();
   setTimeout(() => { const inp = document.getElementById(`todo-title-${id}-d`) || document.getElementById(`todo-title-${id}-m`); if (inp) inp.focus(); }, 10);
 }
 function removeTodoList(id) {
-  todoLists = todoLists.filter(l => l.id !== id); renderTodos();
+  todoLists = todoLists.filter(l => l.id !== id); renderTodos(); saveToLocal();
 }
 function changeTodoColor(id, color) {
   const list = todoLists.find(l => l.id === id); if (!list) return;
@@ -738,11 +742,12 @@ function addTask(listId) {
   const tid = taskIdCounter++;
   list.tasks.push({ id: tid, text: '', done: false });
   renderTodos();
+  saveToLocal();
   setTimeout(() => { const inp = document.querySelector(`input.task-text-${tid}`); if (inp) inp.focus(); }, 10);
 }
 function removeTask(listId, taskId) {
   const list = todoLists.find(l => l.id === listId); if (!list) return;
-  list.tasks = list.tasks.filter(t => t.id !== taskId); renderTodos();
+  list.tasks = list.tasks.filter(t => t.id !== taskId); renderTodos(); saveToLocal();
 }
 function toggleTask(listId, taskId) {
   const list = todoLists.find(l => l.id === listId); if (!list) return;
@@ -754,6 +759,7 @@ function toggleTask(listId, taskId) {
     el.style.borderColor = task.done ? list.color : '';
   });
   document.querySelectorAll(`.task-text-${taskId}`).forEach(el => el.classList.toggle('done', task.done));
+  saveToLocal();
 }
 
 function buildCard(list, pfx) {
@@ -764,11 +770,10 @@ function buildCard(list, pfx) {
     <div class="todo-card-header">
       <div class="color-swatch todo-swatch-${list.id}" style="background:${list.color}">
         <input type="color" value="${list.color}"
-          oninput="changeTodoColor(${list.id},this.value)"
-          onchange="changeTodoColor(${list.id},this.value)">
+          oninput="changeTodoColor(${list.id},this.value); saveToLocal();">
       </div>
       <input class="todo-title-input" id="todo-title-${list.id}-${pfx}" value="${list.title}" placeholder="List title"
-        oninput="todoLists.find(l=>l.id===${list.id}).title=this.value">
+        oninput="todoLists.find(l=>l.id===${list.id}).title=this.value; saveToLocal();">
       <button class="todo-delete-btn" onclick="removeTodoList(${list.id})">×</button>
     </div>
     <div class="todo-tasks">
@@ -783,7 +788,7 @@ function buildCard(list, pfx) {
           </div>
           <input class="task-text task-text-${task.id} ${task.done?'done':''}"
             value="${task.text}" placeholder="Task…"
-            oninput="todoLists.find(l=>l.id===${list.id}).tasks.find(t=>t.id===${task.id}).text=this.value"
+            oninput="todoLists.find(l=>l.id===${list.id}).tasks.find(t=>t.id===${task.id}).text=this.value; saveToLocal();"
             onkeydown="if(event.key==='Enter'){event.preventDefault();addTask(${list.id});}">
           <button class="task-del" onclick="removeTask(${list.id},${task.id})">×</button>
         </div>
@@ -923,7 +928,7 @@ function loadFromLocal() {
 }
 
 // Auto-save every 5 seconds and immediately on tab hide / page close
-setInterval(saveToLocal, 5000);
+setInterval(saveToLocal, 2000);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') saveToLocal();
 });
