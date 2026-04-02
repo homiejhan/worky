@@ -149,6 +149,40 @@
   .data-spacer { flex: 1; }
 
   /* ── TOAST ── */
+  .reset-all-btn { border-color: rgba(220,60,60,0.3); color: #e05555; }
+  .reset-all-btn:hover { background: rgba(220,60,60,0.1); color: #ff6666; }
+
+  .confirm-overlay {
+    position: fixed; inset: 0; z-index: 200;
+    background: rgba(0,0,0,0.6);
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .confirm-overlay.show { opacity: 1; pointer-events: all; }
+  .confirm-box {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-mid);
+    border-radius: var(--radius-lg);
+    padding: 24px 20px 16px;
+    width: min(280px, 85vw);
+    display: flex; flex-direction: column; gap: 10px;
+    text-align: center;
+  }
+  .confirm-title { font-size: 15px; font-weight: 500; color: var(--text-primary); }
+  .confirm-sub { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+  .confirm-actions { display: flex; gap: 8px; margin-top: 4px; }
+  .confirm-actions button {
+    flex: 1; padding: 9px; border-radius: var(--radius-md);
+    font-size: 13px; font-family: var(--font-sans);
+    cursor: pointer; border: 1px solid var(--border-mid);
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+  .confirm-cancel { background: var(--bg-hover); color: var(--text-secondary); }
+  .confirm-cancel:hover { color: var(--text-primary); }
+  .confirm-confirm { background: rgba(220,60,60,0.15); color: #e05555; border-color: rgba(220,60,60,0.3); }
+  .confirm-confirm:hover { background: rgba(220,60,60,0.25); }
+
   .toast {
     position: fixed; bottom: 56px; left: 50%;
     transform: translateX(-50%);
@@ -485,8 +519,20 @@
   <button class="data-btn" onclick="downloadState()">Download</button>
   <button class="data-btn accent" onclick="triggerUpload()">Load file</button>
   <input type="file" id="fileInput" accept=".json" style="display:none" onchange="loadStateFile(this)">
+  <div class="data-spacer"></div>
+  <button class="data-btn reset-all-btn" onclick="confirmResetAll()">Reset all</button>
 </div>
 
+<div class="confirm-overlay" id="confirmOverlay">
+  <div class="confirm-box">
+    <div class="confirm-title">Reset everything?</div>
+    <div class="confirm-sub">Timers reset, daily tasks unchecked, and all custom lists removed.</div>
+    <div class="confirm-actions">
+      <button class="confirm-cancel" onclick="closeConfirm()">Cancel</button>
+      <button class="confirm-confirm" onclick="resetAll()">Reset all</button>
+    </div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -896,6 +942,41 @@ function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+/* ─────────── RESET ALL ─────────── */
+function confirmResetAll() {
+  document.getElementById('confirmOverlay').classList.add('show');
+}
+function closeConfirm() {
+  document.getElementById('confirmOverlay').classList.remove('show');
+}
+function resetAll() {
+  closeConfirm();
+  // Reset timers
+  timers.forEach((t, i) => {
+    t.running = false;
+    t.seconds = TIMER_DEFAULTS[i].seconds;
+    t.startedAt = null; t.secondsAtStart = null;
+  });
+  // Uncheck wakeup
+  wokenUp = false;
+  ['d','m'].forEach(p => {
+    const row = document.getElementById(`wakeupRow-${p}`);
+    const box = document.getElementById(`wakeupBox-${p}`);
+    if (row) row.classList.remove('done');
+    if (box) box.classList.remove('checked');
+  });
+  // Uncheck all daily tasks
+  todoLists.filter(l => l.isDefault).forEach(l => {
+    l.tasks.forEach(t => t.done = false);
+  });
+  // Remove all custom lists
+  todoLists = todoLists.filter(l => l.isDefault);
+  renderTimers();
+  renderTodos();
+  saveToLocal();
+  showToast('Reset ✓');
 }
 
 /* ─────────── LOCAL STORAGE AUTO-SAVE ─────────── */
