@@ -526,7 +526,7 @@
 <div class="confirm-overlay" id="confirmOverlay">
   <div class="confirm-box">
     <div class="confirm-title">Reset everything?</div>
-    <div class="confirm-sub">Timers reset, daily tasks unchecked, and all custom lists removed.</div>
+    <div class="confirm-sub">Timers reset to defaults and daily tasks unchecked. Your custom lists are untouched.</div>
     <div class="confirm-actions">
       <button class="confirm-cancel" onclick="closeConfirm()">Cancel</button>
       <button class="confirm-confirm" onclick="resetAll()">Reset all</button>
@@ -971,8 +971,7 @@ function resetAll() {
   todoLists.filter(l => l.isDefault).forEach(l => {
     l.tasks.forEach(t => t.done = false);
   });
-  // Remove all custom lists
-  todoLists = todoLists.filter(l => l.isDefault);
+  // Custom lists are left untouched
   renderTimers();
   renderTodos();
   saveToLocal();
