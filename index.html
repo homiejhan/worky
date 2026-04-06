@@ -405,6 +405,23 @@
   .task-row:hover .task-del { display: flex; }
   .task-del:hover { color: #e05555; }
 
+  .drag-handle {
+    width: 18px; height: 18px; flex-shrink: 0;
+    display: none; align-items: center; justify-content: center;
+    cursor: grab; color: var(--text-muted);
+    touch-action: none;
+  }
+  .drag-handle:active { cursor: grabbing; }
+  .task-row:hover .drag-handle { display: flex; }
+  .task-row.dragging { opacity: 0.35; }
+  .task-row.drag-over { border-top: 2px solid var(--accent-green); }
+  .todo-tasks.drag-over-empty {
+    min-height: 36px;
+    border: 1px dashed rgba(93,202,165,0.35);
+    border-radius: var(--radius-sm);
+    margin: 4px 8px;
+  }
+
   .todo-add-task {
     display: flex; align-items: center;
     padding: 7px 13px 10px;
@@ -824,7 +841,8 @@ function buildCard(list, pfx) {
     </div>
     <div class="todo-tasks">
       ${list.tasks.map(task => `
-        <div class="task-row">
+        <div class="task-row" data-task-id="${task.id}" data-list-id="${list.id}" ${!list.isDefault ? 'draggable="true"' : ''}>
+          ${!list.isDefault ? `<div class="drag-handle" title="Drag to reorder"><svg width="10" height="14" viewBox="0 0 10 14" fill="none"><circle cx="3" cy="3" r="1.2" fill="currentColor"/><circle cx="7" cy="3" r="1.2" fill="currentColor"/><circle cx="3" cy="7" r="1.2" fill="currentColor"/><circle cx="7" cy="7" r="1.2" fill="currentColor"/><circle cx="3" cy="11" r="1.2" fill="currentColor"/><circle cx="7" cy="11" r="1.2" fill="currentColor"/></svg></div>` : ''}
           <div class="task-check task-checks-${task.id} ${task.done?'done':''}"
             style="${task.done?`background:${list.color};border-color:${list.color}`:''}"
             onclick="toggleTask(${list.id},${task.id})">
@@ -865,6 +883,147 @@ function renderTodos() {
     todoLists.filter(l => l.isDefault).forEach(l => defEl.appendChild(buildCard(l, pfx)));
     customLists.forEach(l => custEl.appendChild(buildCard(l, pfx)));
   });
+  initDragDrop();
+}
+
+/* ─────────── DRAG & DROP (My Lists only) ─────────── */
+let dragTaskId = null;
+let dragFromListId = null;
+
+function initDragDrop() {
+  // Desktop: HTML5 drag events
+  document.querySelectorAll('.task-row[draggable="true"]').forEach(row => {
+    row.addEventListener('dragstart', e => {
+      dragTaskId = parseInt(row.dataset.taskId);
+      dragFromListId = parseInt(row.dataset.listId);
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+      document.querySelectorAll('.drag-over-empty').forEach(el => el.classList.remove('drag-over-empty'));
+    });
+    row.addEventListener('dragover', e => {
+      e.preventDefault();
+      document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+      row.classList.add('drag-over');
+    });
+    row.addEventListener('drop', e => {
+      e.preventDefault();
+      const toTaskId = parseInt(row.dataset.taskId);
+      const toListId = parseInt(row.dataset.listId);
+      if (dragTaskId === toTaskId) return;
+      moveTask(dragTaskId, dragFromListId, toListId, toTaskId);
+    });
+  });
+
+  // Drop onto empty task areas
+  document.querySelectorAll('.todo-tasks').forEach(area => {
+    area.addEventListener('dragover', e => {
+      e.preventDefault();
+      area.classList.add('drag-over-empty');
+    });
+    area.addEventListener('dragleave', () => area.classList.remove('drag-over-empty'));
+    area.addEventListener('drop', e => {
+      e.preventDefault();
+      area.classList.remove('drag-over-empty');
+      const card = area.closest('.todo-card');
+      if (!card) return;
+      const toListId = parseInt(area.querySelector('.task-row')?.dataset.listId ?? card.querySelector('[data-list-id]')?.dataset.listId);
+      if (isNaN(toListId)) return;
+      moveTask(dragTaskId, dragFromListId, toListId, null);
+    });
+  });
+
+  // Touch drag (mobile)
+  let touchDragRow = null, touchClone = null, touchOffsetY = 0;
+
+  document.querySelectorAll('.drag-handle').forEach(handle => {
+    handle.addEventListener('touchstart', e => {
+      const row = handle.closest('.task-row');
+      if (!row) return;
+      dragTaskId = parseInt(row.dataset.taskId);
+      dragFromListId = parseInt(row.dataset.listId);
+      touchDragRow = row;
+      touchOffsetY = e.touches[0].clientY - row.getBoundingClientRect().top;
+
+      touchClone = row.cloneNode(true);
+      touchClone.style.cssText = `position:fixed;left:0;right:0;z-index:500;opacity:0.85;pointer-events:none;background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:var(--radius-sm);`;
+      touchClone.style.top = (e.touches[0].clientY - touchOffsetY) + 'px';
+      document.body.appendChild(touchClone);
+      row.classList.add('dragging');
+      e.preventDefault();
+    }, { passive: false });
+  });
+
+  document.addEventListener('touchmove', e => {
+    if (!touchClone) return;
+    const y = e.touches[0].clientY;
+    const x = e.touches[0].clientX;
+    touchClone.style.top = (y - touchOffsetY) + 'px';
+
+    // Find what we're hovering over
+    touchClone.style.display = 'none';
+    const el = document.elementFromPoint(x, y);
+    touchClone.style.display = '';
+
+    document.querySelectorAll('.drag-over').forEach(r => r.classList.remove('drag-over'));
+    const hoverRow = el?.closest('.task-row[draggable]');
+    if (hoverRow) hoverRow.classList.add('drag-over');
+    e.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener('touchend', e => {
+    if (!touchClone) return;
+    const x = e.changedTouches[0].clientX;
+    const y = e.changedTouches[0].clientY;
+
+    touchClone.style.display = 'none';
+    const el = document.elementFromPoint(x, y);
+    touchClone.style.display = '';
+
+    const hoverRow = el?.closest('.task-row[draggable]');
+    const hoverArea = el?.closest('.todo-tasks');
+    const hoverCard = el?.closest('.todo-card');
+
+    if (hoverRow) {
+      const toTaskId = parseInt(hoverRow.dataset.taskId);
+      const toListId = parseInt(hoverRow.dataset.listId);
+      if (dragTaskId !== toTaskId) moveTask(dragTaskId, dragFromListId, toListId, toTaskId);
+    } else if (hoverCard) {
+      const anyRow = hoverCard.querySelector('.task-row[data-list-id]');
+      if (anyRow) {
+        const toListId = parseInt(anyRow.dataset.listId);
+        moveTask(dragTaskId, dragFromListId, toListId, null);
+      }
+    }
+
+    touchClone.remove(); touchClone = null;
+    touchDragRow?.classList.remove('dragging');
+    touchDragRow = null;
+    document.querySelectorAll('.drag-over').forEach(r => r.classList.remove('drag-over'));
+  });
+}
+
+function moveTask(taskId, fromListId, toListId, beforeTaskId) {
+  const fromList = todoLists.find(l => l.id === fromListId);
+  const toList   = todoLists.find(l => l.id === toListId);
+  if (!fromList || !toList) return;
+
+  const taskIdx = fromList.tasks.findIndex(t => t.id === taskId);
+  if (taskIdx === -1) return;
+  const [task] = fromList.tasks.splice(taskIdx, 1);
+
+  if (beforeTaskId != null) {
+    const beforeIdx = toList.tasks.findIndex(t => t.id === beforeTaskId);
+    toList.tasks.splice(beforeIdx, 0, task);
+  } else {
+    toList.tasks.push(task);
+  }
+
+  renderTodos();
+  saveToLocal();
 }
 
 /* ─────────── SAVE / LOAD ─────────── */
