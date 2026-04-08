@@ -152,6 +152,92 @@
   .reset-all-btn { border-color: rgba(220,60,60,0.3); color: #e05555; }
   .reset-all-btn:hover { background: rgba(220,60,60,0.1); color: #ff6666; }
 
+  /* Format mode */
+  .fmt-btn {
+    font-size: 11px; font-family: var(--font-sans);
+    padding: 4px 12px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border-mid);
+    background: var(--bg-elevated);
+    color: var(--text-secondary); cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    white-space: nowrap;
+  }
+  .fmt-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .fmt-btn.active { border-color: rgba(93,202,165,0.4); color: var(--accent-green); background: rgba(93,202,165,0.07); }
+
+  .fmt-banner {
+    display: none;
+    font-size: 10px; font-weight: 500;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--accent-green);
+    padding: 0 6px;
+  }
+  body.format-mode .fmt-banner { display: block; }
+
+  /* In format mode hide play/reset on timers, show remove-timer btn */
+  body.format-mode .play-btn { display: none !important; }
+  body.format-mode .reset-btn { display: none !important; }
+  body.format-mode .timer-sub { display: none !important; }
+  body.format-mode .fmt-remove-timer { display: flex !important; }
+  body.format-mode .fmt-add-timer { display: flex !important; }
+
+  .fmt-remove-timer {
+    display: none;
+    width: 22px; height: 22px; border-radius: 50%;
+    border: 1px solid rgba(220,60,60,0.3);
+    background: transparent;
+    align-items: center; justify-content: center;
+    cursor: pointer; flex-shrink: 0; color: #e05555;
+    margin-left: 4px;
+    touch-action: manipulation;
+  }
+  .fmt-remove-timer:hover { background: rgba(220,60,60,0.1); }
+
+  .fmt-add-timer {
+    display: none;
+    align-items: center; gap: 6px;
+    padding: 8px 11px;
+    font-size: 12px; font-family: var(--font-sans);
+    color: var(--text-muted); cursor: pointer;
+    background: transparent; border: none;
+    width: 100%; text-align: left;
+    border-top: 1px solid var(--border);
+    touch-action: manipulation;
+  }
+  .fmt-add-timer:hover { color: var(--text-secondary); }
+
+  /* Daily section in format mode */
+  body.format-mode .fmt-add-daily { display: flex !important; }
+  body.format-mode .fmt-remove-daily { display: flex !important; }
+
+  .fmt-add-daily {
+    display: none;
+    font-size: 12px; font-family: var(--font-sans);
+    padding: 5px 12px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border-mid);
+    background: var(--bg-elevated);
+    color: var(--text-secondary); cursor: pointer;
+    touch-action: manipulation; white-space: nowrap;
+  }
+  .fmt-add-daily:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+  .fmt-remove-daily {
+    display: none;
+    width: 20px; height: 20px;
+    align-items: center; justify-content: center;
+    border-radius: 4px; border: none; background: transparent;
+    color: var(--text-muted); cursor: pointer;
+    font-size: 16px; line-height: 1; padding: 0;
+    font-family: var(--font-sans);
+    touch-action: manipulation;
+  }
+  .fmt-remove-daily:hover { background: rgba(220,60,60,0.12); color: #e05555; }
+
+  /* timer-display: in format mode still allow clicking to edit time */
+  body.format-mode .timer-display { cursor: pointer; opacity: 1; pointer-events: auto; }
+  .reset-all-btn:hover { background: rgba(220,60,60,0.1); color: #ff6666; }
+
   .confirm-overlay {
     position: fixed; inset: 0; z-index: 200;
     background: rgba(0,0,0,0.6);
@@ -473,10 +559,17 @@
       <span class="wakeup-label" id="wakeupLabel-d">Woke up</span>
     </div>
     <div class="section-label">Timers</div>
+    <button class="fmt-add-timer" onclick="addFormatTimer('d')">
+      <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1V10M1 5.5H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      Add timer
+    </button>
   </div>
 
   <div class="right-panel" id="rightPanel">
-    <div class="section-label" style="padding:0">Daily</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:4px">
+      <div class="section-label" style="padding:0">Daily</div>
+      <button class="fmt-add-daily" onclick="addFormatDaily()">+ Add list</button>
+    </div>
     <div class="lists-grid" id="defaultContainer-d"></div>
     <div class="section-divider"></div>
     <div class="panel-header">
@@ -509,10 +602,17 @@
           <span class="wakeup-label" id="wakeupLabel-m">Woke up</span>
         </div>
         <div class="section-label">Timers</div>
+        <button class="fmt-add-timer" onclick="addFormatTimer('m')">
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1V10M1 5.5H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          Add timer
+        </button>
       </div>
       <!-- Tab 1: Daily lists -->
       <div class="swipe-panel">
-        <div class="section-label" style="padding:0">Daily</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:4px">
+          <div class="section-label" style="padding:0">Daily</div>
+          <button class="fmt-add-daily" onclick="addFormatDaily()">+ Add list</button>
+        </div>
         <div id="defaultContainer-m"></div>
       </div>
       <!-- Tab 2: My lists -->
@@ -531,7 +631,9 @@
 
 <!-- ── PERSISTENT DATA BAR (both layouts) ── -->
 <div class="data-bar">
-  <span class="data-bar-label">Data</span>
+  <button class="fmt-btn" id="fmtBtn" onclick="toggleFormatMode()">Formats</button>
+  <span class="fmt-banner">Format mode</span>
+  <span class="data-bar-label" style="margin-left:8px">Data</span>
   <button class="data-btn" onclick="copyState()">Copy</button>
   <button class="data-btn" onclick="downloadState()">Download</button>
   <button class="data-btn accent" onclick="triggerUpload()">Load file</button>
@@ -554,12 +656,16 @@
 
 <script>
 /* ─────────── STATE ─────────── */
-const TIMER_DEFAULTS = [
+// Mutable defaults — updated when Format mode is committed
+let TIMER_DEFAULTS = [
   { label: 'Productivity Timer',   seconds: 6*3600, color: '#378ADD' },
   { label: 'Personal Development', seconds: 4*3600, color: '#EC3636' },
   { label: 'Time with God',        seconds: 2*3600, color: '#8B5CF6' },
   { label: 'Skill Development',    seconds: 1*3600, color: '#F97316' },
 ];
+
+let formatMode = false;
+let formatTimerIdCounter = 900; // high range to avoid clashing with regular timer ids
 
 let wokenUp = false;
 
@@ -684,7 +790,7 @@ function timerCardHTML(t, pfx) {
           oninput="changeTimerColor(${t.id},this.value); saveToLocal();">
       </div>
       <input class="timer-title-input" value="${t.label}" placeholder="Timer name"
-        oninput="timers[${t.id}].label=this.value; saveToLocal();">
+        oninput="timers[${t.id}].label=this.value; if(formatMode){const idx=timers.findIndex(x=>x.id===${t.id});if(TIMER_DEFAULTS[idx])TIMER_DEFAULTS[idx].label=this.value;} saveToLocal();">
     </div>
     <div class="timer-body">
       <div class="timer-accent-bar tbar-${t.id}" style="background:${t.color}"></div>
@@ -696,6 +802,9 @@ function timerCardHTML(t, pfx) {
         ${t.running ? pauseIcon() : playIcon()}
       </button>
       <button class="reset-btn" onclick="resetTimer(${t.id})" title="Reset">${resetIcon()}</button>
+      <button class="fmt-remove-timer" onclick="removeFormatTimer(${t.id})" title="Remove timer">
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 1.5L8.5 8.5M8.5 1.5L1.5 8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
     </div>
     <div class="timer-sub tsub-${t.id}">${t.running?'running':'paused'} · click time to edit</div>
   `;
@@ -716,11 +825,12 @@ function renderTimers() {
 }
 
 function changeTimerColor(id, color) {
-  timers[id].color = color;
+  const t = timers.find(x => x.id === id);
+  if (t) t.color = color;
   document.querySelectorAll(`.tbar-${id}`).forEach(el => el.style.background = color);
 }
 function toggleTimer(id) {
-  const t = timers[id];
+  const t = timers.find(x => x.id === id);
   if (t.running) {
     t.seconds = getRemaining(t); t.running = false;
   } else {
@@ -741,14 +851,14 @@ function updateTimerUI(id) {
   });
 }
 function startEditTimer(id, pfx) {
-  const t = timers[id];
+  const t = timers.find(x => x.id === id);
   if (t.running) return;
   document.querySelectorAll(`.tdisp-${id}`).forEach(el => el.style.display = 'none');
   const edit = document.querySelector(`.tedit-${id}-${pfx}`);
   if (edit) { edit.style.display = 'block'; edit.value = fmt(t.seconds); edit.focus(); edit.select(); }
 }
 function commitEditTimer(id, pfx) {
-  const t = timers[id];
+  const t = timers.find(x => x.id === id);
   const edit = document.querySelector(`.tedit-${id}-${pfx}`);
   if (edit) {
     const parsed = parseTime(edit.value);
@@ -762,8 +872,9 @@ function commitEditTimer(id, pfx) {
   saveToLocal();
 }
 function resetTimer(id) {
-  const t = timers[id];
-  t.running = false; t.seconds = TIMER_DEFAULTS[id].seconds; t.startedAt = null; t.secondsAtStart = null;
+  const t = timers.find(x => x.id === id);
+  const tIdx = timers.findIndex(x => x.id === id);
+  t.running = false; t.seconds = (TIMER_DEFAULTS[tIdx] ?? TIMER_DEFAULTS[0]).seconds; t.startedAt = null; t.secondsAtStart = null;
   document.querySelectorAll(`.tedit-${id}-d, .tedit-${id}-m`).forEach(el => el.style.display = 'none');
   document.querySelectorAll(`.tdisp-${id}`).forEach(el => { el.style.display = 'block'; el.textContent = fmt(t.seconds); });
   updateTimerUI(id);
@@ -837,7 +948,7 @@ function buildCard(list, pfx) {
       </div>
       <input class="todo-title-input" id="todo-title-${list.id}-${pfx}" value="${list.title}" placeholder="List title"
         oninput="todoLists.find(l=>l.id===${list.id}).title=this.value; saveToLocal();">
-      <button class="todo-delete-btn" onclick="removeTodoList(${list.id})">×</button>
+      ${list.isDefault ? `<button class="fmt-remove-daily" onclick="removeFormatDaily(${list.id})">×</button>` : `<button class="todo-delete-btn" onclick="removeTodoList(${list.id})">×</button>`}
     </div>
     <div class="todo-tasks">
       ${list.tasks.map(task => `
@@ -1026,12 +1137,100 @@ function moveTask(taskId, fromListId, toListId, beforeTaskId) {
   saveToLocal();
 }
 
+/* ─────────── FORMAT MODE ─────────── */
+function toggleFormatMode() {
+  if (formatMode) {
+    commitFormatMode();
+  } else {
+    enterFormatMode();
+  }
+}
+
+function enterFormatMode() {
+  // Pause all running timers first
+  timers.forEach(t => {
+    if (t.running) {
+      t.seconds = getRemaining(t);
+      t.running = false;
+      updateTimerUI(t.id);
+    }
+  });
+  formatMode = true;
+  document.body.classList.add('format-mode');
+  const btn = document.getElementById('fmtBtn');
+  if (btn) {
+    btn.textContent = '✓ Done';
+    btn.classList.add('active');
+  }
+}
+
+function commitFormatMode() {
+  formatMode = false;
+  document.body.classList.remove('format-mode');
+  const btn = document.getElementById('fmtBtn');
+  if (btn) {
+    btn.textContent = 'Formats';
+    btn.classList.remove('active');
+  }
+
+  // Commit current timer state as new defaults
+  TIMER_DEFAULTS = timers.map(t => ({
+    label: t.label,
+    seconds: Math.round(getRemaining(t)),
+    color: t.color,
+  }));
+
+  // Commit daily list titles/colors/tasks as new defaults
+  // (they're already mutated in-place via oninput handlers)
+
+  saveToLocal();
+  showToast('Format saved ✓');
+}
+
+function addFormatTimer() {
+  if (!formatMode) return;
+  const id = formatTimerIdCounter++;
+  const newT = { id, label: 'New Timer', seconds: 3600, color: '#5DCAA5', running: false, startedAt: null, secondsAtStart: null };
+  timers.push(newT);
+  // Also push a default entry to keep arrays in sync
+  TIMER_DEFAULTS.push({ label: newT.label, seconds: newT.seconds, color: newT.color });
+  renderTimers();
+}
+
+function removeFormatTimer(id) {
+  if (!formatMode) return;
+  if (timers.length <= 1) { showToast('Need at least one timer.'); return; }
+  const idx = timers.findIndex(t => t.id === id);
+  if (idx === -1) return;
+  timers.splice(idx, 1);
+  TIMER_DEFAULTS.splice(idx, 1);
+  renderTimers();
+}
+
+function addFormatDaily() {
+  if (!formatMode) return;
+  const id = todoIdCounter++;
+  todoLists.push({ id, title: 'New List', color: '#5DCAA5', isDefault: true, tasks: [] });
+  renderTodos();
+  setTimeout(() => {
+    const inp = document.getElementById(`todo-title-${id}-d`) || document.getElementById(`todo-title-${id}-m`);
+    if (inp) inp.focus();
+  }, 10);
+}
+
+function removeFormatDaily(id) {
+  if (!formatMode) return;
+  todoLists = todoLists.filter(l => l.id !== id);
+  renderTodos();
+}
+
 /* ─────────── SAVE / LOAD ─────────── */
 function gatherState() {
   return {
     version: 1,
     savedAt: Date.now(),
     wokenUp,
+    timerDefaults: TIMER_DEFAULTS,
     timers: timers.map(t => ({
       id: t.id, label: t.label, color: t.color,
       seconds: Math.round(getRemaining(t)),
@@ -1062,6 +1261,7 @@ function applyState(state) {
     seconds: t.seconds, running: t.running,
     startedAt: t.startedAt, secondsAtStart: t.secondsAtStart,
   }));
+  if (state.timerDefaults) TIMER_DEFAULTS = state.timerDefaults;
   todoIdCounter = state.todoIdCounter ?? todoIdCounter;
   taskIdCounter = state.taskIdCounter ?? taskIdCounter;
   todoLists = state.todoLists.map(l => ({
