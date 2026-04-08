@@ -633,7 +633,6 @@
 <div class="data-bar">
   <button class="fmt-btn" id="fmtBtn" onclick="toggleFormatMode()">Formats</button>
   <span class="fmt-banner">Format mode</span>
-  <button class="data-btn" onclick="copyState()">Copy</button>
   <button class="data-btn" onclick="downloadState()">Download</button>
   <button class="data-btn accent" onclick="triggerUpload()">Load file</button>
   <input type="file" id="fileInput" accept=".json" style="display:none" onchange="loadStateFile(this)">
@@ -1270,13 +1269,6 @@ function applyState(state) {
   renderTimers();
   renderTodos();
   showToast('State restored ✓');
-}
-
-function copyState() {
-  const json = JSON.stringify(gatherState(), null, 2);
-  navigator.clipboard.writeText(json)
-    .then(() => showToast('Copied to clipboard ✓'))
-    .catch(() => showToast('Copy failed — use Download instead'));
 }
 function downloadState() {
   const json = JSON.stringify(gatherState(), null, 2);
