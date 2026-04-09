@@ -238,6 +238,70 @@
   body.format-mode .timer-display { cursor: pointer; opacity: 1; pointer-events: auto; }
   .reset-all-btn:hover { background: rgba(220,60,60,0.1); color: #ff6666; }
 
+  /* ── IMPORT / EXPORT MODALS ── */
+  .modal-overlay {
+    position: fixed; inset: 0; z-index: 200;
+    background: rgba(0,0,0,0.6);
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .modal-overlay.show { opacity: 1; pointer-events: all; }
+  .modal-box {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-mid);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    width: min(360px, 92vw);
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .modal-title {
+    font-size: 14px; font-weight: 500; color: var(--text-primary);
+  }
+  .modal-sub {
+    font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin-top: -4px;
+  }
+  .modal-textarea {
+    width: 100%; height: 120px;
+    background: var(--bg-hover);
+    border: 1px solid var(--border-mid);
+    border-radius: var(--radius-md);
+    padding: 10px; resize: none;
+    font-size: 11px; font-family: var(--font-mono);
+    color: var(--text-primary); outline: none;
+    line-height: 1.5;
+  }
+  .modal-textarea::placeholder { color: var(--text-muted); }
+  .modal-divider {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; color: var(--text-muted);
+  }
+  .modal-divider::before, .modal-divider::after {
+    content: ''; flex: 1; height: 1px; background: var(--border);
+  }
+  .modal-actions { display: flex; gap: 8px; }
+  .modal-actions button {
+    flex: 1; padding: 9px; border-radius: var(--radius-md);
+    font-size: 12px; font-family: var(--font-sans);
+    cursor: pointer; border: 1px solid var(--border-mid);
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s, color 0.15s;
+  }
+  .modal-cancel { background: var(--bg-hover); color: var(--text-secondary); }
+  .modal-cancel:hover { color: var(--text-primary); }
+  .modal-primary { background: rgba(93,202,165,0.1); color: var(--accent-green); border-color: rgba(93,202,165,0.3); }
+  .modal-primary:hover { background: rgba(93,202,165,0.18); }
+  .modal-file-btn {
+    width: 100%; padding: 9px; border-radius: var(--radius-md);
+    font-size: 12px; font-family: var(--font-sans);
+    cursor: pointer; border: 1px solid var(--border-mid);
+    background: var(--bg-hover); color: var(--text-secondary);
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s, color 0.15s;
+    text-align: center;
+  }
+  .modal-file-btn:hover { color: var(--text-primary); }
+
   .confirm-overlay {
     position: fixed; inset: 0; z-index: 200;
     background: rgba(0,0,0,0.6);
@@ -633,11 +697,41 @@
 <div class="data-bar">
   <button class="fmt-btn" id="fmtBtn" onclick="toggleFormatMode()">Formats</button>
   <span class="fmt-banner">Format mode</span>
-  <button class="data-btn" onclick="downloadState()">Download</button>
-  <button class="data-btn accent" onclick="triggerUpload()">Load file</button>
-  <input type="file" id="fileInput" accept=".json" style="display:none" onchange="loadStateFile(this)">
   <div class="data-spacer"></div>
+  <button class="data-btn" onclick="openExportModal()">Export</button>
+  <button class="data-btn accent" onclick="openImportModal()">Import</button>
+  <input type="file" id="fileInput" accept=".json" style="display:none" onchange="loadStateFile(this)">
   <button class="data-btn reset-all-btn" onclick="confirmResetAll()">Reset all</button>
+</div>
+
+<!-- ── EXPORT MODAL ── -->
+<div class="modal-overlay" id="exportModal">
+  <div class="modal-box">
+    <div class="modal-title">Export data</div>
+    <div class="modal-sub">Copy your data to clipboard or download it as a file.</div>
+    <textarea class="modal-textarea" id="exportTextarea" readonly placeholder="Your data will appear here..."></textarea>
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeModal('exportModal')">Close</button>
+      <button class="modal-primary" onclick="exportCopy()">Copy to clipboard</button>
+    </div>
+    <div class="modal-divider">or</div>
+    <button class="modal-file-btn" onclick="exportDownload()">Download as .json file</button>
+  </div>
+</div>
+
+<!-- ── IMPORT MODAL ── -->
+<div class="modal-overlay" id="importModal">
+  <div class="modal-box">
+    <div class="modal-title">Import data</div>
+    <div class="modal-sub">Paste exported data below, or load from a file.</div>
+    <textarea class="modal-textarea" id="importTextarea" placeholder="Paste your data here..."></textarea>
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeModal('importModal')">Cancel</button>
+      <button class="modal-primary" onclick="importFromText()">Import</button>
+    </div>
+    <div class="modal-divider">or</div>
+    <button class="modal-file-btn" onclick="document.getElementById('fileInput').click()">Load from file</button>
+  </div>
 </div>
 
 <div class="confirm-overlay" id="confirmOverlay">
@@ -1270,23 +1364,61 @@ function applyState(state) {
   renderTodos();
   showToast('State restored ✓');
 }
-function downloadState() {
+
+function openExportModal() {
   const json = JSON.stringify(gatherState(), null, 2);
+  document.getElementById('exportTextarea').value = json;
+  document.getElementById('exportModal').classList.add('show');
+}
+function openImportModal() {
+  document.getElementById('importTextarea').value = '';
+  document.getElementById('importModal').classList.add('show');
+}
+function closeModal(id) {
+  document.getElementById(id).classList.remove('show');
+}
+function exportCopy() {
+  const json = document.getElementById('exportTextarea').value;
+  navigator.clipboard.writeText(json)
+    .then(() => { showToast('Copied to clipboard ✓'); closeModal('exportModal'); })
+    .catch(() => showToast('Copy failed — try Download instead'));
+}
+function exportDownload() {
+  const json = document.getElementById('exportTextarea').value;
   const blob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = `focus-${new Date().toISOString().slice(0,10)}.json`;
   a.click(); URL.revokeObjectURL(url);
   showToast('Downloaded ✓');
+  closeModal('exportModal');
 }
-function triggerUpload() { document.getElementById('fileInput').click(); }
+function importFromText() {
+  const raw = document.getElementById('importTextarea').value.trim();
+  if (!raw) { showToast('Nothing to import.'); return; }
+  try {
+    applyState(JSON.parse(raw));
+    closeModal('importModal');
+  } catch { showToast('Invalid data — check your text and try again.'); }
+}
 function loadStateFile(input) {
   const file = input.files[0]; if (!file) return;
   const reader = new FileReader();
-  reader.onload = e => { try { applyState(JSON.parse(e.target.result)); } catch { showToast('Could not parse file.'); } };
+  reader.onload = e => {
+    try {
+      applyState(JSON.parse(e.target.result));
+      closeModal('importModal');
+    } catch { showToast('Could not parse file.'); }
+  };
   reader.readAsText(file);
   input.value = '';
 }
+// Close modals on backdrop click
+['exportModal','importModal'].forEach(id => {
+  document.getElementById(id).addEventListener('click', e => {
+    if (e.target.id === id) closeModal(id);
+  });
+});
 
 function showToast(msg) {
   const t = document.getElementById('toast');
