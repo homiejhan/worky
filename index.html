@@ -9,13 +9,8 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
-<!-- ══════════════════════════════════════════════════════
-     DESKTOP LAYOUT
-     ══════════════════════════════════════════════════════ -->
+<!-- ── DESKTOP ── -->
 <div class="desktop-app" id="desktopApp">
-
-  <!-- Left panel: wakeup + timers -->
   <div class="left-panel" id="leftPanel">
     <div class="wakeup-row" id="wakeupRow-d" onclick="toggleWakeup()">
       <div class="wakeup-box" id="wakeupBox-d">
@@ -26,24 +21,19 @@
       <span class="wakeup-label" id="wakeupLabel-d">Woke up</span>
     </div>
     <div class="section-label">Timers</div>
-    <button class="fmt-add-timer" onclick="addFormatTimer()">
-      <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-        <path d="M5.5 1V10M1 5.5H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-      </svg>
+    <button class="fmt-add-timer" onclick="addFormatTimer('d')">
+      <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1V10M1 5.5H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
       Add timer
     </button>
   </div>
 
-  <!-- Right panel: daily lists + my lists -->
   <div class="right-panel" id="rightPanel">
     <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:4px">
       <div class="section-label" style="padding:0">Daily</div>
       <button class="fmt-add-daily" onclick="addFormatDaily()">+ Add list</button>
     </div>
     <div class="lists-grid" id="defaultContainer-d"></div>
-
     <div class="section-divider"></div>
-
     <div class="panel-header">
       <span class="section-label" style="padding:0">My lists</span>
       <button class="add-btn" onclick="addTodoList()">+ New list</button>
@@ -52,24 +42,17 @@
       <div class="empty-state" id="emptyState-d">No lists yet.<br>Click "+ New list" to get started.</div>
     </div>
   </div>
+</div>
 
-</div><!-- /desktop-app -->
-
-
-<!-- ══════════════════════════════════════════════════════
-     MOBILE LAYOUT
-     ══════════════════════════════════════════════════════ -->
+<!-- ── MOBILE ── -->
 <div class="mobile-app" id="mobileApp">
-
   <div class="tab-bar">
     <button class="tab-btn active" id="tab-0" onclick="goTab(0,true)">Timers</button>
     <button class="tab-btn"        id="tab-1" onclick="goTab(1,true)">Daily</button>
     <button class="tab-btn"        id="tab-2" onclick="goTab(2,true)">My Lists</button>
   </div>
-
   <div class="swipe-container" id="swipeContainer">
     <div class="swipe-track" id="swipeTrack">
-
       <!-- Tab 0: Woke up + Timers -->
       <div class="swipe-panel" id="mobileTimerPanel">
         <div class="wakeup-row" id="wakeupRow-m" onclick="toggleWakeup()">
@@ -81,14 +64,11 @@
           <span class="wakeup-label" id="wakeupLabel-m">Woke up</span>
         </div>
         <div class="section-label">Timers</div>
-        <button class="fmt-add-timer" onclick="addFormatTimer()">
-          <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-            <path d="M5.5 1V10M1 5.5H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
+        <button class="fmt-add-timer" onclick="addFormatTimer('m')">
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1V10M1 5.5H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           Add timer
         </button>
       </div>
-
       <!-- Tab 1: Daily lists -->
       <div class="swipe-panel">
         <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:4px">
@@ -97,7 +77,6 @@
         </div>
         <div id="defaultContainer-m"></div>
       </div>
-
       <!-- Tab 2: My lists -->
       <div class="swipe-panel">
         <div class="panel-header">
@@ -108,16 +87,11 @@
           <div class="empty-state" id="emptyState-m">No lists yet.<br>Tap "+ New list" to get started.</div>
         </div>
       </div>
+    </div>
+  </div>
+</div>
 
-    </div><!-- /swipe-track -->
-  </div><!-- /swipe-container -->
-
-</div><!-- /mobile-app -->
-
-
-<!-- ══════════════════════════════════════════════════════
-     PERSISTENT BOTTOM BAR
-     ══════════════════════════════════════════════════════ -->
+<!-- ── PERSISTENT DATA BAR (both layouts) ── -->
 <div class="data-bar">
   <button class="fmt-btn" id="fmtBtn" onclick="toggleFormatMode()">Formats</button>
   <span class="fmt-banner">Format mode</span>
@@ -128,12 +102,7 @@
   <button class="data-btn reset-all-btn" onclick="confirmResetAll()">Reset all</button>
 </div>
 
-
-<!-- ══════════════════════════════════════════════════════
-     MODALS & OVERLAYS
-     ══════════════════════════════════════════════════════ -->
-
-<!-- Export modal -->
+<!-- ── EXPORT MODAL ── -->
 <div class="modal-overlay" id="exportModal">
   <div class="modal-box">
     <div class="modal-title">Export data</div>
@@ -148,7 +117,7 @@
   </div>
 </div>
 
-<!-- Import modal -->
+<!-- ── IMPORT MODAL ── -->
 <div class="modal-overlay" id="importModal">
   <div class="modal-box">
     <div class="modal-title">Import data</div>
@@ -163,7 +132,6 @@
   </div>
 </div>
 
-<!-- Reset confirmation -->
 <div class="confirm-overlay" id="confirmOverlay">
   <div class="confirm-box">
     <div class="confirm-title">Reset everything?</div>
@@ -174,12 +142,7 @@
     </div>
   </div>
 </div>
-
-<!-- Toast notification -->
 <div class="toast" id="toast"></div>
-
-
 <script src="app.js"></script>
 </body>
 </html>
-
