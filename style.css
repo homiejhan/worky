@@ -1,4 +1,4 @@
-/* ── RESET & ROOT ── */*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
     --bg-base:       #0e0f11;
@@ -598,3 +598,28 @@
     .mobile-app { display: flex; }
     .lists-grid { grid-template-columns: 1fr; }
   }
+
+/* ── TIMER SUMMARY ── */
+.timer-summary {
+  display: none;
+  flex-direction: column; gap: 3px;
+  padding: 8px 2px 2px;
+}
+.timer-summary.visible { display: flex; }
+
+.timer-summary-row {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 8px;
+}
+.timer-summary-label {
+  font-size: 10px; font-weight: 400;
+  letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.timer-summary-value {
+  font-size: 12px; font-weight: 300;
+  font-family: 'Lora', serif;
+  color: var(--text-muted);
+  text-align: right;
+}
