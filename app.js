@@ -121,6 +121,7 @@ function tickAll() {
     document.querySelectorAll(`.tdisp-${t.id}`).forEach(el => el.textContent = fmt(rem));
     if (rem <= 0) { t.seconds = 0; t.running = false; updateTimerUI(t.id); }
   });
+  if (wokenUp) updateTimerSummary();
   requestAnimationFrame(tickAll);
 }
 
@@ -158,11 +159,14 @@ function renderTimers() {
     const panel = document.getElementById(panelId);
     if (!panel) return;
     panel.querySelectorAll('.timer-card').forEach(e => e.remove());
+    const summary = document.getElementById(`timerSummary-${pfx}`);
     timers.forEach(t => {
       const card = document.createElement('div');
       card.className = 'timer-card';
       card.innerHTML = timerCardHTML(t, pfx);
-      panel.appendChild(card);
+      // Insert before the summary div so it always sits at the bottom
+      if (summary) panel.insertBefore(card, summary);
+      else panel.appendChild(card);
     });
   });
 }
@@ -233,7 +237,36 @@ function toggleWakeup() {
     if (row) row.classList.toggle('done', wokenUp);
     if (box) box.classList.toggle('checked', wokenUp);
   });
+  updateTimerSummary();
   saveToLocal();
+}
+
+function updateTimerSummary() {
+  const totalSecs = timers.reduce((sum, t) => sum + Math.round(getRemaining(t)), 0);
+  const finishTime = new Date(Date.now() + totalSecs * 1000);
+  const hh = finishTime.getHours();
+  const mm = String(finishTime.getMinutes()).padStart(2, '0');
+  const ampm = hh >= 12 ? 'pm' : 'am';
+  const h12 = hh % 12 || 12;
+  const finishStr = `${h12}:${mm} ${ampm}`;
+
+  const html = wokenUp ? `
+    <div class="timer-summary-row">
+      <span class="timer-summary-label">Time remaining</span>
+      <span class="timer-summary-value">${fmt(totalSecs)}</span>
+    </div>
+    <div class="timer-summary-row">
+      <span class="timer-summary-label">Est. finish</span>
+      <span class="timer-summary-value">${finishStr}</span>
+    </div>
+  ` : '';
+
+  ['d','m'].forEach(p => {
+    const el = document.getElementById(`timerSummary-${p}`);
+    if (!el) return;
+    el.innerHTML = html;
+    el.classList.toggle('visible', wokenUp);
+  });
 }
 
 /* ─────────── TODO LISTS ─────────── */
@@ -762,4 +795,5 @@ if (restored) {
   });
 }
 setSwipePanelWidths();
+updateTimerSummary();
 tickAll();
