@@ -85,7 +85,7 @@ if (swipeEl) {
     const dx = e.changedTouches[0].clientX - touchStartX;
     const dy = e.changedTouches[0].clientY - touchStartY;
     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
-      goTab(dx < 0 ? Math.min(currentTab + 1, 2) : Math.max(currentTab - 1, 0), true);
+      goTab(dx < 0 ? Math.min(currentTab + 1, 3) : Math.max(currentTab - 1, 0), true);
     }
     touchStartX = 0; isSwiping = false;
   }, { passive: true });
@@ -797,3 +797,538 @@ if (restored) {
 setSwipePanelWidths();
 updateTimerSummary();
 tickAll();
+
+/* ══════════════════════════════════════════════════════
+   CALENDAR
+   ══════════════════════════════════════════════════════ */
+
+const CAL_HOUR_PX   = 64;
+const CAL_DAY_COUNT = 7;
+const CAL_COLORS    = ['#378ADD','#EC3636','#8B5CF6','#F97316','#22C55E','#EAB308','#5DCAA5','#D4537E'];
+const CAL_LS_KEY    = 'focus-cal-state';
+
+let calEvents       = {};   // { 'YYYY-MM-DD': [event,...] }
+let calTemplates    = [];   // template events/dividers
+let calEventIdCtr   = 1;
+let calMobileDay    = 0;
+let calDesktopOpen  = false;
+let calEditId       = null;
+let calEditDate     = null;
+let calEditType     = 'event';
+let calSelectedColor= CAL_COLORS[0];
+
+/* ── Date helpers ── */
+function calToday() { const d=new Date(); d.setHours(0,0,0,0); return d; }
+function calDateKey(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function calWeekDays() {
+  const t=calToday();
+  return Array.from({length:CAL_DAY_COUNT},(_,i)=>{ const d=new Date(t); d.setDate(t.getDate()+i); return d; });
+}
+function calFmtFull(d) { return d.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'}); }
+function calFmtShort(d) { return d.toLocaleDateString('en-US',{weekday:'short'}).toUpperCase(); }
+function calTimeToMins(s) { const [h,m]=s.split(':').map(Number); return h*60+m; }
+function calMinsToStr(n) { return `${String(Math.floor(n/60)).padStart(2,'0')}:${String(n%60).padStart(2,'0')}`; }
+function calFmtTime(s) {
+  const [h,m]=s.split(':').map(Number);
+  const ap=h>=12?'pm':'am'; const h12=h%12||12;
+  return m===0?`${h12}${ap}`:`${h12}:${String(m).padStart(2,'0')}${ap}`;
+}
+function calMinsToPx(n) { return (n/60)*CAL_HOUR_PX; }
+function calPxToMins(px) { return Math.round((px/CAL_HOUR_PX)*60/15)*15; }
+const CAL_TOTAL_PX = 24 * CAL_HOUR_PX;
+
+/* ── Ensure day seeded from templates ── */
+function calEnsureDay(key) {
+  if (!calEvents[key]) {
+    calEvents[key] = calTemplates.map(t => ({...t, id:calEventIdCtr++, fromTemplate:true, templateId:t.id}));
+  }
+}
+function calPruneDays() {
+  const keys = new Set(calWeekDays().map(calDateKey));
+  Object.keys(calEvents).forEach(k => { if (!keys.has(k)) delete calEvents[k]; });
+}
+
+/* ── Time column ── */
+function calBuildTimeCol(el) {
+  el.style.height = CAL_TOTAL_PX + 'px';
+  el.innerHTML = '';
+  for (let h=1; h<24; h++) {
+    const lbl = document.createElement('div');
+    lbl.className = 'cal-time-label';
+    lbl.style.top = (h*CAL_HOUR_PX)+'px';
+    const ap=h>=12?'pm':'am'; lbl.textContent=`${h%12||12}${ap}`;
+    el.appendChild(lbl);
+  }
+}
+
+/* ── Grid lines ── */
+function calBuildLines(col) {
+  col.style.height = CAL_TOTAL_PX + 'px';
+  for (let h=0; h<24; h++) {
+    const line = document.createElement('div');
+    line.className = 'cal-hour-line';
+    line.style.top = (h*CAL_HOUR_PX)+'px';
+    col.appendChild(line);
+    const half = document.createElement('div');
+    half.className = 'cal-half-line';
+    half.style.top = (h*CAL_HOUR_PX + CAL_HOUR_PX/2)+'px';
+    col.appendChild(half);
+    [1,3].forEach(q => {
+      const ql = document.createElement('div');
+      ql.className = 'cal-quarter-line';
+      ql.style.top = (h*CAL_HOUR_PX + q*(CAL_HOUR_PX/4))+'px';
+      col.appendChild(ql);
+    });
+  }
+}
+
+/* ── Now line ── */
+function calBuildNowLine(col) {
+  const existing = col.querySelector('.cal-now-line');
+  if (existing) existing.remove();
+  const now = new Date();
+  const mins = now.getHours()*60 + now.getMinutes();
+  const wrap = document.createElement('div');
+  wrap.className = 'cal-now-line';
+  wrap.style.top = calMinsToPx(mins)+'px';
+  const dot = document.createElement('div'); dot.className='cal-now-dot';
+  wrap.appendChild(dot);
+  col.appendChild(wrap);
+}
+
+/* ── Render event block ── */
+function calMakeEventEl(ev, dateKey) {
+  const el = document.createElement('div');
+  if (ev.type === 'divider') {
+    el.className = 'cal-divider';
+    const mins = calTimeToMins(ev.start);
+    el.style.top = calMinsToPx(mins)+'px';
+    const line = document.createElement('div');
+    line.className = 'cal-divider-line';
+    line.style.background = ev.color;
+    const lbl = document.createElement('div');
+    lbl.className = 'cal-divider-label';
+    lbl.style.color = ev.color;
+    lbl.textContent = ev.title || 'Divider';
+    el.appendChild(line); el.appendChild(lbl);
+  } else {
+    el.className = 'cal-event';
+    const startM = calTimeToMins(ev.start);
+    const endM   = calTimeToMins(ev.end);
+    const durM   = Math.max(15, endM - startM);
+    el.style.top    = calMinsToPx(startM)+'px';
+    el.style.height = calMinsToPx(durM)+'px';
+    el.style.background = ev.color + '33';
+    el.style.borderLeft = `3px solid ${ev.color}`;
+    el.style.color = ev.color;
+    el.innerHTML = `<div style="font-weight:500;overflow:hidden;text-overflow:ellipsis">${ev.title||'(no title)'}</div>
+      <div class="cal-event-time">${calFmtTime(ev.start)}–${calFmtTime(ev.end)}</div>`;
+  }
+  el.addEventListener('click', e => { e.stopPropagation(); openCalModal(dateKey, ev.id); });
+  calAddDragToEvent(el, ev, dateKey);
+  return el;
+}
+
+/* ── Render a single day column ── */
+function calRenderDayCol(col, dateKey) {
+  // Remove old events/dividers but keep lines
+  col.querySelectorAll('.cal-event,.cal-divider,.cal-now-line').forEach(e=>e.remove());
+  calEnsureDay(dateKey);
+  (calEvents[dateKey]||[]).forEach(ev => col.appendChild(calMakeEventEl(ev, dateKey)));
+  // Now line on today
+  if (dateKey === calDateKey(calToday())) calBuildNowLine(col);
+  // Click to add
+  col.onclick = (e) => {
+    if (e.target !== col) return;
+    const rect = col.getBoundingClientRect();
+    const mins = calPxToMins(e.clientY - rect.top);
+    openCalModal(dateKey, null, calMinsToStr(mins));
+  };
+}
+
+/* ── Desktop render ── */
+function calRenderDesktop() {
+  const days = calWeekDays();
+  calPruneDays();
+
+  const titleEl = document.getElementById('calDesktopTitle');
+  if (titleEl) titleEl.textContent = calFmtFull(calToday());
+
+  // Header days
+  const daysEl = document.getElementById('calDesktopDays');
+  const gridEl = document.getElementById('calDesktopGrid');
+  const timeEl = document.getElementById('calTimeCol');
+  if (!daysEl||!gridEl||!timeEl) return;
+
+  daysEl.style.gridTemplateColumns = `repeat(${CAL_DAY_COUNT},1fr)`;
+  daysEl.innerHTML = '';
+  gridEl.style.gridTemplateColumns = `repeat(${CAL_DAY_COUNT},1fr)`;
+  gridEl.innerHTML = '';
+
+  calBuildTimeCol(timeEl);
+
+  days.forEach((day, i) => {
+    const key = calDateKey(day);
+    const isToday = key === calDateKey(calToday());
+
+    // Header
+    const hdr = document.createElement('div');
+    hdr.className = 'cal-day-header' + (isToday?' today':'');
+    hdr.innerHTML = `<div>${calFmtShort(day)}</div><div class="cal-day-header-date">${day.getDate()}</div>`;
+    daysEl.appendChild(hdr);
+
+    // Column
+    const col = document.createElement('div');
+    col.className = 'cal-day-col';
+    col.dataset.dateKey = key;
+    calBuildLines(col);
+    calRenderDayCol(col, key);
+
+    // Drag-over highlight
+    col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('drag-over'); });
+    col.addEventListener('dragleave', () => col.classList.remove('drag-over'));
+    col.addEventListener('drop', e => {
+      e.preventDefault(); col.classList.remove('drag-over');
+      calHandleDrop(key, e.clientY, col.getBoundingClientRect().top);
+    });
+
+    gridEl.appendChild(col);
+  });
+
+  // Scroll to 7am
+  setTimeout(() => { gridEl.scrollTop = 7 * CAL_HOUR_PX; }, 50);
+}
+
+/* ── Mobile render ── */
+function calRenderMobile() {
+  const days = calWeekDays();
+  calPruneDays();
+  const day = days[calMobileDay];
+  const key = calDateKey(day);
+
+  const titleEl = document.getElementById('calDayTitle');
+  if (titleEl) titleEl.textContent = calFmtFull(day);
+
+  const gridEl = document.getElementById('calMobileGrid');
+  if (!gridEl) return;
+  gridEl.innerHTML = '';
+
+  const body = document.createElement('div');
+  body.className = 'cal-mobile-body';
+  body.style.width = '100%';
+
+  const timeCol = document.createElement('div');
+  timeCol.className = 'cal-mobile-time-col';
+  calBuildTimeCol(timeCol);
+
+  const dayCol = document.createElement('div');
+  dayCol.className = 'cal-mobile-day-col';
+  calBuildLines(dayCol);
+  calRenderDayCol(dayCol, key);
+
+  dayCol.addEventListener('dragover', e => { e.preventDefault(); });
+  dayCol.addEventListener('drop', e => {
+    e.preventDefault();
+    calHandleDrop(key, e.clientY, dayCol.getBoundingClientRect().top);
+  });
+
+  body.appendChild(timeCol);
+  body.appendChild(dayCol);
+  gridEl.appendChild(body);
+
+  setTimeout(() => { gridEl.scrollTop = 7 * CAL_HOUR_PX; }, 50);
+}
+
+/* ── Navigation ── */
+function calNavDay(dir) {
+  const days = calWeekDays();
+  calMobileDay = Math.max(0, Math.min(CAL_DAY_COUNT-1, calMobileDay + dir));
+  calRenderMobile();
+}
+
+/* ── Toggle desktop calendar ── */
+function calToggleDesktop() {
+  calDesktopOpen = !calDesktopOpen;
+  const panel = document.getElementById('calDesktopPanel');
+  const btn   = document.getElementById('calDesktopNavTab');
+  const rp    = document.getElementById('rightPanel');
+  if (panel) panel.classList.toggle('active', calDesktopOpen);
+  if (btn)   btn.classList.toggle('active', calDesktopOpen);
+  if (rp)    rp.style.display = calDesktopOpen ? 'none' : '';
+  if (calDesktopOpen) calRenderDesktop();
+}
+
+/* ── Modal ── */
+function openCalModal(dateKey, evId, defaultStart) {
+  calEditDate = dateKey;
+  calEditId   = evId || null;
+
+  // Build color swatches
+  const swatchEl = document.getElementById('calColorSwatches');
+  swatchEl.innerHTML = '';
+  CAL_COLORS.forEach(c => {
+    const dot = document.createElement('div');
+    dot.className = 'cal-color-dot' + (c===calSelectedColor?' selected':'');
+    dot.style.background = c;
+    dot.onclick = () => { calSelectedColor=c; document.querySelectorAll('.cal-color-dot').forEach(d=>d.classList.remove('selected')); dot.classList.add('selected'); };
+    swatchEl.appendChild(dot);
+  });
+
+  const deleteBtn = document.getElementById('calEventDeleteBtn');
+  const titleEl   = document.getElementById('calEventModalTitle');
+
+  if (evId) {
+    // Edit existing
+    const ev = (calEvents[dateKey]||[]).find(e=>e.id===evId)
+            || calTemplates.find(e=>e.id===evId);
+    if (!ev) return;
+    document.getElementById('calEventTitle').value = ev.title || '';
+    document.getElementById('calEventStart').value = ev.start || '09:00';
+    document.getElementById('calEventEnd').value   = ev.end   || '10:00';
+    calSelectedColor = ev.color || CAL_COLORS[0];
+    setCalEventType(ev.type || 'event');
+    document.getElementById('calEventTemplate').checked = !!ev.isTemplate;
+    titleEl.textContent = 'Edit event';
+    deleteBtn.style.display = 'block';
+    document.querySelectorAll('.cal-color-dot').forEach(d => d.classList.toggle('selected', d.style.background === calSelectedColor || d.style.backgroundColor === calSelectedColor));
+  } else {
+    // New
+    document.getElementById('calEventTitle').value = '';
+    document.getElementById('calEventStart').value = defaultStart || '09:00';
+    document.getElementById('calEventEnd').value   = defaultStart ? calMinsToStr(Math.min(1440, calTimeToMins(defaultStart)+60)) : '10:00';
+    calSelectedColor = CAL_COLORS[0];
+    setCalEventType('event');
+    document.getElementById('calEventTemplate').checked = formatMode;
+    titleEl.textContent = 'Add event';
+    deleteBtn.style.display = 'none';
+  }
+
+  document.getElementById('calTemplateRow').style.display = formatMode ? 'block' : 'none';
+  document.getElementById('calEventModal').classList.add('show');
+}
+
+function closeCalModal() {
+  document.getElementById('calEventModal').classList.remove('show');
+  calEditId = null; calEditDate = null;
+}
+
+function setCalEventType(type) {
+  calEditType = type;
+  document.getElementById('calTypeEvent').classList.toggle('active', type==='event');
+  document.getElementById('calTypeDivider').classList.toggle('active', type==='divider');
+  const startField = document.querySelector('.cal-event-field');
+  const endField   = document.querySelectorAll('.cal-event-field')[1];
+  if (endField) endField.style.display = type==='divider' ? 'none' : '';
+}
+
+function saveCalEvent() {
+  const title    = document.getElementById('calEventTitle').value.trim();
+  const start    = document.getElementById('calEventStart').value;
+  const end      = calEditType==='divider' ? start : document.getElementById('calEventEnd').value;
+  const isTemplate = formatMode && document.getElementById('calEventTemplate').checked;
+
+  const ev = {
+    id:        calEditId || calEventIdCtr++,
+    title, start, end,
+    color:     calSelectedColor,
+    type:      calEditType,
+    isTemplate: isTemplate,
+  };
+
+  if (isTemplate) {
+    // Save/update in templates
+    const idx = calTemplates.findIndex(t => t.id === ev.id);
+    if (idx >= 0) calTemplates[idx] = ev; else calTemplates.push(ev);
+    // Seed into all days that don't already have an override
+    calWeekDays().forEach(day => {
+      const key = calDateKey(day);
+      calEnsureDay(key);
+      const existing = calEvents[key].findIndex(e => e.templateId === ev.id);
+      if (existing >= 0) calEvents[key][existing] = {...ev, fromTemplate:true, templateId:ev.id};
+      else calEvents[key].push({...ev, id:calEventIdCtr++, fromTemplate:true, templateId:ev.id});
+    });
+  } else {
+    // Day-specific event
+    const key = calEditDate;
+    calEnsureDay(key);
+    const idx = (calEvents[key]||[]).findIndex(e => e.id === calEditId);
+    if (idx >= 0) calEvents[key][idx] = ev;
+    else { calEvents[key] = calEvents[key] || []; calEvents[key].push(ev); }
+  }
+
+  closeCalModal();
+  calRefresh();
+  calSave();
+}
+
+function deleteCalEvent() {
+  if (!calEditDate || !calEditId) return;
+  const ev = (calEvents[calEditDate]||[]).find(e=>e.id===calEditId);
+
+  if (ev && ev.fromTemplate && formatMode) {
+    // In format mode: remove from templates entirely + all days
+    calTemplates = calTemplates.filter(t => t.id !== ev.templateId);
+    Object.keys(calEvents).forEach(k => {
+      calEvents[k] = calEvents[k].filter(e => e.templateId !== ev.templateId);
+    });
+  } else if (ev && ev.fromTemplate && !formatMode) {
+    // In user mode: remove only from this day (template persists for future days)
+    calEvents[calEditDate] = calEvents[calEditDate].filter(e => e.id !== calEditId);
+  } else {
+    // Plain event
+    calEvents[calEditDate] = (calEvents[calEditDate]||[]).filter(e => e.id !== calEditId);
+    if (ev && ev.isTemplate) {
+      calTemplates = calTemplates.filter(t => t.id !== ev.id);
+    }
+  }
+
+  closeCalModal();
+  calRefresh();
+  calSave();
+}
+
+/* ── Drag & drop ── */
+let calDragEv   = null;
+let calDragDate = null;
+let calDragOffY = 0;
+
+function calAddDragToEvent(el, ev, dateKey) {
+  el.setAttribute('draggable', 'true');
+  el.addEventListener('dragstart', e => {
+    calDragEv   = ev;
+    calDragDate = dateKey;
+    calDragOffY = e.offsetY;
+    e.dataTransfer.effectAllowed = 'move';
+    setTimeout(() => el.classList.add('dragging'), 0);
+  });
+  el.addEventListener('dragend', () => el.classList.remove('dragging'));
+}
+
+function calHandleDrop(toDateKey, clientY, colTop) {
+  if (!calDragEv) return;
+  const mins     = calPxToMins(clientY - colTop - calDragOffY);
+  const duration = calEditType === 'divider' ? 0
+    : calTimeToMins(calDragEv.end) - calTimeToMins(calDragEv.start);
+  const newStart = Math.max(0, Math.min(1425, mins));
+  const newEnd   = Math.min(1440, newStart + Math.max(15, duration));
+
+  // Remove from old day
+  calEvents[calDragDate] = (calEvents[calDragDate]||[]).filter(e => e.id !== calDragEv.id);
+
+  // Add to new day
+  calEnsureDay(toDateKey);
+  calEvents[toDateKey].push({
+    ...calDragEv,
+    start: calMinsToStr(newStart),
+    end:   calMinsToStr(newEnd),
+    fromTemplate: toDateKey !== calDragDate ? false : calDragEv.fromTemplate,
+  });
+
+  calDragEv = null;
+  calRefresh();
+  calSave();
+}
+
+/* ── Refresh both views ── */
+function calRefresh() {
+  if (calDesktopOpen) calRenderDesktop();
+  const panels = document.querySelectorAll('.swipe-panel');
+  if (panels.length >= 4) calRenderMobile();
+}
+
+/* ── Now-line tick ── */
+function calTickNow() {
+  if (calDesktopOpen) {
+    document.querySelectorAll('.cal-day-col').forEach(col => {
+      if (col.dataset.dateKey === calDateKey(calToday())) calBuildNowLine(col);
+    });
+  }
+  const mobileDay = document.querySelector('.cal-mobile-day-col');
+  if (mobileDay && calWeekDays()[calMobileDay] && calDateKey(calWeekDays()[calMobileDay]) === calDateKey(calToday())) {
+    calBuildNowLine(mobileDay);
+  }
+  setTimeout(calTickNow, 60000);
+}
+
+/* ── Persist ── */
+function calSave() {
+  try { localStorage.setItem(CAL_LS_KEY, JSON.stringify({ calEvents, calTemplates, calEventIdCtr })); } catch(e) {}
+}
+function calLoad() {
+  try {
+    const raw = localStorage.getItem(CAL_LS_KEY);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (s.calEvents)    calEvents    = s.calEvents;
+    if (s.calTemplates) calTemplates = s.calTemplates;
+    if (s.calEventIdCtr) calEventIdCtr = s.calEventIdCtr;
+  } catch(e) {}
+}
+
+/* ── Desktop Calendar nav tab in left panel ── */
+function calInitDesktopTab() {
+  const lp = document.getElementById('leftPanel');
+  if (!lp) return;
+  const tab = document.createElement('div');
+  tab.className = 'cal-nav-tab';
+  tab.id = 'calDesktopNavTab';
+  tab.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+    <rect x="1" y="2" width="10" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2"/>
+    <path d="M1 5h10" stroke="currentColor" stroke-width="1.2"/>
+    <path d="M4 1v2M8 1v2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+  </svg> Calendar`;
+  tab.onclick = calToggleDesktop;
+  // Insert after wakeup row (first child after the wakeup-row)
+  const wakeup = lp.querySelector('.wakeup-row');
+  if (wakeup) wakeup.after(tab);
+  else lp.prepend(tab);
+}
+
+/* ── Swipe panel count update ── */
+const _origSetSwipe = setSwipePanelWidths;
+setSwipePanelWidths = function() {
+  const w = window.innerWidth;
+  const track = document.getElementById('swipeTrack');
+  const panels = document.querySelectorAll('.swipe-panel');
+  const count = panels.length;
+  if (track) track.style.width = (w * count) + 'px';
+  panels.forEach(p => p.style.width = w + 'px');
+  const track2 = document.getElementById('swipeTrack');
+  if (track2) {
+    track2.style.transition = 'none';
+    track2.style.transform = `translateX(${-currentTab * w}px)`;
+  }
+  [0,1,2,3].forEach(i => {
+    const btn = document.getElementById(`tab-${i}`);
+    if (btn) btn.classList.toggle('active', i === currentTab);
+  });
+};
+
+/* ── goTab update for 4 tabs ── */
+const _origGoTab = goTab;
+goTab = function(idx, animate) {
+  currentTab = idx;
+  const w = window.innerWidth;
+  const track = document.getElementById('swipeTrack');
+  if (track) {
+    track.style.transition = animate===false ? 'none' : 'transform 0.32s cubic-bezier(0.4,0,0.2,1)';
+    track.style.transform = `translateX(${-idx * w}px)`;
+  }
+  [0,1,2,3].forEach(i => {
+    const btn = document.getElementById(`tab-${i}`);
+    if (btn) btn.classList.toggle('active', i === idx);
+  });
+  if (idx === 3) calRenderMobile();
+};
+
+// Close modal on backdrop click
+document.getElementById('calEventModal').addEventListener('click', e => {
+  if (e.target.id === 'calEventModal') closeCalModal();
+});
+
+/* ── Init ── */
+calLoad();
+calPruneDays();
+calInitDesktopTab();
+calRenderMobile();
+calTickNow();
