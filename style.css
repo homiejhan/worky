@@ -675,10 +675,26 @@
   flex: 1; display: flex; overflow: hidden;
 }
 
+/* Single scrollable container holds time col + day cols together */
+.cal-scroll-area {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.cal-scroll-area::-webkit-scrollbar { width: 4px; }
+.cal-scroll-area::-webkit-scrollbar-thumb { background: var(--border-mid); border-radius: 4px; }
+
+.cal-scroll-inner {
+  display: flex;
+  flex: 1;
+  position: relative;
+}
+
 /* ── Time column ── */
 .cal-time-col {
   width: 52px; flex-shrink: 0;
-  overflow: hidden;
   border-right: 1px solid var(--border);
   position: relative;
 }
@@ -692,11 +708,10 @@
 
 /* ── Desktop grid ── */
 .cal-desktop-grid {
-  flex: 1; display: grid; overflow-y: auto; overflow-x: hidden;
+  flex: 1; display: grid;
   position: relative;
+  overflow: visible;
 }
-.cal-desktop-grid::-webkit-scrollbar { width: 4px; }
-.cal-desktop-grid::-webkit-scrollbar-thumb { background: var(--border-mid); border-radius: 4px; }
 
 .cal-day-col {
   position: relative;
