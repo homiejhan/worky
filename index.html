@@ -51,6 +51,7 @@
     <button class="tab-btn active" id="tab-0" onclick="goTab(0,true)">Timers</button>
     <button class="tab-btn"        id="tab-1" onclick="goTab(1,true)">Daily</button>
     <button class="tab-btn"        id="tab-2" onclick="goTab(2,true)">My Lists</button>
+    <button class="tab-btn"        id="tab-3" onclick="goTab(3,true)">Calendar</button>
   </div>
   <div class="swipe-container" id="swipeContainer">
     <div class="swipe-track" id="swipeTrack">
@@ -89,7 +90,67 @@
           <div class="empty-state" id="emptyState-m">No lists yet.<br>Tap "+ New list" to get started.</div>
         </div>
       </div>
+      <!-- Tab 3: Calendar (mobile) -->
+      <div class="swipe-panel cal-swipe-panel" id="mobileCalPanel">
+        <div class="cal-mobile-header">
+          <button class="cal-nav-btn" onclick="calNavDay(-1)">&#8249;</button>
+          <div class="cal-day-title" id="calDayTitle"></div>
+          <button class="cal-nav-btn" onclick="calNavDay(1)">&#8250;</button>
+        </div>
+        <div class="cal-grid-wrap" id="calMobileGrid"></div>
+      </div>
     </div>
+  </div>
+</div>
+
+<!-- ── DESKTOP CALENDAR PANEL ── -->
+<div class="cal-desktop-panel" id="calDesktopPanel">
+  <div class="cal-desktop-header">
+    <div class="cal-desktop-title" id="calDesktopTitle"></div>
+    <div class="cal-desktop-days" id="calDesktopDays"></div>
+  </div>
+  <div class="cal-desktop-body">
+    <div class="cal-time-col" id="calTimeCol"></div>
+    <div class="cal-desktop-grid" id="calDesktopGrid"></div>
+  </div>
+</div>
+
+<!-- ── CALENDAR EVENT MODAL ── -->
+<div class="modal-overlay" id="calEventModal">
+  <div class="modal-box">
+    <div class="modal-title" id="calEventModalTitle">Add event</div>
+    <input class="cal-event-input" id="calEventTitle" type="text" placeholder="Event title">
+    <div class="cal-event-row">
+      <div class="cal-event-field">
+        <label class="cal-event-label">Start</label>
+        <input class="cal-event-input cal-time-input" id="calEventStart" type="time">
+      </div>
+      <div class="cal-event-field">
+        <label class="cal-event-label">End</label>
+        <input class="cal-event-input cal-time-input" id="calEventEnd" type="time">
+      </div>
+    </div>
+    <div class="cal-event-row">
+      <label class="cal-event-label">Color</label>
+      <div class="cal-color-swatches" id="calColorSwatches"></div>
+    </div>
+    <div class="cal-event-type-row">
+      <label class="cal-event-label">Type</label>
+      <div style="display:flex;gap:8px;flex:1">
+        <button class="cal-type-btn active" id="calTypeEvent" onclick="setCalEventType('event')">Event</button>
+        <button class="cal-type-btn" id="calTypeDivider" onclick="setCalEventType('divider')">Divider</button>
+      </div>
+    </div>
+    <div class="cal-template-row" id="calTemplateRow">
+      <label class="cal-event-label" style="cursor:pointer;display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="calEventTemplate"> Template (repeats daily)
+      </label>
+    </div>
+    <div class="modal-actions" style="margin-top:4px">
+      <button class="modal-cancel" onclick="closeCalModal()">Cancel</button>
+      <button class="modal-primary" id="calEventSaveBtn" onclick="saveCalEvent()">Save</button>
+    </div>
+    <button class="cal-delete-btn" id="calEventDeleteBtn" onclick="deleteCalEvent()" style="display:none">Delete event</button>
   </div>
 </div>
 
