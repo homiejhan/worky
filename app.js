@@ -903,6 +903,7 @@ function calMakeEventEl(ev, dateKey) {
     el.className = 'cal-divider';
     const mins = calTimeToMins(ev.start);
     el.style.top = calMinsToPx(mins)+'px';
+    el.style.transform = 'translateY(-50%)';
     const line = document.createElement('div');
     line.className = 'cal-divider-line';
     line.style.background = ev.color;
@@ -1137,23 +1138,32 @@ function saveCalEvent() {
 
   if (isTemplate) {
     // Save/update in templates
-    const idx = calTemplates.findIndex(t => t.id === ev.id);
-    if (idx >= 0) calTemplates[idx] = ev; else calTemplates.push(ev);
-    // Seed into all days that don't already have an override
+    const tIdx = calTemplates.findIndex(t => t.id === ev.id);
+    if (tIdx >= 0) calTemplates[tIdx] = ev; else calTemplates.push(ev);
+    // Update or seed into all days in the current window
     calWeekDays().forEach(day => {
       const key = calDateKey(day);
       calEnsureDay(key);
-      const existing = calEvents[key].findIndex(e => e.templateId === ev.id);
-      if (existing >= 0) calEvents[key][existing] = {...ev, fromTemplate:true, templateId:ev.id};
+      const dIdx = calEvents[key].findIndex(e => e.templateId === ev.id);
+      if (dIdx >= 0) calEvents[key][dIdx] = {...ev, id: calEvents[key][dIdx].id, fromTemplate:true, templateId:ev.id};
       else calEvents[key].push({...ev, id:calEventIdCtr++, fromTemplate:true, templateId:ev.id});
     });
   } else {
-    // Day-specific event
     const key = calEditDate;
-    calEnsureDay(key);
-    const idx = (calEvents[key]||[]).findIndex(e => e.id === calEditId);
-    if (idx >= 0) calEvents[key][idx] = ev;
-    else { calEvents[key] = calEvents[key] || []; calEvents[key].push(ev); }
+    if (calEditId) {
+      // Editing existing — find and update in-place, never push
+      if (!calEvents[key]) calEnsureDay(key);
+      const idx = calEvents[key].findIndex(e => e.id === calEditId);
+      if (idx >= 0) {
+        calEvents[key][idx] = ev;
+      }
+      // If not found (shouldn't happen) do nothing — avoids duplicates
+    } else {
+      // New event
+      calEnsureDay(key);
+      ev.id = calEventIdCtr++;
+      calEvents[key].push(ev);
+    }
   }
 
   closeCalModal();
