@@ -623,3 +623,281 @@
   color: var(--text-muted);
   text-align: right;
 }
+
+/* ══════════════════════════════════════════════════════
+   CALENDAR
+   ══════════════════════════════════════════════════════ */
+
+/* ── Desktop calendar panel (replaces right panel when active) ── */
+.cal-desktop-panel {
+  display: none;
+  flex-direction: column;
+  position: fixed;
+  top: 0; left: 320px; right: 0; bottom: 44px;
+  background: var(--bg-base);
+  overflow: hidden;
+  z-index: 10;
+}
+.cal-desktop-panel.active { display: flex; }
+
+.cal-desktop-header {
+  flex-shrink: 0;
+  padding: 16px 20px 0;
+  border-bottom: 1px solid var(--border);
+}
+.cal-desktop-title {
+  font-size: 18px; font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+.cal-desktop-days {
+  display: grid;
+  gap: 0;
+}
+.cal-day-header {
+  padding: 6px 8px 8px;
+  font-size: 11px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-muted);
+  border-left: 1px solid var(--border);
+  cursor: pointer;
+}
+.cal-day-header.today { color: var(--accent-green); }
+.cal-day-header-date {
+  font-size: 20px; font-weight: 300;
+  font-family: 'Lora', serif;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.cal-day-header.today .cal-day-header-date { color: var(--accent-green); }
+
+.cal-desktop-body {
+  flex: 1; display: flex; overflow: hidden;
+}
+
+/* ── Time column ── */
+.cal-time-col {
+  width: 52px; flex-shrink: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+  position: relative;
+}
+.cal-time-label {
+  position: absolute; right: 8px;
+  font-size: 10px; font-family: var(--font-mono);
+  color: var(--text-muted);
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+
+/* ── Desktop grid ── */
+.cal-desktop-grid {
+  flex: 1; display: grid; overflow-y: auto; overflow-x: hidden;
+  position: relative;
+}
+.cal-desktop-grid::-webkit-scrollbar { width: 4px; }
+.cal-desktop-grid::-webkit-scrollbar-thumb { background: var(--border-mid); border-radius: 4px; }
+
+.cal-day-col {
+  position: relative;
+  border-left: 1px solid var(--border);
+  min-height: 100%;
+}
+
+/* Hour & half-hour lines */
+.cal-hour-line {
+  position: absolute; left: 0; right: 0;
+  border-top: 1px solid var(--border);
+  pointer-events: none;
+}
+.cal-half-line {
+  position: absolute; left: 0; right: 0;
+  border-top: 1px dashed rgba(255,255,255,0.04);
+  pointer-events: none;
+}
+.cal-quarter-line {
+  position: absolute; left: 0; right: 0;
+  border-top: 1px dashed rgba(255,255,255,0.02);
+  pointer-events: none;
+}
+
+/* Current time indicator */
+.cal-now-line {
+  position: absolute; left: 0; right: 0;
+  border-top: 1px solid var(--accent-green);
+  z-index: 3; pointer-events: none;
+}
+.cal-now-dot {
+  position: absolute; left: -4px; top: -4px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent-green);
+}
+
+/* ── Events ── */
+.cal-event {
+  position: absolute; left: 3px; right: 3px;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 11px; font-weight: 500;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  cursor: pointer; z-index: 2;
+  transition: opacity 0.1s, transform 0.1s;
+  user-select: none;
+  touch-action: none;
+}
+.cal-event:hover { opacity: 0.85; }
+.cal-event.dragging { opacity: 0.5; transform: scale(0.98); z-index: 10; }
+.cal-event-time {
+  font-size: 10px; font-weight: 400; opacity: 0.8; margin-top: 1px;
+}
+
+/* Dividers */
+.cal-divider {
+  position: absolute; left: 0; right: 0;
+  display: flex; align-items: center; gap: 6px;
+  z-index: 2; pointer-events: all; cursor: pointer;
+}
+.cal-divider-line {
+  flex: 1; height: 1px;
+}
+.cal-divider-label {
+  font-size: 10px; font-weight: 500;
+  letter-spacing: 0.05em;
+  white-space: nowrap; flex-shrink: 0;
+  padding: 0 4px;
+}
+
+/* Drop highlight */
+.cal-day-col.drag-over { background: rgba(93,202,165,0.04); }
+
+/* ── Mobile calendar ── */
+.cal-swipe-panel {
+  padding: 0 !important;
+  gap: 0 !important;
+}
+.cal-mobile-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px 10px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+.cal-day-title {
+  font-size: 14px; font-weight: 500;
+  color: var(--text-primary); text-align: center; flex: 1;
+}
+.cal-nav-btn {
+  background: transparent; border: none;
+  color: var(--text-secondary); cursor: pointer;
+  font-size: 22px; line-height: 1; padding: 4px 8px;
+  touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.cal-nav-btn:hover { color: var(--text-primary); }
+.cal-grid-wrap {
+  flex: 1; overflow-y: auto; position: relative;
+  display: flex;
+}
+.cal-grid-wrap::-webkit-scrollbar { display: none; }
+
+.cal-mobile-body {
+  flex: 1; display: flex; position: relative;
+}
+.cal-mobile-time-col {
+  width: 44px; flex-shrink: 0;
+  position: relative;
+  border-right: 1px solid var(--border);
+}
+.cal-mobile-day-col {
+  flex: 1; position: relative;
+}
+
+/* ── Add button on grid click ── */
+.cal-add-hint {
+  position: absolute; left: 0; right: 0;
+  height: 24px; display: flex; align-items: center;
+  justify-content: center; z-index: 1;
+  cursor: pointer; opacity: 0;
+  transition: opacity 0.15s;
+}
+.cal-day-col:hover .cal-add-hint,
+.cal-mobile-day-col:hover .cal-add-hint { opacity: 0.4; }
+
+/* ── Calendar button in desktop ── */
+.cal-desktop-btn {
+  position: fixed; top: 0; right: 0;
+  height: 44px; /* aligns with data-bar height, but top */
+}
+
+/* ── Desktop nav: Calendar tab shown in left panel ── */
+.cal-nav-tab {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  cursor: pointer; user-select: none;
+  font-size: 12px; font-weight: 500;
+  color: var(--text-secondary);
+  transition: border-color 0.2s, background 0.2s, color 0.2s;
+  margin-bottom: 4px;
+}
+.cal-nav-tab:hover { border-color: var(--border-mid); background: var(--bg-hover); color: var(--text-primary); }
+.cal-nav-tab.active { border-color: rgba(93,202,165,0.3); background: rgba(93,202,165,0.06); color: var(--accent-green); }
+
+/* ── Event modal extras ── */
+.cal-event-input {
+  width: 100%;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-mid);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  font-size: 13px; font-family: var(--font-sans);
+  color: var(--text-primary); outline: none;
+}
+.cal-event-input::placeholder { color: var(--text-muted); }
+.cal-time-input { flex: 1; }
+.cal-event-row {
+  display: flex; align-items: center; gap: 10px;
+}
+.cal-event-field {
+  display: flex; flex-direction: column; gap: 4px; flex: 1;
+}
+.cal-event-label {
+  font-size: 10px; font-weight: 500; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+.cal-color-swatches {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center; flex: 1;
+}
+.cal-color-dot {
+  width: 20px; height: 20px; border-radius: 50%;
+  cursor: pointer; border: 2px solid transparent;
+  transition: transform 0.1s, border-color 0.1s;
+  flex-shrink: 0;
+}
+.cal-color-dot.selected { border-color: var(--text-primary); transform: scale(1.15); }
+.cal-event-type-row {
+  display: flex; align-items: center; gap: 10px;
+}
+.cal-type-btn {
+  flex: 1; padding: 6px; border-radius: var(--radius-sm);
+  font-size: 12px; font-family: var(--font-sans);
+  border: 1px solid var(--border-mid);
+  background: var(--bg-hover); color: var(--text-secondary);
+  cursor: pointer; transition: background 0.15s, color 0.15s;
+  touch-action: manipulation;
+}
+.cal-type-btn.active { background: rgba(93,202,165,0.1); color: var(--accent-green); border-color: rgba(93,202,165,0.3); }
+.cal-template-row {
+  font-size: 12px; color: var(--text-secondary);
+}
+.cal-template-row input[type=checkbox] { accent-color: var(--accent-green); }
+.cal-delete-btn {
+  width: 100%; padding: 8px; border-radius: var(--radius-md);
+  font-size: 12px; font-family: var(--font-sans);
+  background: rgba(220,60,60,0.1); color: #e05555;
+  border: 1px solid rgba(220,60,60,0.25); cursor: pointer;
+  transition: background 0.15s;
+  touch-action: manipulation;
+}
+.cal-delete-btn:hover { background: rgba(220,60,60,0.2); }
+
