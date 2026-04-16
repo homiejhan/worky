@@ -10,6 +10,11 @@ let TIMER_DEFAULTS = [
 let formatMode = false;
 let formatTimerIdCounter = 900; // high range to avoid clashing with regular timer ids
 
+/* ── Calendar state (declared here so gatherState/applyState can access them) ── */
+let calEvents      = {};   // { 'YYYY-MM-DD': [event,...] }
+let calTemplates   = [];   // template events/dividers
+let calEventIdCtr  = 1;
+
 let wokenUp = false;
 
 let timers = TIMER_DEFAULTS.map((t, i) => ({
@@ -40,7 +45,8 @@ function setSwipePanelWidths() {
   const w = window.innerWidth;
   const track = document.getElementById('swipeTrack');
   const panels = document.querySelectorAll('.swipe-panel');
-  if (track) track.style.width = (w * 3) + 'px';
+  const count = panels.length || 4;
+  if (track) track.style.width = (w * count) + 'px';
   panels.forEach(p => p.style.width = w + 'px');
   goTab(currentTab, false);
 }
@@ -53,10 +59,11 @@ function goTab(idx, animate) {
     track.style.transition = animate === false ? 'none' : 'transform 0.32s cubic-bezier(0.4,0,0.2,1)';
     track.style.transform = `translateX(${-idx * w}px)`;
   }
-  [0,1,2].forEach(i => {
+  [0,1,2,3].forEach(i => {
     const btn = document.getElementById(`tab-${i}`);
     if (btn) btn.classList.toggle('active', i === idx);
   });
+  if (idx === 3 && typeof calRenderMobile === 'function') calRenderMobile();
 }
 
 const swipeEl = document.getElementById('swipeContainer');
@@ -854,6 +861,8 @@ setSwipePanelWidths();
 updateTimerSummary();
 tickAll();
 
+/* Calendar init runs after all calendar functions are defined (see bottom of file) */
+
 /* ══════════════════════════════════════════════════════
    CALENDAR
    ══════════════════════════════════════════════════════ */
@@ -863,9 +872,7 @@ const CAL_DAY_COUNT = 7;
 const CAL_COLORS    = ['#378ADD','#EC3636','#8B5CF6','#F97316','#22C55E','#EAB308','#5DCAA5','#D4537E'];
 const CAL_LS_KEY    = 'focus-cal-state';
 
-let calEvents       = {};   // { 'YYYY-MM-DD': [event,...] }
-let calTemplates    = [];   // template events/dividers
-let calEventIdCtr   = 1;
+// calEvents, calTemplates, calEventIdCtr declared at top of file
 let calMobileDay    = 0;
 let calDesktopOpen  = false;
 let calEditId       = null;
@@ -1395,51 +1402,18 @@ function calInitDesktopTab() {
   else lp.prepend(tab);
 }
 
-/* ── Swipe panel count update ── */
-const _origSetSwipe = setSwipePanelWidths;
-setSwipePanelWidths = function() {
-  const w = window.innerWidth;
-  const track = document.getElementById('swipeTrack');
-  const panels = document.querySelectorAll('.swipe-panel');
-  const count = panels.length;
-  if (track) track.style.width = (w * count) + 'px';
-  panels.forEach(p => p.style.width = w + 'px');
-  const track2 = document.getElementById('swipeTrack');
-  if (track2) {
-    track2.style.transition = 'none';
-    track2.style.transform = `translateX(${-currentTab * w}px)`;
-  }
-  [0,1,2,3].forEach(i => {
-    const btn = document.getElementById(`tab-${i}`);
-    if (btn) btn.classList.toggle('active', i === currentTab);
-  });
-};
-
-/* ── goTab update for 4 tabs ── */
-const _origGoTab = goTab;
-goTab = function(idx, animate) {
-  currentTab = idx;
-  const w = window.innerWidth;
-  const track = document.getElementById('swipeTrack');
-  if (track) {
-    track.style.transition = animate===false ? 'none' : 'transform 0.32s cubic-bezier(0.4,0,0.2,1)';
-    track.style.transform = `translateX(${-idx * w}px)`;
-  }
-  [0,1,2,3].forEach(i => {
-    const btn = document.getElementById(`tab-${i}`);
-    if (btn) btn.classList.toggle('active', i === idx);
-  });
-  if (idx === 3) calRenderMobile();
-};
+/* goTab and setSwipePanelWidths already handle 4 tabs in their original definitions above */
 
 // Close modal on backdrop click
 document.getElementById('calEventModal').addEventListener('click', e => {
   if (e.target.id === 'calEventModal') closeCalModal();
 });
 
-/* ── Init ── */
+/* ── Calendar Init ── */
 calLoad();
 calPruneDays();
 calInitDesktopTab();
 calRenderMobile();
 calTickNow();
+
+// Close modal on backdrop click already wired above
