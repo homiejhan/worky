@@ -915,3 +915,50 @@
   touch-action: manipulation;
 }
 .cal-delete-btn:hover { background: rgba(220,60,60,0.2); }
+
+/* ── Week mode toggle button ── */
+.cal-week-mode-btn {
+  display: none;
+  font-size: 11px; font-family: var(--font-sans);
+  padding: 4px 10px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-mid);
+  background: var(--bg-elevated);
+  color: var(--text-secondary); cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap; touch-action: manipulation;
+  margin-bottom: 4px;
+}
+.cal-week-mode-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.cal-desktop-panel.active ~ * .cal-week-mode-btn,
+#calDesktopNavTab.active + .cal-week-mode-btn { display: block; }
+/* show week mode btn when calendar nav tab is active */
+#calDesktopNavTab.active { margin-bottom: 0; }
+#calWeekModeBtn { display: none; }
+.cal-desktop-panel.active + * #calWeekModeBtn { display: block; }
+
+/* ── Day-of-week repeat picker ── */
+.cal-dow-row {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.cal-dow-btn {
+  width: 28px; height: 28px; border-radius: 50%;
+  font-size: 11px; font-weight: 500; font-family: var(--font-sans);
+  border: 1px solid var(--border-mid);
+  background: var(--bg-hover); color: var(--text-muted);
+  cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s;
+  display: flex; align-items: center; justify-content: center;
+  touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+}
+.cal-dow-btn.active {
+  background: rgba(93,202,165,0.15);
+  color: var(--accent-green);
+  border-color: rgba(93,202,165,0.4);
+}
+
+/* ── Format mode calendar columns (distinct tint) ── */
+.cal-fmt-col { background: rgba(93,202,165,0.02); }
+.cal-fmt-col-header { color: var(--accent-green) !important; opacity: 0.8; }
