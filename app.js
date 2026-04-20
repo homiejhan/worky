@@ -913,9 +913,8 @@ function loadFromLocal() {
     }
     return true;
   } catch(e) {
-    // Corrupted data — wipe and reload so the app always starts clean
-    try { localStorage.clear(); } catch(_) {}
-    location.reload();
+    // Corrupted data — wipe it and continue with defaults (no reload needed)
+    try { localStorage.removeItem(LS_KEY); } catch(_) {}
     return false;
   }
 }
