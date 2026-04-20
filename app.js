@@ -1,6 +1,3 @@
-
-Copy
-
 /* ─────────── STATE ─────────── */
 // Mutable defaults — updated when Format mode is committed
 let TIMER_DEFAULTS = [
