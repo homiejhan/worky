@@ -641,6 +641,83 @@ function removeFormatDaily(id) {
 }
 
 /* ─────────── SAVE / LOAD ─────────── */
+/*
+ * Version 2 export format uses short key aliases to shrink file size.
+ * Version 1 files (old format) are still accepted on import.
+ *
+ * Key map (long → short):
+ *   version→v, wokenUp→wu, timerDefaults→td, timers→tm,
+ *   todoIdCounter→tic, taskIdCounter→tac, todoLists→tl,
+ *   calendar→cal, calEvents→ce, calTemplates→ct, calEventIdCtr→cec,
+ *   -- per timer: id→i, label→lb, color→c, seconds→s,
+ *                 running→r, startedAt→sa, secondsAtStart→ss
+ *   -- per list:  id→i, title→ti, color→c, isDefault→d, tasks→tk
+ *   -- per task:  id→i, text→tx, done→dn
+ *   -- per calEvent: id→i, title→ti, start→s, end→e, color→c,
+ *                    type→tp, fromTemplate→ft, templateId→tid,
+ *                    repeatDays→rd
+ */
+function compressState(st) {
+  const cTimer = t => {
+    const o = { i:t.id, lb:t.label, c:t.color, s:t.seconds };
+    if (t.running)   { o.r=1; o.sa=t.startedAt; o.ss=t.secondsAtStart; }
+    return o;
+  };
+  const cDef   = t => ({ lb:t.label, c:t.color, s:t.seconds });
+  const cTask  = t => { const o = { i:t.id, tx:t.text }; if (t.done) o.dn=1; return o; };
+  const cList  = l => ({ i:l.id, ti:l.title, c:l.color, d:l.isDefault?1:0, tk:l.tasks.map(cTask) });
+  const cCalEv = e => {
+    const o = { i:e.id, ti:e.title, s:e.start, e:e.end, c:e.color };
+    if (e.type && e.type !== 'event') o.tp = e.type;
+    if (e.fromTemplate) o.ft = 1;
+    if (e.templateId != null) o.tid = e.templateId;
+    if (e.repeatDays)  o.rd = e.repeatDays;
+    return o;
+  };
+  const cEvents = {};
+  Object.entries(st.calendar.calEvents || {}).forEach(([k, evs]) => {
+    cEvents[k] = evs.map(cCalEv);
+  });
+  return {
+    v: 2,
+    wu: st.wokenUp ? 1 : 0,
+    td: st.timerDefaults.map(cDef),
+    tm: st.timers.map(cTimer),
+    tic: st.todoIdCounter,
+    tac: st.taskIdCounter,
+    tl: st.todoLists.map(cList),
+    cal: { ce: cEvents, ct: (st.calendar.calTemplates||[]).map(cCalEv), cec: st.calendar.calEventIdCtr },
+  };
+}
+
+function decompressState(c) {
+  // Already v1 (old format) — pass through as-is
+  if (c.version === 1) return c;
+  if (c.v !== 2) return null;
+  const dTimer = t => ({ id:t.i, label:t.lb, color:t.c, seconds:t.s,
+    running:!!t.r, startedAt:t.sa??null, secondsAtStart:t.ss??null });
+  const dDef   = t => ({ label:t.lb, color:t.c, seconds:t.s });
+  const dTask  = t => ({ id:t.i, text:t.tx, done:!!t.dn });
+  const dList  = l => ({ id:l.i, title:l.ti, color:l.c, isDefault:!!l.d, tasks:(l.tk||[]).map(dTask) });
+  const dCalEv = e => ({
+    id:e.i, title:e.ti, start:e.s, end:e.e, color:e.c,
+    type:e.tp||'event', fromTemplate:!!e.ft,
+    templateId:e.tid??null, repeatDays:e.rd||null,
+  });
+  const dEvents = {};
+  Object.entries(c.cal.ce || {}).forEach(([k, evs]) => { dEvents[k] = evs.map(dCalEv); });
+  return {
+    version: 1,
+    wokenUp: !!c.wu,
+    timerDefaults: (c.td||[]).map(dDef),
+    timers: (c.tm||[]).map(dTimer),
+    todoIdCounter: c.tic,
+    taskIdCounter: c.tac,
+    todoLists: (c.tl||[]).map(dList),
+    calendar: { calEvents: dEvents, calTemplates: (c.cal.ct||[]).map(dCalEv), calEventIdCtr: c.cal.cec||1 },
+  };
+}
+
 function gatherState() {
   return {
     version: 1,
@@ -669,30 +746,31 @@ function gatherState() {
 }
 
 function applyState(state) {
-  if (!state || state.version !== 1) { showToast('Invalid or unsupported file.'); return; }
-  wokenUp = !!state.wokenUp;
+  const st = decompressState(state);
+  if (!st || st.version !== 1) { showToast('Invalid or unsupported file.'); return; }
+  wokenUp = !!st.wokenUp;
   ['d','m'].forEach(p => {
     const row = document.getElementById(`wakeupRow-${p}`);
     const box = document.getElementById(`wakeupBox-${p}`);
     if (row) row.classList.toggle('done', wokenUp);
     if (box) box.classList.toggle('checked', wokenUp);
   });
-  timers = state.timers.map(t => ({
+  timers = st.timers.map(t => ({
     id: t.id, label: t.label, color: t.color,
     seconds: t.seconds, running: t.running,
     startedAt: t.startedAt, secondsAtStart: t.secondsAtStart,
   }));
-  if (state.timerDefaults) TIMER_DEFAULTS = state.timerDefaults;
-  todoIdCounter = state.todoIdCounter ?? todoIdCounter;
-  taskIdCounter = state.taskIdCounter ?? taskIdCounter;
-  todoLists = state.todoLists.map(l => ({
+  if (st.timerDefaults) TIMER_DEFAULTS = st.timerDefaults;
+  todoIdCounter = st.todoIdCounter ?? todoIdCounter;
+  taskIdCounter = st.taskIdCounter ?? taskIdCounter;
+  todoLists = st.todoLists.map(l => ({
     id: l.id, title: l.title, color: l.color, isDefault: !!l.isDefault,
     tasks: l.tasks.map(t => ({ id: t.id, text: t.text, done: t.done }))
   }));
-  if (state.calendar) {
-    calEvents      = state.calendar.calEvents      || {};
-    calTemplates   = state.calendar.calTemplates   || [];
-    calEventIdCtr  = state.calendar.calEventIdCtr  || 1;
+  if (st.calendar) {
+    calEvents      = st.calendar.calEvents      || {};
+    calTemplates   = st.calendar.calTemplates   || [];
+    calEventIdCtr  = st.calendar.calEventIdCtr  || 1;
     calSave();
     calPruneDays();
     calRefresh();
@@ -703,7 +781,7 @@ function applyState(state) {
 }
 
 function openExportModal() {
-  const json = JSON.stringify(gatherState(), null, 2);
+  const json = JSON.stringify(compressState(gatherState()));
   document.getElementById('exportTextarea').value = json;
   document.getElementById('exportModal').classList.add('show');
 }
@@ -767,6 +845,12 @@ function showToast(msg) {
 function confirmResetAll() {
   document.getElementById('confirmOverlay').classList.add('show');
 }
+function confirmClearStorage() {
+  if (confirm('Clear all saved data and reload? This cannot be undone.')) {
+    localStorage.clear();
+    location.reload();
+  }
+}
 function closeConfirm() {
   document.getElementById('confirmOverlay').classList.remove('show');
 }
@@ -828,7 +912,12 @@ function loadFromLocal() {
       calEventIdCtr = state.calendar.calEventIdCtr || 1;
     }
     return true;
-  } catch(e) { return false; }
+  } catch(e) {
+    // Corrupted data — wipe and reload so the app always starts clean
+    try { localStorage.clear(); } catch(_) {}
+    location.reload();
+    return false;
+  }
 }
 
 // Auto-save every 5 seconds and immediately on tab hide / page close
