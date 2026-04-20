@@ -6,36 +6,36 @@ let TIMER_DEFAULTS = [
   { label: 'Time with God',        seconds: 2*3600, color: '#8B5CF6' },
   { label: 'Skill Development',    seconds: 1*3600, color: '#F97316' },
 ];
- 
+
 let formatMode = false;
 let formatTimerIdCounter = 900; // high range to avoid clashing with regular timer ids
- 
+
 let wokenUp = false;
- 
+
 let timers = TIMER_DEFAULTS.map((t, i) => ({
   id: i, label: t.label, seconds: t.seconds, color: t.color,
   running: false, startedAt: null, secondsAtStart: null
 }));
- 
+
 let todoIdCounter = 0;
 let taskIdCounter = 0;
- 
+
 function makeTasks(texts) {
   return texts.map(text => ({ id: taskIdCounter++, text, done: false }));
 }
- 
+
 let todoLists = [
   { id: todoIdCounter++, title: 'Physical Activities', color: '#22C55E', isDefault: true,
     tasks: makeTasks(['Morning Workout/Stretch', 'Gym/Recovery', 'Cardio']) },
   { id: todoIdCounter++, title: 'Social Interactions',  color: '#EAB308', isDefault: true,
     tasks: makeTasks(['1','2','3','4','5']) },
 ];
- 
+
 /* ─────────── MOBILE SWIPE ─────────── */
 let currentTab = 0;
 let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
 let isSwiping = false;
- 
+
 function setSwipePanelWidths() {
   const w = window.innerWidth;
   const track = document.getElementById('swipeTrack');
@@ -44,7 +44,7 @@ function setSwipePanelWidths() {
   panels.forEach(p => p.style.width = w + 'px');
   goTab(currentTab, false);
 }
- 
+
 function goTab(idx, animate) {
   currentTab = idx;
   const w = window.innerWidth;
@@ -58,7 +58,7 @@ function goTab(idx, animate) {
     if (btn) btn.classList.toggle('active', i === idx);
   });
 }
- 
+
 const swipeEl = document.getElementById('swipeContainer');
 if (swipeEl) {
   swipeEl.addEventListener('touchstart', e => {
@@ -70,7 +70,7 @@ if (swipeEl) {
     touchStartTime = Date.now();
     isSwiping = false;
   }, { passive: true });
- 
+
   swipeEl.addEventListener('touchmove', e => {
     if (!touchStartX) return;
     const dx = e.touches[0].clientX - touchStartX;
@@ -79,7 +79,7 @@ if (swipeEl) {
       isSwiping = true;
     }
   }, { passive: true });
- 
+
   swipeEl.addEventListener('touchend', e => {
     if (!isSwiping) { touchStartX = 0; return; }
     const dx = e.changedTouches[0].clientX - touchStartX;
@@ -90,9 +90,9 @@ if (swipeEl) {
     touchStartX = 0; isSwiping = false;
   }, { passive: true });
 }
- 
+
 window.addEventListener('resize', setSwipePanelWidths);
- 
+
 /* ─────────── TIMER UTILS ─────────── */
 function fmt(s) {
   s = Math.max(0, Math.round(s));
@@ -113,7 +113,7 @@ function getRemaining(t) {
 function playIcon()  { return `<svg width="10" height="12" viewBox="0 0 10 12" fill="none"><path d="M1 1.2L9 6L1 10.8V1.2Z" fill="currentColor"/></svg>`; }
 function pauseIcon() { return `<svg width="10" height="12" viewBox="0 0 10 12" fill="none"><rect x="1" y="1" width="3" height="10" rx="1" fill="currentColor"/><rect x="6" y="1" width="3" height="10" rx="1" fill="currentColor"/></svg>`; }
 function resetIcon() { return `<svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M1.5 5.5A4 4 0 1 0 2.9 2.7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M1.5 2V5.5H5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`; }
- 
+
 function tickAll() {
   timers.forEach(t => {
     if (!t.running) return;
@@ -124,7 +124,7 @@ function tickAll() {
   if (wokenUp) updateTimerSummary();
   requestAnimationFrame(tickAll);
 }
- 
+
 /* ─────────── RENDER TIMERS ─────────── */
 function timerCardHTML(t, pfx) {
   return `
@@ -153,7 +153,7 @@ function timerCardHTML(t, pfx) {
     <div class="timer-sub tsub-${t.id}">${t.running?'running':'paused'} · click time to edit</div>
   `;
 }
- 
+
 function renderTimers() {
   [['leftPanel','d'],['mobileTimerPanel','m']].forEach(([panelId, pfx]) => {
     const panel = document.getElementById(panelId);
@@ -170,7 +170,7 @@ function renderTimers() {
     });
   });
 }
- 
+
 function changeTimerColor(id, color) {
   const t = timers.find(x => x.id === id);
   if (t) t.color = color;
@@ -227,7 +227,7 @@ function resetTimer(id) {
   updateTimerUI(id);
   saveToLocal();
 }
- 
+
 /* ─────────── WAKEUP ─────────── */
 function toggleWakeup() {
   wokenUp = !wokenUp;
@@ -240,7 +240,7 @@ function toggleWakeup() {
   updateTimerSummary();
   saveToLocal();
 }
- 
+
 function updateTimerSummary() {
   const totalSecs = timers.reduce((sum, t) => sum + Math.round(getRemaining(t)), 0);
   const finishTime = new Date(Date.now() + totalSecs * 1000);
@@ -249,7 +249,7 @@ function updateTimerSummary() {
   const ampm = hh >= 12 ? 'pm' : 'am';
   const h12 = hh % 12 || 12;
   const finishStr = `${h12}:${mm} ${ampm}`;
- 
+
   const html = wokenUp ? `
     <div class="timer-summary-row">
       <span class="timer-summary-label">Time remaining</span>
@@ -260,7 +260,7 @@ function updateTimerSummary() {
       <span class="timer-summary-value">${finishStr}</span>
     </div>
   ` : '';
- 
+
   ['d','m'].forEach(p => {
     const el = document.getElementById(`timerSummary-${p}`);
     if (!el) return;
@@ -268,7 +268,7 @@ function updateTimerSummary() {
     el.classList.toggle('visible', wokenUp);
   });
 }
- 
+
 /* ─────────── TODO LISTS ─────────── */
 function addTodoList() {
   const id = todoIdCounter++;
@@ -313,7 +313,7 @@ function toggleTask(listId, taskId) {
   document.querySelectorAll(`.task-text-${taskId}`).forEach(el => el.classList.toggle('done', task.done));
   saveToLocal();
 }
- 
+
 function buildCard(list, pfx) {
   const card = document.createElement('div');
   card.className = 'todo-card';
@@ -358,7 +358,7 @@ function buildCard(list, pfx) {
   `;
   return card;
 }
- 
+
 function renderTodos() {
   [['d'],['m']].forEach(([pfx]) => {
     const defEl  = document.getElementById(`defaultContainer-${pfx}`);
@@ -374,11 +374,11 @@ function renderTodos() {
   });
   initDragDrop();
 }
- 
+
 /* ─────────── DRAG & DROP (My Lists only) ─────────── */
 let dragTaskId = null;
 let dragFromListId = null;
- 
+
 function initDragDrop() {
   // Desktop: HTML5 drag events
   document.querySelectorAll('.task-row[draggable="true"]').forEach(row => {
@@ -406,7 +406,7 @@ function initDragDrop() {
       moveTask(dragTaskId, dragFromListId, toListId, toTaskId);
     });
   });
- 
+
   // Drop onto empty task areas
   document.querySelectorAll('.todo-tasks').forEach(area => {
     area.addEventListener('dragover', e => {
@@ -424,10 +424,10 @@ function initDragDrop() {
       moveTask(dragTaskId, dragFromListId, toListId, null);
     });
   });
- 
+
   // Touch drag (mobile)
   let touchDragRow = null, touchClone = null, touchOffsetY = 0;
- 
+
   document.querySelectorAll('.drag-handle').forEach(handle => {
     handle.addEventListener('touchstart', e => {
       const row = handle.closest('.task-row');
@@ -436,7 +436,7 @@ function initDragDrop() {
       dragFromListId = parseInt(row.dataset.listId);
       touchDragRow = row;
       touchOffsetY = e.touches[0].clientY - row.getBoundingClientRect().top;
- 
+
       touchClone = row.cloneNode(true);
       touchClone.style.cssText = `position:fixed;left:0;right:0;z-index:500;opacity:0.85;pointer-events:none;background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:var(--radius-sm);`;
       touchClone.style.top = (e.touches[0].clientY - touchOffsetY) + 'px';
@@ -445,37 +445,37 @@ function initDragDrop() {
       e.preventDefault();
     }, { passive: false });
   });
- 
+
   document.addEventListener('touchmove', e => {
     if (!touchClone) return;
     const y = e.touches[0].clientY;
     const x = e.touches[0].clientX;
     touchClone.style.top = (y - touchOffsetY) + 'px';
- 
+
     // Find what we're hovering over
     touchClone.style.display = 'none';
     const el = document.elementFromPoint(x, y);
     touchClone.style.display = '';
- 
+
     document.querySelectorAll('.drag-over').forEach(r => r.classList.remove('drag-over'));
     const hoverRow = el?.closest('.task-row[draggable]');
     if (hoverRow) hoverRow.classList.add('drag-over');
     e.preventDefault();
   }, { passive: false });
- 
+
   document.addEventListener('touchend', e => {
     if (!touchClone) return;
     const x = e.changedTouches[0].clientX;
     const y = e.changedTouches[0].clientY;
- 
+
     touchClone.style.display = 'none';
     const el = document.elementFromPoint(x, y);
     touchClone.style.display = '';
- 
+
     const hoverRow = el?.closest('.task-row[draggable]');
     const hoverArea = el?.closest('.todo-tasks');
     const hoverCard = el?.closest('.todo-card');
- 
+
     if (hoverRow) {
       const toTaskId = parseInt(hoverRow.dataset.taskId);
       const toListId = parseInt(hoverRow.dataset.listId);
@@ -487,34 +487,34 @@ function initDragDrop() {
         moveTask(dragTaskId, dragFromListId, toListId, null);
       }
     }
- 
+
     touchClone.remove(); touchClone = null;
     touchDragRow?.classList.remove('dragging');
     touchDragRow = null;
     document.querySelectorAll('.drag-over').forEach(r => r.classList.remove('drag-over'));
   });
 }
- 
+
 function moveTask(taskId, fromListId, toListId, beforeTaskId) {
   const fromList = todoLists.find(l => l.id === fromListId);
   const toList   = todoLists.find(l => l.id === toListId);
   if (!fromList || !toList) return;
- 
+
   const taskIdx = fromList.tasks.findIndex(t => t.id === taskId);
   if (taskIdx === -1) return;
   const [task] = fromList.tasks.splice(taskIdx, 1);
- 
+
   if (beforeTaskId != null) {
     const beforeIdx = toList.tasks.findIndex(t => t.id === beforeTaskId);
     toList.tasks.splice(beforeIdx, 0, task);
   } else {
     toList.tasks.push(task);
   }
- 
+
   renderTodos();
   saveToLocal();
 }
- 
+
 /* ─────────── FORMAT MODE ─────────── */
 function toggleFormatMode() {
   if (formatMode) {
@@ -523,10 +523,10 @@ function toggleFormatMode() {
     enterFormatMode();
   }
 }
- 
+
 // Stores the real remaining time before entering format mode
 let preFormatTimerState = [];
- 
+
 function enterFormatMode() {
   // Snapshot real remaining times before we overwrite t.seconds
   preFormatTimerState = timers.map(t => ({
@@ -536,7 +536,7 @@ function enterFormatMode() {
     startedAt: t.startedAt,
     secondsAtStart: t.secondsAtStart,
   }));
- 
+
   // Pause all running timers
   timers.forEach(t => {
     if (t.running) {
@@ -545,7 +545,7 @@ function enterFormatMode() {
       updateTimerUI(t.id);
     }
   });
- 
+
   // Show each timer's DEFAULT time in the display
   timers.forEach((t, i) => {
     const def = TIMER_DEFAULTS[i];
@@ -558,19 +558,19 @@ function enterFormatMode() {
       document.querySelectorAll(`.tedit-${t.id}-d, .tedit-${t.id}-m`).forEach(el => el.style.display = 'none');
     }
   });
- 
+
   // Now set t.seconds to the default so edits in format mode work correctly
   timers.forEach((t, i) => {
     const def = TIMER_DEFAULTS[i];
     if (def) t.seconds = def.seconds;
   });
- 
+
   formatMode = true;
   document.body.classList.add('format-mode');
   const btn = document.getElementById('fmtBtn');
   if (btn) { btn.textContent = '✓ Done'; btn.classList.add('active'); }
 }
- 
+
 function commitFormatMode() {
   // Save the new defaults from whatever the timers show in format mode
   TIMER_DEFAULTS = timers.map(t => ({
@@ -578,12 +578,12 @@ function commitFormatMode() {
     seconds: t.seconds,  // t.seconds is the format-mode value (default or edited)
     color: t.color,
   }));
- 
+
   formatMode = false;
   document.body.classList.remove('format-mode');
   const btn = document.getElementById('fmtBtn');
   if (btn) { btn.textContent = 'Formats'; btn.classList.remove('active'); }
- 
+
   // Restore live remaining times so user's progress is not lost
   timers.forEach(t => {
     const pre = preFormatTimerState.find(p => p.id === t.id);
@@ -595,14 +595,14 @@ function commitFormatMode() {
     }
   });
   preFormatTimerState = [];
- 
+
   // Re-render so displays show live remaining time again
   renderTimers();
- 
+
   saveToLocal();
   showToast('Format saved ✓');
 }
- 
+
 function addFormatTimer() {
   if (!formatMode) return;
   const id = formatTimerIdCounter++;
@@ -612,7 +612,7 @@ function addFormatTimer() {
   TIMER_DEFAULTS.push({ label: newT.label, seconds: newT.seconds, color: newT.color });
   renderTimers();
 }
- 
+
 function removeFormatTimer(id) {
   if (!formatMode) return;
   if (timers.length <= 1) { showToast('Need at least one timer.'); return; }
@@ -622,7 +622,7 @@ function removeFormatTimer(id) {
   TIMER_DEFAULTS.splice(idx, 1);
   renderTimers();
 }
- 
+
 function addFormatDaily() {
   if (!formatMode) return;
   const id = todoIdCounter++;
@@ -633,91 +633,14 @@ function addFormatDaily() {
     if (inp) inp.focus();
   }, 10);
 }
- 
+
 function removeFormatDaily(id) {
   if (!formatMode) return;
   todoLists = todoLists.filter(l => l.id !== id);
   renderTodos();
 }
- 
+
 /* ─────────── SAVE / LOAD ─────────── */
-/*
- * Version 2 export format uses short key aliases to shrink file size.
- * Version 1 files (old format) are still accepted on import.
- *
- * Key map (long → short):
- *   version→v, wokenUp→wu, timerDefaults→td, timers→tm,
- *   todoIdCounter→tic, taskIdCounter→tac, todoLists→tl,
- *   calendar→cal, calEvents→ce, calTemplates→ct, calEventIdCtr→cec,
- *   -- per timer: id→i, label→lb, color→c, seconds→s,
- *                 running→r, startedAt→sa, secondsAtStart→ss
- *   -- per list:  id→i, title→ti, color→c, isDefault→d, tasks→tk
- *   -- per task:  id→i, text→tx, done→dn
- *   -- per calEvent: id→i, title→ti, start→s, end→e, color→c,
- *                    type→tp, fromTemplate→ft, templateId→tid,
- *                    repeatDays→rd
- */
-function compressState(st) {
-  const cTimer = t => {
-    const o = { i:t.id, lb:t.label, c:t.color, s:t.seconds };
-    if (t.running)   { o.r=1; o.sa=t.startedAt; o.ss=t.secondsAtStart; }
-    return o;
-  };
-  const cDef   = t => ({ lb:t.label, c:t.color, s:t.seconds });
-  const cTask  = t => { const o = { i:t.id, tx:t.text }; if (t.done) o.dn=1; return o; };
-  const cList  = l => ({ i:l.id, ti:l.title, c:l.color, d:l.isDefault?1:0, tk:l.tasks.map(cTask) });
-  const cCalEv = e => {
-    const o = { i:e.id, ti:e.title, s:e.start, e:e.end, c:e.color };
-    if (e.type && e.type !== 'event') o.tp = e.type;
-    if (e.fromTemplate) o.ft = 1;
-    if (e.templateId != null) o.tid = e.templateId;
-    if (e.repeatDays)  o.rd = e.repeatDays;
-    return o;
-  };
-  const cEvents = {};
-  Object.entries(st.calendar.calEvents || {}).forEach(([k, evs]) => {
-    cEvents[k] = evs.map(cCalEv);
-  });
-  return {
-    v: 2,
-    wu: st.wokenUp ? 1 : 0,
-    td: st.timerDefaults.map(cDef),
-    tm: st.timers.map(cTimer),
-    tic: st.todoIdCounter,
-    tac: st.taskIdCounter,
-    tl: st.todoLists.map(cList),
-    cal: { ce: cEvents, ct: (st.calendar.calTemplates||[]).map(cCalEv), cec: st.calendar.calEventIdCtr },
-  };
-}
- 
-function decompressState(c) {
-  // Already v1 (old format) — pass through as-is
-  if (c.version === 1) return c;
-  if (c.v !== 2) return null;
-  const dTimer = t => ({ id:t.i, label:t.lb, color:t.c, seconds:t.s,
-    running:!!t.r, startedAt:t.sa??null, secondsAtStart:t.ss??null });
-  const dDef   = t => ({ label:t.lb, color:t.c, seconds:t.s });
-  const dTask  = t => ({ id:t.i, text:t.tx, done:!!t.dn });
-  const dList  = l => ({ id:l.i, title:l.ti, color:l.c, isDefault:!!l.d, tasks:(l.tk||[]).map(dTask) });
-  const dCalEv = e => ({
-    id:e.i, title:e.ti, start:e.s, end:e.e, color:e.c,
-    type:e.tp||'event', fromTemplate:!!e.ft,
-    templateId:e.tid??null, repeatDays:e.rd||null,
-  });
-  const dEvents = {};
-  Object.entries(c.cal.ce || {}).forEach(([k, evs]) => { dEvents[k] = evs.map(dCalEv); });
-  return {
-    version: 1,
-    wokenUp: !!c.wu,
-    timerDefaults: (c.td||[]).map(dDef),
-    timers: (c.tm||[]).map(dTimer),
-    todoIdCounter: c.tic,
-    taskIdCounter: c.tac,
-    todoLists: (c.tl||[]).map(dList),
-    calendar: { calEvents: dEvents, calTemplates: (c.cal.ct||[]).map(dCalEv), calEventIdCtr: c.cal.cec||1 },
-  };
-}
- 
 function gatherState() {
   return {
     version: 1,
@@ -744,33 +667,32 @@ function gatherState() {
     },
   };
 }
- 
+
 function applyState(state) {
-  const st = decompressState(state);
-  if (!st || st.version !== 1) { showToast('Invalid or unsupported file.'); return; }
-  wokenUp = !!st.wokenUp;
+  if (!state || state.version !== 1) { showToast('Invalid or unsupported file.'); return; }
+  wokenUp = !!state.wokenUp;
   ['d','m'].forEach(p => {
     const row = document.getElementById(`wakeupRow-${p}`);
     const box = document.getElementById(`wakeupBox-${p}`);
     if (row) row.classList.toggle('done', wokenUp);
     if (box) box.classList.toggle('checked', wokenUp);
   });
-  timers = st.timers.map(t => ({
+  timers = state.timers.map(t => ({
     id: t.id, label: t.label, color: t.color,
     seconds: t.seconds, running: t.running,
     startedAt: t.startedAt, secondsAtStart: t.secondsAtStart,
   }));
-  if (st.timerDefaults) TIMER_DEFAULTS = st.timerDefaults;
-  todoIdCounter = st.todoIdCounter ?? todoIdCounter;
-  taskIdCounter = st.taskIdCounter ?? taskIdCounter;
-  todoLists = st.todoLists.map(l => ({
+  if (state.timerDefaults) TIMER_DEFAULTS = state.timerDefaults;
+  todoIdCounter = state.todoIdCounter ?? todoIdCounter;
+  taskIdCounter = state.taskIdCounter ?? taskIdCounter;
+  todoLists = state.todoLists.map(l => ({
     id: l.id, title: l.title, color: l.color, isDefault: !!l.isDefault,
     tasks: l.tasks.map(t => ({ id: t.id, text: t.text, done: t.done }))
   }));
-  if (st.calendar) {
-    calEvents      = st.calendar.calEvents      || {};
-    calTemplates   = st.calendar.calTemplates   || [];
-    calEventIdCtr  = st.calendar.calEventIdCtr  || 1;
+  if (state.calendar) {
+    calEvents      = state.calendar.calEvents      || {};
+    calTemplates   = state.calendar.calTemplates   || [];
+    calEventIdCtr  = state.calendar.calEventIdCtr  || 1;
     calSave();
     calPruneDays();
     calRefresh();
@@ -779,9 +701,9 @@ function applyState(state) {
   renderTodos();
   showToast('State restored ✓');
 }
- 
+
 function openExportModal() {
-  const json = JSON.stringify(compressState(gatherState()));
+  const json = JSON.stringify(gatherState(), null, 2);
   document.getElementById('exportTextarea').value = json;
   document.getElementById('exportModal').classList.add('show');
 }
@@ -834,13 +756,13 @@ function loadStateFile(input) {
     if (e.target.id === id) closeModal(id);
   });
 });
- 
+
 function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 2400);
 }
- 
+
 /* ─────────── RESET ALL ─────────── */
 function confirmResetAll() {
   document.getElementById('confirmOverlay').classList.add('show');
@@ -874,14 +796,14 @@ function resetAll() {
   saveToLocal();
   showToast('Reset ✓');
 }
- 
+
 /* ─────────── LOCAL STORAGE AUTO-SAVE ─────────── */
 const LS_KEY = 'focus-app-state';
- 
+
 function saveToLocal() {
   try { localStorage.setItem(LS_KEY, JSON.stringify(gatherState())); } catch(e) {}
 }
- 
+
 function loadFromLocal() {
   try {
     const raw = localStorage.getItem(LS_KEY);
@@ -908,14 +830,14 @@ function loadFromLocal() {
     return true;
   } catch(e) { return false; }
 }
- 
+
 // Auto-save every 5 seconds and immediately on tab hide / page close
 setInterval(saveToLocal, 2000);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') saveToLocal();
 });
 window.addEventListener('pagehide', saveToLocal);
- 
+
 /* ─────────── INIT ─────────── */
 const restored = loadFromLocal();
 renderTimers();
@@ -931,18 +853,18 @@ if (restored) {
 setSwipePanelWidths();
 updateTimerSummary();
 tickAll();
- 
+
 /* ══════════════════════════════════════════════════════
    CALENDAR
    ══════════════════════════════════════════════════════ */
- 
+
 const CAL_HOUR_PX   = 64;
 const CAL_DAY_COUNT = 7;
 const CAL_COLORS    = ['#378ADD','#EC3636','#8B5CF6','#F97316','#22C55E','#EAB308','#5DCAA5','#D4537E'];
 const CAL_LS_KEY    = 'focus-cal-state';
 const CAL_DOW       = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const CAL_TOTAL_PX  = 24 * CAL_HOUR_PX;
- 
+
 // calEvents: { 'YYYY-MM-DD': [ {id, title, start, end, color, type, fromTemplate, templateId}, ... ] }
 // calTemplates: [ {id, title, start, end, color, type, repeatDays:[0-6], isTemplate:true}, ... ]
 let calEvents      = {};
@@ -961,7 +883,7 @@ let calDragEv      = null;
 let calDragDate    = null;
 let calDragDow     = null;
 let calDragOffY    = 0;
- 
+
 /* ── Date helpers ── */
 function calToday() { const d=new Date(); d.setHours(0,0,0,0); return d; }
 function calDateKey(d) {
@@ -993,7 +915,7 @@ function calFmtTime(s) {
 }
 function calMinsToPx(n) { return (n/60)*CAL_HOUR_PX; }
 function calPxToMins(px) { return Math.round((px/CAL_HOUR_PX)*60/15)*15; }
- 
+
 /* ── Seeding: ensure a day exists with templates for its weekday ── */
 function calEnsureDay(key) {
   if (!calEvents[key]) {
@@ -1003,12 +925,12 @@ function calEnsureDay(key) {
       .map(t => ({...t, id:calEventIdCtr++, fromTemplate:true, templateId:t.id}));
   }
 }
- 
+
 function calPruneDays() {
   const keys = new Set(calDisplayDays().map(calDateKey));
   Object.keys(calEvents).forEach(k => { if (!keys.has(k)) delete calEvents[k]; });
 }
- 
+
 /* ── Time column ── */
 function calBuildTimeCol(el) {
   el.style.height = CAL_TOTAL_PX + 'px';
@@ -1021,7 +943,7 @@ function calBuildTimeCol(el) {
     el.appendChild(lbl);
   }
 }
- 
+
 /* ── Grid lines ── */
 function calBuildLines(col) {
   col.style.height = CAL_TOTAL_PX + 'px';
@@ -1039,7 +961,7 @@ function calBuildLines(col) {
     });
   }
 }
- 
+
 /* ── Now line ── */
 function calBuildNowLine(col) {
   col.querySelector('.cal-now-line')?.remove();
@@ -1050,7 +972,7 @@ function calBuildNowLine(col) {
   const dot = document.createElement('div'); dot.className='cal-now-dot';
   wrap.appendChild(dot); col.appendChild(wrap);
 }
- 
+
 /* ── Render event block ── */
 function calMakeEventEl(ev, dateKeyOrDow, isFmtMode) {
   const el = document.createElement('div');
@@ -1085,7 +1007,7 @@ function calMakeEventEl(ev, dateKeyOrDow, isFmtMode) {
   calAddDragToEvent(el, ev, dateKeyOrDow, isFmtMode);
   return el;
 }
- 
+
 /* ── Render user day column ── */
 function calRenderDayCol(col, dateKey) {
   col.querySelectorAll('.cal-event,.cal-divider,.cal-now-line').forEach(e=>e.remove());
@@ -1099,7 +1021,7 @@ function calRenderDayCol(col, dateKey) {
     openCalModal(dateKey, null, calMinsToStr(calPxToMins(e.clientY - rect.top)));
   };
 }
- 
+
 /* ── Render format mode DOW column (shows only templates for that DOW) ── */
 function calRenderFmtCol(col, dow) {
   col.querySelectorAll('.cal-event,.cal-divider').forEach(e=>e.remove());
@@ -1111,29 +1033,29 @@ function calRenderFmtCol(col, dow) {
     openCalModalFmt(dow, null, calMinsToStr(calPxToMins(e.clientY - rect.top)));
   };
 }
- 
+
 /* ── Desktop render (user mode) ── */
 function calRenderDesktop() {
   if (formatMode) { calRenderDesktopFmt(); return; }
   const days = calDisplayDays();
   calPruneDays();
- 
+
   const titleEl = document.getElementById('calDesktopTitle');
   if (titleEl) titleEl.textContent = calFmtFull(calToday());
- 
+
   const daysEl = document.getElementById('calDesktopDays');
   const gridEl = document.getElementById('calDesktopGrid');
   const timeEl = document.getElementById('calTimeCol');
   if (!daysEl||!gridEl||!timeEl) return;
- 
+
   daysEl.style.gridTemplateColumns = `repeat(7,1fr)`;
   daysEl.innerHTML = '';
   gridEl.style.gridTemplateColumns = `repeat(7,1fr)`;
   gridEl.innerHTML = '';
- 
+
   calBuildTimeCol(timeEl);
   timeEl.style.height = CAL_TOTAL_PX + 'px';
- 
+
   days.forEach(day => {
     const key = calDateKey(day);
     const isToday = key === calDateKey(calToday());
@@ -1141,7 +1063,7 @@ function calRenderDesktop() {
     hdr.className = 'cal-day-header'+(isToday?' today':'');
     hdr.innerHTML = `<div>${calFmtShort(day)}</div><div class="cal-day-header-date">${day.getDate()}</div>`;
     daysEl.appendChild(hdr);
- 
+
     const col = document.createElement('div');
     col.className = 'cal-day-col'; col.dataset.dateKey = key;
     calBuildLines(col);
@@ -1154,36 +1076,36 @@ function calRenderDesktop() {
     });
     gridEl.appendChild(col);
   });
- 
+
   gridEl.style.height = CAL_TOTAL_PX + 'px';
   const scrollArea = document.getElementById('calScrollArea');
   setTimeout(() => { if (scrollArea) scrollArea.scrollTop = 7 * CAL_HOUR_PX; }, 50);
 }
- 
+
 /* ── Desktop render (format mode — shows Sun-Sat template columns) ── */
 function calRenderDesktopFmt() {
   const titleEl = document.getElementById('calDesktopTitle');
   if (titleEl) titleEl.textContent = 'Template week — Sun through Sat';
- 
+
   const daysEl = document.getElementById('calDesktopDays');
   const gridEl = document.getElementById('calDesktopGrid');
   const timeEl = document.getElementById('calTimeCol');
   if (!daysEl||!gridEl||!timeEl) return;
- 
+
   daysEl.style.gridTemplateColumns = `repeat(7,1fr)`;
   daysEl.innerHTML = '';
   gridEl.style.gridTemplateColumns = `repeat(7,1fr)`;
   gridEl.innerHTML = '';
- 
+
   calBuildTimeCol(timeEl);
   timeEl.style.height = CAL_TOTAL_PX + 'px';
- 
+
   CAL_DOW.forEach((name, dow) => {
     const hdr = document.createElement('div');
     hdr.className = 'cal-day-header cal-fmt-col-header';
     hdr.innerHTML = `<div>${name}</div>`;
     daysEl.appendChild(hdr);
- 
+
     const col = document.createElement('div');
     col.className = 'cal-day-col cal-fmt-col'; col.dataset.dow = dow;
     calBuildLines(col);
@@ -1196,12 +1118,12 @@ function calRenderDesktopFmt() {
     });
     gridEl.appendChild(col);
   });
- 
+
   gridEl.style.height = CAL_TOTAL_PX + 'px';
   const scrollArea = document.getElementById('calScrollArea');
   setTimeout(() => { if (scrollArea) scrollArea.scrollTop = 7 * CAL_HOUR_PX; }, 50);
 }
- 
+
 /* ── Mobile render (user mode) ── */
 function calRenderMobile() {
   if (formatMode) { calRenderMobileFmt(); return; }
@@ -1209,20 +1131,20 @@ function calRenderMobile() {
   const days = calDisplayDays();
   const day = days[Math.min(calMobileDay, days.length-1)];
   const key = calDateKey(day);
- 
+
   const titleEl = document.getElementById('calDayTitle');
   if (titleEl) titleEl.textContent = calFmtFull(day);
- 
+
   const gridEl = document.getElementById('calMobileGrid');
   if (!gridEl) return;
   gridEl.innerHTML = '';
- 
+
   const body = document.createElement('div');
   body.className = 'cal-mobile-body'; body.style.width = '100%';
- 
+
   const timeCol = document.createElement('div');
   timeCol.className = 'cal-mobile-time-col'; calBuildTimeCol(timeCol);
- 
+
   const dayCol = document.createElement('div');
   dayCol.className = 'cal-mobile-day-col';
   calBuildLines(dayCol);
@@ -1232,27 +1154,27 @@ function calRenderMobile() {
     e.preventDefault();
     calHandleDrop(key, e.clientY, dayCol.getBoundingClientRect().top, false);
   });
- 
+
   body.appendChild(timeCol); body.appendChild(dayCol); gridEl.appendChild(body);
   setTimeout(() => { gridEl.scrollTop = 7 * CAL_HOUR_PX; }, 50);
 }
- 
+
 /* ── Mobile render (format mode — Sun-Sat) ── */
 function calRenderMobileFmt() {
   const dow = calFmtMobileDay; // 0=Sun … 6=Sat
   const titleEl = document.getElementById('calDayTitle');
   if (titleEl) titleEl.textContent = `Template: ${CAL_DOW[dow]}`;
- 
+
   const gridEl = document.getElementById('calMobileGrid');
   if (!gridEl) return;
   gridEl.innerHTML = '';
- 
+
   const body = document.createElement('div');
   body.className = 'cal-mobile-body'; body.style.width = '100%';
- 
+
   const timeCol = document.createElement('div');
   timeCol.className = 'cal-mobile-time-col'; calBuildTimeCol(timeCol);
- 
+
   const dayCol = document.createElement('div');
   dayCol.className = 'cal-mobile-day-col cal-fmt-col';
   calBuildLines(dayCol);
@@ -1262,11 +1184,11 @@ function calRenderMobileFmt() {
     e.preventDefault();
     calHandleDropFmt(dow, e.clientY, dayCol.getBoundingClientRect().top);
   });
- 
+
   body.appendChild(timeCol); body.appendChild(dayCol); gridEl.appendChild(body);
   setTimeout(() => { gridEl.scrollTop = 7 * CAL_HOUR_PX; }, 50);
 }
- 
+
 /* ── Navigation ── */
 function calNavDay(dir) {
   if (formatMode) {
@@ -1277,7 +1199,7 @@ function calNavDay(dir) {
     calRenderMobile();
   }
 }
- 
+
 /* ── Toggle desktop calendar ── */
 function calToggleDesktop() {
   calDesktopOpen = !calDesktopOpen;
@@ -1291,7 +1213,7 @@ function calToggleDesktop() {
   if (weekBtn) weekBtn.style.display = calDesktopOpen ? 'block' : 'none';
   if (calDesktopOpen) calRenderDesktop();
 }
- 
+
 /* ── Week mode toggle (desktop) ── */
 function calToggleWeekMode() {
   calWeekMode = calWeekMode === 'rolling' ? 'fixed' : 'rolling';
@@ -1299,27 +1221,27 @@ function calToggleWeekMode() {
   if (btn) btn.textContent = calWeekMode === 'fixed' ? 'Rolling week' : 'Sun – Sat';
   if (calDesktopOpen) calRenderDesktop();
 }
- 
+
 /* ── User mode modal ── */
 function openCalModal(dateKey, evId, defaultStart) {
   calEditDate = dateKey;
   calEditDow  = null;
   calEditId   = (evId !== undefined && evId !== null) ? evId : null;
- 
+
   _buildCalModal(evId, defaultStart, false,
     (calEvents[dateKey]||[]).find(e=>e.id===evId) || null);
 }
- 
+
 /* ── Format mode modal (template editing) ── */
 function openCalModalFmt(dow, evId, defaultStart) {
   calEditDow  = dow;
   calEditDate = null;
   calEditId   = (evId !== undefined && evId !== null) ? evId : null;
- 
+
   const existingTmpl = evId !== null ? calTemplates.find(t=>t.id===evId) : null;
   _buildCalModal(evId, defaultStart, true, existingTmpl);
 }
- 
+
 function _buildCalModal(evId, defaultStart, isFmt, existingEv) {
   const swatchEl = document.getElementById('calColorSwatches');
   swatchEl.innerHTML = '';
@@ -1334,11 +1256,11 @@ function _buildCalModal(evId, defaultStart, isFmt, existingEv) {
     };
     swatchEl.appendChild(dot);
   });
- 
+
   const deleteBtn = document.getElementById('calEventDeleteBtn');
   const titleEl   = document.getElementById('calEventModalTitle');
   const tmplRow   = document.getElementById('calTemplateRow');
- 
+
   // Day-of-week repeat picker (only in format mode)
   let dowRow = document.getElementById('calDowRow');
   if (!dowRow) {
@@ -1347,7 +1269,7 @@ function _buildCalModal(evId, defaultStart, isFmt, existingEv) {
     dowRow.className = 'cal-dow-row';
     tmplRow.after(dowRow);
   }
- 
+
   if (isFmt) {
     // Format mode: show DOW picker, hide template checkbox
     tmplRow.style.display = 'none';
@@ -1366,7 +1288,7 @@ function _buildCalModal(evId, defaultStart, isFmt, existingEv) {
     tmplRow.style.display = 'none'; // hide template checkbox in user mode
     dowRow.style.display = 'none';
   }
- 
+
   if (existingEv) {
     document.getElementById('calEventTitle').value = existingEv.title || '';
     document.getElementById('calEventStart').value = existingEv.start || '09:00';
@@ -1387,15 +1309,15 @@ function _buildCalModal(evId, defaultStart, isFmt, existingEv) {
     titleEl.textContent = isFmt ? 'Add template' : 'Add event';
     deleteBtn.style.display = 'none';
   }
- 
+
   document.getElementById('calEventModal').classList.add('show');
 }
- 
+
 function closeCalModal() {
   document.getElementById('calEventModal').classList.remove('show');
   calEditId = null; calEditDate = null; calEditDow = null;
 }
- 
+
 function setCalEventType(type) {
   calEditType = type;
   document.getElementById('calTypeEvent').classList.toggle('active', type==='event');
@@ -1403,28 +1325,28 @@ function setCalEventType(type) {
   const endField = document.querySelectorAll('.cal-event-field')[1];
   if (endField) endField.style.display = type==='divider' ? 'none' : '';
 }
- 
+
 /* ── Save event ── */
 function saveCalEvent() {
   const title = document.getElementById('calEventTitle').value.trim();
   const start = document.getElementById('calEventStart').value;
   const end   = calEditType==='divider' ? start : document.getElementById('calEventEnd').value;
- 
+
   if (calEditDow !== null || (formatMode && calEditDate === null)) {
     // ── Format mode: save/update template ──
     const dowBtns = document.querySelectorAll('#calDowRow .cal-dow-btn.active');
     const repeatDays = Array.from(dowBtns).map(b => parseInt(b.dataset.dow));
- 
+
     const tmplId = (calEditId !== null && calEditId !== undefined) ? calEditId : calEventIdCtr++;
     const tmpl = {
       id: tmplId, title, start, end,
       color: calSelectedColor, type: calEditType,
       isTemplate: true, repeatDays,
     };
- 
+
     const tIdx = calTemplates.findIndex(t => t.id === tmplId);
     if (tIdx >= 0) calTemplates[tIdx] = tmpl; else calTemplates.push(tmpl);
- 
+
     // Re-seed all affected days (remove old instances, add updated)
     calDisplayDays().forEach(day => {
       const key = calDateKey(day);
@@ -1437,7 +1359,7 @@ function saveCalEvent() {
         calEvents[key].push({...tmpl, id:calEventIdCtr++, fromTemplate:true, templateId:tmplId});
       }
     });
- 
+
   } else {
     // ── User mode: save/update day event ──
     const key = calEditDate;
@@ -1461,12 +1383,12 @@ function saveCalEvent() {
       });
     }
   }
- 
+
   closeCalModal();
   calRefresh();
   calSave();
 }
- 
+
 /* ── Delete event ── */
 function deleteCalEvent() {
   if (calEditDow !== null) {
@@ -1488,7 +1410,7 @@ function deleteCalEvent() {
   calRefresh();
   calSave();
 }
- 
+
 /* ── Drag & drop (user mode) ── */
 function calAddDragToEvent(el, ev, dateKeyOrDow, isFmtMode) {
   el.setAttribute('draggable', 'true');
@@ -1502,7 +1424,7 @@ function calAddDragToEvent(el, ev, dateKeyOrDow, isFmtMode) {
   });
   el.addEventListener('dragend', () => el.classList.remove('dragging'));
 }
- 
+
 function calHandleDrop(toDateKey, clientY, colTop) {
   if (!calDragEv) return;
   const mins = calPxToMins(clientY - colTop - calDragOffY);
@@ -1510,7 +1432,7 @@ function calHandleDrop(toDateKey, clientY, colTop) {
     : calTimeToMins(calDragEv.end) - calTimeToMins(calDragEv.start);
   const newStart = Math.max(0, Math.min(1425, mins));
   const newEnd   = Math.min(1440, newStart + Math.max(15, dur));
- 
+
   calEvents[calDragDate] = (calEvents[calDragDate]||[]).filter(e=>e.id!==calDragEv.id);
   calEnsureDay(toDateKey);
   calEvents[toDateKey].push({
@@ -1518,12 +1440,12 @@ function calHandleDrop(toDateKey, clientY, colTop) {
     start: calMinsToStr(newStart), end: calMinsToStr(newEnd),
     fromTemplate: toDateKey !== calDragDate ? false : calDragEv.fromTemplate,
   });
- 
+
   calDragEv = null;
   calRefresh();
   calSave();
 }
- 
+
 function calHandleDropFmt(toDow, clientY, colTop) {
   if (!calDragEv) return;
   const mins = calPxToMins(clientY - colTop - calDragOffY);
@@ -1531,7 +1453,7 @@ function calHandleDropFmt(toDow, clientY, colTop) {
     : calTimeToMins(calDragEv.end) - calTimeToMins(calDragEv.start);
   const newStart = Math.max(0, Math.min(1425, mins));
   const newEnd   = Math.min(1440, newStart + Math.max(15, dur));
- 
+
   // Update template
   const tmpl = calTemplates.find(t=>t.id===calDragEv.id);
   if (tmpl) {
@@ -1553,14 +1475,14 @@ function calHandleDropFmt(toDow, clientY, colTop) {
   calRefresh();
   calSave();
 }
- 
+
 /* ── Refresh ── */
 function calRefresh() {
   if (calDesktopOpen) calRenderDesktop();
   const panels = document.querySelectorAll('.swipe-panel');
   if (panels.length >= 4) calRenderMobile();
 }
- 
+
 /* ── Now-line tick ── */
 function calTickNow() {
   if (calDesktopOpen && !formatMode) {
@@ -1576,7 +1498,7 @@ function calTickNow() {
   }
   setTimeout(calTickNow, 60000);
 }
- 
+
 /* ── Persist ── */
 function calSave() {
   try { localStorage.setItem(CAL_LS_KEY, JSON.stringify({calEvents, calTemplates, calEventIdCtr})); } catch(e) {}
@@ -1591,12 +1513,12 @@ function calLoad() {
     if (s.calEventIdCtr) calEventIdCtr = s.calEventIdCtr;
   } catch(e) {}
 }
- 
+
 /* ── Desktop Calendar nav tab in left panel ── */
 function calInitDesktopTab() {
   const lp = document.getElementById('leftPanel');
   if (!lp) return;
- 
+
   const tab = document.createElement('div');
   tab.className = 'cal-nav-tab'; tab.id = 'calDesktopNavTab';
   tab.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -1605,19 +1527,19 @@ function calInitDesktopTab() {
     <path d="M4 1v2M8 1v2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
   </svg> Calendar`;
   tab.onclick = calToggleDesktop;
- 
+
   // Week mode toggle button (shown when calendar is open)
   const weekBtn = document.createElement('button');
   weekBtn.id = 'calWeekModeBtn';
   weekBtn.className = 'cal-week-mode-btn';
   weekBtn.textContent = 'Sun – Sat';
   weekBtn.onclick = (e) => { e.stopPropagation(); calToggleWeekMode(); };
- 
+
   const wakeup = lp.querySelector('.wakeup-row');
   if (wakeup) { wakeup.after(weekBtn); wakeup.after(tab); }
   else { lp.prepend(weekBtn); lp.prepend(tab); }
 }
- 
+
 /* ── goTab / setSwipePanelWidths: already handle 4 tabs ── */
 const _origGoTab = goTab;
 goTab = function(idx, animate) {
@@ -1634,7 +1556,7 @@ goTab = function(idx, animate) {
   });
   if (idx === 3) calRenderMobile();
 };
- 
+
 const _origSetSwipe = setSwipePanelWidths;
 setSwipePanelWidths = function() {
   const w = window.innerWidth;
@@ -1652,12 +1574,12 @@ setSwipePanelWidths = function() {
     if (btn) btn.classList.toggle('active', i === currentTab);
   });
 };
- 
+
 // Modal backdrop click
 document.getElementById('calEventModal').addEventListener('click', e => {
   if (e.target.id === 'calEventModal') closeCalModal();
 });
- 
+
 /* ── Hook format mode enter/exit to refresh calendar ── */
 const _origEnterFmt = enterFormatMode;
 enterFormatMode = function() {
@@ -1666,14 +1588,14 @@ enterFormatMode = function() {
   if (calDesktopOpen) calRenderDesktop();
   if (currentTab === 3) calRenderMobile();
 };
- 
+
 const _origCommitFmt = commitFormatMode;
 commitFormatMode = function() {
   _origCommitFmt();
   if (calDesktopOpen) calRenderDesktop();
   if (currentTab === 3) calRenderMobile();
 };
- 
+
 /* ── Init ── */
 calLoad();
 calPruneDays();
