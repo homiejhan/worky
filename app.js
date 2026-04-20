@@ -91,7 +91,11 @@ if (swipeEl) {
   }, { passive: true });
 }
 
-window.addEventListener('resize', setSwipePanelWidths);
+let _resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(setSwipePanelWidths, 80);
+});
 
 /* ─────────── TIMER UTILS ─────────── */
 function fmt(s) {
@@ -846,9 +850,9 @@ function confirmResetAll() {
   document.getElementById('confirmOverlay').classList.add('show');
 }
 function confirmClearStorage() {
-  if (confirm('Clear all saved data and reload? This cannot be undone.')) {
+  if (confirm('Clear all saved data and reset to defaults? This cannot be undone.')) {
     localStorage.clear();
-    location.reload();
+    showToast('Storage cleared ✓');
   }
 }
 function closeConfirm() {
