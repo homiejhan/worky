@@ -1694,3 +1694,402 @@ calPruneDays();
 calInitDesktopTab();
 calRenderMobile();
 calTickNow();
+
+/* ══════════════════════════════════════════════════════
+   GOOGLE CALENDAR INTEGRATION
+   ══════════════════════════════════════════════════════ */
+
+const GCAL_CLIENT_ID  = '855884688171-80lpepboe9q7io8m8lpd3njllnrgvl0d.apps.googleusercontent.com';
+const GCAL_SCOPES     = 'https://www.googleapis.com/auth/calendar';
+const GCAL_LS_KEY     = 'focus-gcal-token';
+const GCAL_CAL_LS_KEY = 'focus-gcal-calendars';
+
+let gcalToken       = null;   // { access_token, expires_at }
+let gcalCalendars   = [];     // [{ id, summary, color, enabled }]
+let gcalEvents      = {};     // { 'YYYY-MM-DD': [ gcal event objects ] }
+let gcalSyncing     = false;
+
+/* ── Token helpers ── */
+function gcalSaveToken(t) {
+  gcalToken = t;
+  try { localStorage.setItem(GCAL_LS_KEY, JSON.stringify(t)); } catch(e) {}
+}
+function gcalLoadToken() {
+  try {
+    const raw = localStorage.getItem(GCAL_LS_KEY);
+    if (!raw) return;
+    const t = JSON.parse(raw);
+    if (t && t.expires_at && Date.now() < t.expires_at) gcalToken = t;
+    else localStorage.removeItem(GCAL_LS_KEY);
+  } catch(e) {}
+}
+function gcalSaveCals() {
+  try { localStorage.setItem(GCAL_CAL_LS_KEY, JSON.stringify(gcalCalendars)); } catch(e) {}
+}
+function gcalLoadCals() {
+  try {
+    const raw = localStorage.getItem(GCAL_CAL_LS_KEY);
+    if (raw) gcalCalendars = JSON.parse(raw);
+  } catch(e) {}
+}
+function gcalIsConnected() { return !!(gcalToken && Date.now() < gcalToken.expires_at); }
+
+/* ── OAuth via popup ── */
+function gcalConnect() {
+  const params = new URLSearchParams({
+    client_id:     GCAL_CLIENT_ID,
+    redirect_uri:  'https://homiejhan.github.io/worky/',
+    response_type: 'token',
+    scope:         GCAL_SCOPES,
+    prompt:        'select_account',
+  });
+  const w = 500, h = 600;
+  const left = Math.max(0, (screen.width  - w) / 2);
+  const top  = Math.max(0, (screen.height - h) / 2);
+  window.open(
+    `https://accounts.google.com/o/oauth2/v2/auth?${params}`,
+    'gcal-auth',
+    `width=${w},height=${h},left=${left},top=${top},toolbar=no,menubar=no`
+  );
+}
+
+/* ── Handle OAuth redirect (token in hash) ── */
+function gcalHandleRedirect() {
+  const hash = window.location.hash.slice(1);
+  if (!hash.includes('access_token')) return;
+  const params = new URLSearchParams(hash);
+  const token  = params.get('access_token');
+  const expiresIn = parseInt(params.get('expires_in') || '3600');
+  if (!token) return;
+  gcalSaveToken({ access_token: token, expires_at: Date.now() + expiresIn * 1000 });
+  // Clean the URL
+  history.replaceState(null, '', window.location.pathname);
+  gcalAfterConnect();
+}
+
+async function gcalAfterConnect() {
+  gcalUpdateBtn();
+  showToast('Google Calendar connected ✓');
+  await gcalFetchCalendars();
+  gcalOpenModal();
+  await gcalSyncAll();
+}
+
+/* ── Fetch calendar list ── */
+async function gcalFetchCalendars() {
+  if (!gcalIsConnected()) return;
+  try {
+    const res  = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList', {
+      headers: { Authorization: `Bearer ${gcalToken.access_token}` }
+    });
+    const data = await res.json();
+    if (!data.items) return;
+    // Merge with saved enabled states
+    const saved = {};
+    gcalCalendars.forEach(c => { saved[c.id] = c.enabled; });
+    gcalCalendars = data.items.map(c => ({
+      id:      c.id,
+      summary: c.summary,
+      color:   c.backgroundColor || '#378ADD',
+      enabled: saved[c.id] !== undefined ? saved[c.id] : true,
+    }));
+    gcalSaveCals();
+    gcalRenderCalList();
+  } catch(e) { showToast('Could not fetch calendars.'); }
+}
+
+/* ── Fetch events for the current week ── */
+async function gcalSyncAll() {
+  if (!gcalIsConnected() || gcalSyncing) return;
+  gcalSyncing = true;
+  gcalUpdateSyncBtn();
+
+  const days     = calDisplayDays();
+  const timeMin  = new Date(days[0]);  timeMin.setHours(0,0,0,0);
+  const timeMax  = new Date(days[days.length-1]); timeMax.setHours(23,59,59,999);
+  const enabledCals = gcalCalendars.filter(c => c.enabled);
+
+  gcalEvents = {};
+
+  try {
+    await Promise.all(enabledCals.map(async cal => {
+      const params = new URLSearchParams({
+        timeMin:      timeMin.toISOString(),
+        timeMax:      timeMax.toISOString(),
+        singleEvents: 'true',
+        orderBy:      'startTime',
+        maxResults:   '250',
+      });
+      const res  = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cal.id)}/events?${params}`,
+        { headers: { Authorization: `Bearer ${gcalToken.access_token}` } }
+      );
+      const data = await res.json();
+      if (!data.items) return;
+      data.items.forEach(ev => {
+        if (!ev.start) return;
+        // All-day events have date, timed events have dateTime
+        const startStr = ev.start.dateTime || ev.start.date;
+        const endStr   = ev.end?.dateTime  || ev.end?.date;
+        const dateKey  = startStr.slice(0, 10);
+        if (!gcalEvents[dateKey]) gcalEvents[dateKey] = [];
+        gcalEvents[dateKey].push({
+          gcalId:     ev.id,
+          calId:      cal.id,
+          calName:    cal.summary,
+          calColor:   cal.color,
+          title:      ev.summary || '(no title)',
+          start:      ev.start.dateTime ? startStr.slice(11,16) : '00:00',
+          end:        ev.end?.dateTime  ? endStr.slice(11,16)   : '23:59',
+          allDay:     !ev.start.dateTime,
+          htmlLink:   ev.htmlLink,
+          color:      cal.color,
+        });
+      });
+    }));
+  } catch(e) { showToast('Sync error — check connection.'); }
+
+  gcalSyncing = false;
+  gcalUpdateSyncBtn();
+  calRefresh();
+}
+
+/* ── Push a local event to GCal ── */
+async function gcalPushEvent(ev, dateKey, calId) {
+  if (!gcalIsConnected()) return null;
+  const date    = dateKey; // 'YYYY-MM-DD'
+  const body    = {
+    summary: ev.title,
+    start:   { dateTime: `${date}T${ev.start}:00`, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+    end:     { dateTime: `${date}T${ev.end}:00`,   timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+  };
+  try {
+    const res  = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`,
+      { method: 'POST', headers: { Authorization: `Bearer ${gcalToken.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+    );
+    const data = await res.json();
+    return data.id || null;
+  } catch(e) { showToast('Could not push event to GCal.'); return null; }
+}
+
+/* ── Update an existing GCal event ── */
+async function gcalUpdateEvent(gcalId, calId, ev, dateKey) {
+  if (!gcalIsConnected() || !gcalId) return;
+  const date = dateKey;
+  const body = {
+    summary: ev.title,
+    start:   { dateTime: `${date}T${ev.start}:00`, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+    end:     { dateTime: `${date}T${ev.end}:00`,   timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+  };
+  try {
+    await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events/${gcalId}`,
+      { method: 'PUT', headers: { Authorization: `Bearer ${gcalToken.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+    );
+  } catch(e) { showToast('Could not update GCal event.'); }
+}
+
+/* ── Delete a GCal event ── */
+async function gcalDeleteEvent(gcalId, calId) {
+  if (!gcalIsConnected() || !gcalId) return;
+  try {
+    await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events/${gcalId}`,
+      { method: 'DELETE', headers: { Authorization: `Bearer ${gcalToken.access_token}` } }
+    );
+  } catch(e) {}
+}
+
+/* ── Disconnect ── */
+function gcalDisconnect() {
+  gcalToken     = null;
+  gcalEvents    = {};
+  localStorage.removeItem(GCAL_LS_KEY);
+  gcalUpdateBtn();
+  gcalCloseModal();
+  calRefresh();
+  showToast('Disconnected from Google Calendar');
+}
+
+/* ── Render GCal events on top of local calendar ── */
+function gcalMakeEventEl(ev) {
+  const el = document.createElement('div');
+  el.className = 'cal-event gcal-event';
+  const startM = calTimeToMins(ev.start);
+  const endM   = calTimeToMins(ev.end);
+  const durM   = Math.max(15, endM - startM);
+  el.style.top        = calMinsToPx(startM) + 'px';
+  el.style.height     = calMinsToPx(durM) + 'px';
+  el.style.background = ev.color + '22';
+  el.style.borderLeft = `3px solid ${ev.color}`;
+  el.style.color      = ev.color;
+  el.style.left       = '50%';   // right half of column to avoid overlap with local
+  el.style.right      = '2px';
+  el.innerHTML = `
+    <div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ev.title}</div>
+    <div class="cal-event-time gcal-badge" style="color:${ev.color}">${ev.calName}</div>`;
+  el.addEventListener('click', e => { e.stopPropagation(); gcalOpenEventDetail(ev); });
+  return el;
+}
+
+function gcalInjectEvents(col, dateKey) {
+  col.querySelectorAll('.gcal-event').forEach(e => e.remove());
+  if (!gcalIsConnected()) return;
+  (gcalEvents[dateKey] || []).forEach(ev => {
+    if (!ev.allDay) col.appendChild(gcalMakeEventEl(ev));
+  });
+}
+
+/* ── Hook into calRenderDayCol ── */
+const _origCalRenderDayCol = calRenderDayCol;
+calRenderDayCol = function(col, dateKey) {
+  _origCalRenderDayCol(col, dateKey);
+  gcalInjectEvents(col, dateKey);
+};
+
+/* ── GCal event detail popup ── */
+function gcalOpenEventDetail(ev) {
+  document.getElementById('gcalDetailTitle').textContent  = ev.title;
+  document.getElementById('gcalDetailCal').textContent    = ev.calName;
+  document.getElementById('gcalDetailCal').style.color    = ev.color;
+  document.getElementById('gcalDetailTime').textContent   = ev.allDay ? 'All day' : `${calFmtTime(ev.start)} – ${calFmtTime(ev.end)}`;
+  document.getElementById('gcalDetailLink').href          = ev.htmlLink || '#';
+  document.getElementById('gcalDetailModal').classList.add('show');
+  // Store for potential delete
+  document.getElementById('gcalDetailModal').dataset.gcalId = ev.gcalId;
+  document.getElementById('gcalDetailModal').dataset.calId  = ev.calId;
+}
+function gcalCloseDetail() {
+  document.getElementById('gcalDetailModal').classList.remove('show');
+}
+async function gcalDeleteFromDetail() {
+  const modal  = document.getElementById('gcalDetailModal');
+  const gcalId = modal.dataset.gcalId;
+  const calId  = modal.dataset.calId;
+  if (!gcalId || !calId) return;
+  await gcalDeleteEvent(gcalId, calId);
+  gcalCloseDetail();
+  await gcalSyncAll();
+  showToast('Event deleted from Google Calendar');
+}
+
+/* ── Calendar list modal ── */
+function gcalOpenModal() {
+  gcalRenderCalList();
+  document.getElementById('gcalModal').classList.add('show');
+}
+function gcalCloseModal() {
+  document.getElementById('gcalModal').classList.remove('show');
+}
+function gcalRenderCalList() {
+  const list = document.getElementById('gcalCalList');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!gcalCalendars.length) {
+    list.innerHTML = '<div style="color:var(--text-muted);font-size:12px">No calendars found.</div>';
+    return;
+  }
+  gcalCalendars.forEach((cal, idx) => {
+    const row = document.createElement('div');
+    row.className = 'gcal-cal-row';
+    row.innerHTML = `
+      <div class="gcal-cal-dot" style="background:${cal.color}"></div>
+      <span class="gcal-cal-name">${cal.summary}</span>
+      <label class="gcal-toggle">
+        <input type="checkbox" ${cal.enabled ? 'checked' : ''} onchange="gcalToggleCal(${idx},this.checked)">
+        <span class="gcal-toggle-track"></span>
+      </label>`;
+    list.appendChild(row);
+  });
+}
+function gcalToggleCal(idx, enabled) {
+  gcalCalendars[idx].enabled = enabled;
+  gcalSaveCals();
+  gcalSyncAll();
+}
+
+/* ── Connect button in left panel ── */
+function gcalUpdateBtn() {
+  const btn = document.getElementById('gcalConnectBtn');
+  if (!btn) return;
+  if (gcalIsConnected()) {
+    btn.textContent = '⚡ Google Cal';
+    btn.classList.add('connected');
+    btn.onclick = gcalOpenModal;
+  } else {
+    btn.textContent = '+ Google Cal';
+    btn.classList.remove('connected');
+    btn.onclick = gcalConnect;
+  }
+}
+
+function gcalUpdateSyncBtn() {
+  const btn = document.getElementById('gcalSyncBtn');
+  if (!btn) return;
+  btn.textContent  = gcalSyncing ? 'Syncing…' : 'Sync now';
+  btn.disabled     = gcalSyncing;
+}
+
+/* ── Patch saveCalEvent to optionally push to GCal ── */
+const _origSaveCalEvent = saveCalEvent;
+saveCalEvent = async function() {
+  // Capture before state
+  const wasNew  = (calEditId === null || calEditId === undefined);
+  const dateKey = calEditDate;
+  const oldEvId = calEditId;
+
+  _origSaveCalEvent();   // runs synchronously, updates calEvents
+
+  if (!gcalIsConnected() || !dateKey || formatMode) return;
+
+  // Find the event we just saved
+  const ev = wasNew
+    ? calEvents[dateKey]?.[calEvents[dateKey].length - 1]
+    : (calEvents[dateKey] || []).find(e => e.id === oldEvId);
+
+  if (!ev || ev.type === 'divider') return;
+
+  const calId = gcalCalendars.find(c => c.enabled)?.id;
+  if (!calId) return;
+
+  if (wasNew) {
+    const gcalId = await gcalPushEvent(ev, dateKey, calId);
+    if (gcalId) ev.gcalId = gcalId; ev.gcalCalId = calId;
+  } else if (ev.gcalId) {
+    await gcalUpdateEvent(ev.gcalId, ev.gcalCalId || calId, ev, dateKey);
+  }
+  await gcalSyncAll();
+};
+
+/* ── Patch deleteCalEvent to also delete from GCal ── */
+const _origDeleteCalEvent = deleteCalEvent;
+deleteCalEvent = async function() {
+  const ev = calEditDate ? (calEvents[calEditDate] || []).find(e => e.id === calEditId) : null;
+  _origDeleteCalEvent();
+  if (ev?.gcalId && ev?.gcalCalId && gcalIsConnected()) {
+    await gcalDeleteEvent(ev.gcalId, ev.gcalCalId);
+    await gcalSyncAll();
+  }
+};
+
+/* ── Auto-sync every 5 minutes ── */
+setInterval(() => { if (gcalIsConnected()) gcalSyncAll(); }, 5 * 60 * 1000);
+
+/* ── Init ── */
+gcalLoadToken();
+gcalLoadCals();
+gcalHandleRedirect();   // handles OAuth return
+gcalUpdateBtn();
+if (gcalIsConnected()) gcalSyncAll();
+
+// Inject connect button into left panel after calendar tab
+(function() {
+  const lp = document.getElementById('leftPanel');
+  if (!lp) return;
+  const btn = document.createElement('button');
+  btn.id = 'gcalConnectBtn';
+  btn.className = 'gcal-connect-btn';
+  lp.appendChild(btn);
+  gcalUpdateBtn();
+})();
