@@ -952,7 +952,7 @@ tickAll();
 
 const CAL_HOUR_PX   = 64;
 const CAL_DAY_COUNT = 7;
-const CAL_COLORS    = ['#378ADD','#EC3636','#8B5CF6','#F97316','#22C55E','#EAB308','#5DCAA5','#D4537E','#A3A3A3'];
+const CAL_COLORS    = ['#378ADD','#EC3636','#8B5CF6','#F97316','#22C55E','#EAB308','#5DCAA5','#D4537E','#767676'];
 const CAL_LS_KEY    = 'focus-cal-state';
 const CAL_DOW       = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const CAL_TOTAL_PX  = 24 * CAL_HOUR_PX;
