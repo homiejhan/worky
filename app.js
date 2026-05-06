@@ -2,7 +2,7 @@
 // Mutable defaults — updated when Format mode is committed
 let TIMER_DEFAULTS = [
   { label: 'Productivity Timer',   seconds: 6*3600, color: '#378ADD' },
-  { label: 'Personal Development', seconds: 4*3600, color: '#EC3636' },
+  { label: 'Personal Development', seconds: 3*3600, color: '#EC3636' },
   { label: 'Time with God',        seconds: 2*3600, color: '#8B5CF6' },
   { label: 'Skill Development',    seconds: 1*3600, color: '#F97316' },
 ];
