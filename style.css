@@ -972,11 +972,10 @@
   flex-shrink: 0;
   color: var(--text-muted);
   cursor: grab;
-  padding: 2px 0;
   touch-action: none;
 }
 .list-drag-handle:active { cursor: grabbing; }
-.todo-card:hover .list-drag-handle,
+.todo-card[draggable="true"]:hover .list-drag-handle,
 .todo-card[draggable="true"] .list-drag-handle { display: flex; }
 .todo-card.list-dragging { opacity: 0.35; }
 .todo-card.list-drag-over { outline: 2px solid var(--accent-green); outline-offset: -2px; border-radius: var(--radius-md); }
