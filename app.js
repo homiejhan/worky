@@ -318,20 +318,18 @@ function toggleTask(listId, taskId) {
   saveToLocal();
 }
 
-const LIST_DRAG_HANDLE_SVG = `<svg width="10" height="14" viewBox="0 0 10 14" fill="none"><circle cx="3" cy="3" r="1.2" fill="currentColor"/><circle cx="7" cy="3" r="1.2" fill="currentColor"/><circle cx="3" cy="7" r="1.2" fill="currentColor"/><circle cx="7" cy="7" r="1.2" fill="currentColor"/><circle cx="3" cy="11" r="1.2" fill="currentColor"/><circle cx="7" cy="11" r="1.2" fill="currentColor"/></svg>`;
+const LIST_DRAG_HANDLE_HTML = '<div class="list-drag-handle" title="Drag to reorder"><svg width="10" height="14" viewBox="0 0 10 14" fill="none"><circle cx="3" cy="3" r="1.2" fill="currentColor"/><circle cx="7" cy="3" r="1.2" fill="currentColor"/><circle cx="3" cy="7" r="1.2" fill="currentColor"/><circle cx="7" cy="7" r="1.2" fill="currentColor"/><circle cx="3" cy="11" r="1.2" fill="currentColor"/><circle cx="7" cy="11" r="1.2" fill="currentColor"/></svg></div>';
 
 function buildCard(list, pfx) {
-  // List is draggable if: it's a custom list (always), or it's a daily list in format mode
   const listDraggable = !list.isDefault || formatMode;
   const card = document.createElement('div');
   card.className = 'todo-card';
   card.dataset.listId = list.id;
-  card.dataset.isDefault = list.isDefault ? '1' : '0';
   if (listDraggable) card.setAttribute('draggable', 'true');
   card.innerHTML = `
     <div class="todo-accent-strip todo-strip-${list.id}" style="background:${list.color}"></div>
     <div class="todo-card-header">
-      ${listDraggable ? `<div class="list-drag-handle" title="Drag to reorder">${LIST_DRAG_HANDLE_SVG}</div>` : ''}
+      ${listDraggable ? LIST_DRAG_HANDLE_HTML : ''}
       <div class="color-swatch todo-swatch-${list.id}" style="background:${list.color}">
         <input type="color" value="${list.color}"
           oninput="changeTodoColor(${list.id},this.value); saveToLocal();">
@@ -387,38 +385,44 @@ function renderTodos() {
   initDragDrop();
 }
 
-/* ─────────── DRAG & DROP (My Lists only) ─────────── */
+/* ─────────── DRAG & DROP ─────────── */
 let dragTaskId = null;
 let dragFromListId = null;
-let dragListId = null;   // for list-level reordering
+let dragListId = null;
+let _listDragAllowed = false;
 
 function initDragDrop() {
-  initListDragDrop();   // list reordering
-  initTaskDragDrop();   // task reordering (existing)
+  initListDragDrop();
+  initTaskDragDrop();
 }
 
-/* ── List-level drag & drop ── */
 function initListDragDrop() {
-  const containers = ['defaultContainer-d','defaultContainer-m','todoContainer-d','todoContainer-m'];
-
-  containers.forEach(containerId => {
+  const specs = [
+    { id: 'defaultContainer-d', isDefault: true },
+    { id: 'defaultContainer-m', isDefault: true },
+    { id: 'todoContainer-d',    isDefault: false },
+    { id: 'todoContainer-m',    isDefault: false },
+  ];
+  specs.forEach(({ id: containerId, isDefault }) => {
     const container = document.getElementById(containerId);
     if (!container) return;
-    const isDefault = containerId.startsWith('default');
-
     container.querySelectorAll('.todo-card[draggable="true"]').forEach(card => {
+      const handle = card.querySelector('.list-drag-handle');
+      if (handle) {
+        handle.addEventListener('mousedown', () => { _listDragAllowed = true; });
+      }
       card.addEventListener('dragstart', e => {
-        // Only start drag from the handle
-        if (!e.target.closest('.list-drag-handle')) { e.preventDefault(); return; }
+        if (!_listDragAllowed) { e.preventDefault(); return; }
         dragListId = parseInt(card.dataset.listId);
         card.classList.add('list-dragging');
         e.dataTransfer.effectAllowed = 'move';
         e.stopPropagation();
       });
       card.addEventListener('dragend', () => {
+        _listDragAllowed = false;
+        dragListId = null;
         card.classList.remove('list-dragging');
         document.querySelectorAll('.list-drag-over').forEach(el => el.classList.remove('list-drag-over'));
-        dragListId = null;
       });
       card.addEventListener('dragover', e => {
         if (dragListId === null) return;
@@ -434,88 +438,68 @@ function initListDragDrop() {
         if (dragListId !== toListId) moveList(dragListId, toListId, isDefault);
         dragListId = null;
       });
-    });
-
-    // Touch drag for list cards
-    container.querySelectorAll('.todo-card[draggable="true"] .list-drag-handle').forEach(handle => {
-      let clone = null, startY = 0, offY = 0, srcCard = null;
-
-      handle.addEventListener('touchstart', e => {
-        srcCard = handle.closest('.todo-card');
-        if (!srcCard) return;
-        dragListId = parseInt(srcCard.dataset.listId);
-        startY = e.touches[0].clientY;
-        offY = startY - srcCard.getBoundingClientRect().top;
-        clone = srcCard.cloneNode(true);
-        clone.style.cssText = `position:fixed;left:0;right:0;z-index:600;opacity:0.85;pointer-events:none;background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:var(--radius-md);`;
-        clone.style.top = (startY - offY) + 'px';
-        document.body.appendChild(clone);
-        srcCard.classList.add('list-dragging');
-        e.preventDefault();
-      }, { passive: false });
-
-      handle.addEventListener('touchmove', e => {
-        if (!clone) return;
-        const y = e.touches[0].clientY;
-        clone.style.top = (y - offY) + 'px';
-        clone.style.display = 'none';
-        const el = document.elementFromPoint(e.touches[0].clientX, y);
-        clone.style.display = '';
-        document.querySelectorAll('.list-drag-over').forEach(c => c.classList.remove('list-drag-over'));
-        const hoverCard = el?.closest('.todo-card');
-        if (hoverCard && hoverCard !== srcCard) hoverCard.classList.add('list-drag-over');
-        e.preventDefault();
-      }, { passive: false });
-
-      handle.addEventListener('touchend', e => {
-        if (!clone) return;
-        const y = e.changedTouches[0].clientY;
-        clone.style.display = 'none';
-        const el = document.elementFromPoint(e.changedTouches[0].clientX, y);
-        clone.style.display = '';
-        const hoverCard = el?.closest('.todo-card');
-        const isDefault = containerId.startsWith('default');
-        if (hoverCard && hoverCard !== srcCard) {
-          const toListId = parseInt(hoverCard.dataset.listId);
-          if (dragListId !== toListId) moveList(dragListId, toListId, isDefault);
-        }
-        clone.remove(); clone = null;
-        srcCard?.classList.remove('list-dragging');
-        document.querySelectorAll('.list-drag-over').forEach(c => c.classList.remove('list-drag-over'));
-        dragListId = null;
-      });
+      // Touch drag
+      if (handle) {
+        let clone = null, offY = 0, srcCard = null;
+        handle.addEventListener('touchstart', e => {
+          srcCard = card;
+          dragListId = parseInt(card.dataset.listId);
+          offY = e.touches[0].clientY - card.getBoundingClientRect().top;
+          clone = card.cloneNode(true);
+          clone.style.cssText = 'position:fixed;left:0;right:0;z-index:600;opacity:0.85;pointer-events:none;background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:var(--radius-md);';
+          clone.style.top = (e.touches[0].clientY - offY) + 'px';
+          document.body.appendChild(clone);
+          card.classList.add('list-dragging');
+          e.preventDefault();
+        }, { passive: false });
+        handle.addEventListener('touchmove', e => {
+          if (!clone) return;
+          clone.style.top = (e.touches[0].clientY - offY) + 'px';
+          clone.style.display = 'none';
+          const el = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
+          clone.style.display = '';
+          document.querySelectorAll('.list-drag-over').forEach(c => c.classList.remove('list-drag-over'));
+          const hc = el && el.closest('.todo-card');
+          if (hc && hc !== srcCard) hc.classList.add('list-drag-over');
+          e.preventDefault();
+        }, { passive: false });
+        handle.addEventListener('touchend', e => {
+          if (!clone) return;
+          clone.style.display = 'none';
+          const el = document.elementFromPoint(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+          clone.style.display = '';
+          const hc = el && el.closest('.todo-card');
+          if (hc && hc !== srcCard) {
+            const toListId = parseInt(hc.dataset.listId);
+            if (dragListId !== toListId) moveList(dragListId, toListId, isDefault);
+          }
+          clone.remove(); clone = null;
+          srcCard.classList.remove('list-dragging');
+          document.querySelectorAll('.list-drag-over').forEach(c => c.classList.remove('list-drag-over'));
+          dragListId = null;
+        });
+      }
     });
   });
 }
 
 function moveList(fromListId, toListId, isDefault) {
-  const arr = isDefault
-    ? todoLists.filter(l => l.isDefault)
-    : todoLists.filter(l => !l.isDefault);
-
-  const fromIdx = arr.findIndex(l => l.id === fromListId);
-  const toIdx   = arr.findIndex(l => l.id === toListId);
+  const group = todoLists.filter(l => l.isDefault === isDefault);
+  const fromIdx = group.findIndex(l => l.id === fromListId);
+  const toIdx   = group.findIndex(l => l.id === toListId);
   if (fromIdx === -1 || toIdx === -1) return;
-
-  // Splice within the sub-array then reconstruct todoLists preserving relative order of other group
-  const [moved] = arr.splice(fromIdx, 1);
-  arr.splice(toIdx, 0, moved);
-
-  // Rebuild todoLists: daily lists first (in new order), then custom lists (in new order)
-  const dailyLists  = isDefault ? arr : todoLists.filter(l => l.isDefault);
-  const customLists = isDefault ? todoLists.filter(l => !l.isDefault) : arr;
-  todoLists = [...dailyLists, ...customLists];
-
+  const [moved] = group.splice(fromIdx, 1);
+  group.splice(toIdx, 0, moved);
+  const other = todoLists.filter(l => l.isDefault !== isDefault);
+  todoLists = isDefault ? [...group, ...other] : [...other, ...group];
   renderTodos();
   saveToLocal();
 }
 
-/* ── Task-level drag & drop (unchanged) ── */
 function initTaskDragDrop() {
-  // Desktop: HTML5 drag events
   document.querySelectorAll('.task-row[draggable="true"]').forEach(row => {
     row.addEventListener('dragstart', e => {
-      if (dragListId !== null) { e.preventDefault(); return; } // list drag takes priority
+      if (dragListId !== null) { e.preventDefault(); return; }
       dragTaskId = parseInt(row.dataset.taskId);
       dragFromListId = parseInt(row.dataset.listId);
       row.classList.add('dragging');
@@ -702,6 +686,7 @@ function enterFormatMode() {
   document.body.classList.add('format-mode');
   const btn = document.getElementById('fmtBtn');
   if (btn) { btn.textContent = '✓ Done'; btn.classList.add('active'); }
+  renderTodos();
 }
 
 function commitFormatMode() {
@@ -731,6 +716,7 @@ function commitFormatMode() {
 
   // Re-render so displays show live remaining time again
   renderTimers();
+  renderTodos();
 
   saveToLocal();
   showToast('Format saved ✓');
@@ -1081,7 +1067,7 @@ tickAll();
 
 const CAL_HOUR_PX   = 64;
 const CAL_DAY_COUNT = 7;
-const CAL_COLORS    = ['#378ADD','#EC3636','#8B5CF6','#F97316','#22C55E','#EAB308','#5DCAA5','#D4537E','#505050'];
+const CAL_COLORS    = ['#378ADD','#EC3636','#8B5CF6','#F97316','#22C55E','#EAB308','#5DCAA5','#D4537E'];
 const CAL_LS_KEY    = 'focus-cal-state';
 const CAL_DOW       = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const CAL_TOTAL_PX  = 24 * CAL_HOUR_PX;
