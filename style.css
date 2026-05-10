@@ -963,77 +963,20 @@
 .cal-fmt-col { background: rgba(93,202,165,0.02); }
 .cal-fmt-col-header { color: var(--accent-green) !important; opacity: 0.8; }
 
-/* ══ GOOGLE CALENDAR INTEGRATION ══ */
-
-/* Connect button in left panel */
-.gcal-connect-btn {
-  display: flex; align-items: center; gap: 8px;
-  width: 100%; padding: 8px 10px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  cursor: pointer; user-select: none;
-  font-size: 12px; font-weight: 500; font-family: var(--font-sans);
-  color: var(--text-secondary);
-  transition: border-color 0.2s, background 0.2s, color 0.2s;
-  margin-top: 4px;
-  touch-action: manipulation;
-}
-.gcal-connect-btn:hover { border-color: var(--border-mid); background: var(--bg-hover); color: var(--text-primary); }
-.gcal-connect-btn.connected { border-color: rgba(66,133,244,0.4); color: #4285f4; background: rgba(66,133,244,0.07); }
-.gcal-connect-btn.connected:hover { background: rgba(66,133,244,0.12); }
-
-/* GCal event overlay — sits in right half of column */
-.gcal-event {
-  left: 50% !important;
-  right: 2px !important;
-  opacity: 0.92;
-  cursor: pointer;
-}
-.gcal-event:hover { opacity: 0.75; }
-
-/* Calendar name badge on event */
-.gcal-badge {
-  font-size: 9px; font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  opacity: 0.85;
-  margin-top: 1px;
-}
-
-/* Calendar list in modal */
-.gcal-cal-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--border);
-}
-.gcal-cal-row:last-child { border-bottom: none; }
-.gcal-cal-dot {
-  width: 12px; height: 12px; border-radius: 50%;
+/* ── List-level drag & drop ── */
+.list-drag-handle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
   flex-shrink: 0;
+  color: var(--text-muted);
+  cursor: grab;
+  padding: 2px 0;
+  touch-action: none;
 }
-.gcal-cal-name {
-  flex: 1; font-size: 13px; color: var(--text-primary);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-
-/* Toggle switch */
-.gcal-toggle { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
-.gcal-toggle input { opacity: 0; width: 0; height: 0; }
-.gcal-toggle-track {
-  position: absolute; inset: 0;
-  background: var(--bg-hover);
-  border: 1px solid var(--border-mid);
-  border-radius: 10px;
-  transition: background 0.2s, border-color 0.2s;
-  cursor: pointer;
-}
-.gcal-toggle-track::after {
-  content: '';
-  position: absolute; top: 2px; left: 2px;
-  width: 14px; height: 14px; border-radius: 50%;
-  background: var(--text-muted);
-  transition: transform 0.2s, background 0.2s;
-}
-.gcal-toggle input:checked + .gcal-toggle-track { background: rgba(66,133,244,0.2); border-color: rgba(66,133,244,0.5); }
-.gcal-toggle input:checked + .gcal-toggle-track::after { transform: translateX(16px); background: #4285f4; }
+.list-drag-handle:active { cursor: grabbing; }
+.todo-card:hover .list-drag-handle,
+.todo-card[draggable="true"] .list-drag-handle { display: flex; }
+.todo-card.list-dragging { opacity: 0.35; }
+.todo-card.list-drag-over { outline: 2px solid var(--accent-green); outline-offset: -2px; border-radius: var(--radius-md); }
