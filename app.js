@@ -323,9 +323,8 @@ const LIST_DRAG_HANDLE_HTML = '<div class="list-drag-handle" title="Drag to reor
 function buildCard(list, pfx) {
   const listDraggable = !list.isDefault || formatMode;
   const card = document.createElement('div');
-  card.className = 'todo-card';
+  card.className = 'todo-card' + (listDraggable ? ' list-reorderable' : '');
   card.dataset.listId = list.id;
-  if (listDraggable) card.setAttribute('draggable', 'true');
   card.innerHTML = `
     <div class="todo-accent-strip todo-strip-${list.id}" style="background:${list.color}"></div>
     <div class="todo-card-header">
@@ -406,79 +405,95 @@ function initListDragDrop() {
   specs.forEach(({ id: containerId, isDefault }) => {
     const container = document.getElementById(containerId);
     if (!container) return;
-    container.querySelectorAll('.todo-card[draggable="true"]').forEach(card => {
+    container.querySelectorAll('.todo-card.list-reorderable').forEach(card => {
       const handle = card.querySelector('.list-drag-handle');
-      if (handle) {
-        handle.addEventListener('mousedown', () => { _listDragAllowed = true; });
-      }
-      card.addEventListener('dragstart', e => {
-        if (!_listDragAllowed) { e.preventDefault(); return; }
-        dragListId = parseInt(card.dataset.listId);
-        card.classList.add('list-dragging');
-        e.dataTransfer.effectAllowed = 'move';
-        e.stopPropagation();
-      });
-      card.addEventListener('dragend', () => {
-        _listDragAllowed = false;
-        dragListId = null;
-        card.classList.remove('list-dragging');
-        document.querySelectorAll('.list-drag-over').forEach(el => el.classList.remove('list-drag-over'));
-      });
-      card.addEventListener('dragover', e => {
-        if (dragListId === null) return;
-        e.preventDefault(); e.stopPropagation();
-        document.querySelectorAll('.list-drag-over').forEach(el => el.classList.remove('list-drag-over'));
-        card.classList.add('list-drag-over');
-      });
-      card.addEventListener('drop', e => {
-        if (dragListId === null) return;
-        e.preventDefault(); e.stopPropagation();
-        card.classList.remove('list-drag-over');
-        const toListId = parseInt(card.dataset.listId);
-        if (dragListId !== toListId) moveList(dragListId, toListId, isDefault);
-        dragListId = null;
-      });
-      // Touch drag
-      if (handle) {
-        let clone = null, offY = 0, srcCard = null;
-        handle.addEventListener('touchstart', e => {
-          srcCard = card;
-          dragListId = parseInt(card.dataset.listId);
-          offY = e.touches[0].clientY - card.getBoundingClientRect().top;
-          clone = card.cloneNode(true);
-          clone.style.cssText = 'position:fixed;left:0;right:0;z-index:600;opacity:0.85;pointer-events:none;background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:var(--radius-md);';
-          clone.style.top = (e.touches[0].clientY - offY) + 'px';
-          document.body.appendChild(clone);
-          card.classList.add('list-dragging');
-          e.preventDefault();
-        }, { passive: false });
-        handle.addEventListener('touchmove', e => {
-          if (!clone) return;
-          clone.style.top = (e.touches[0].clientY - offY) + 'px';
-          clone.style.display = 'none';
-          const el = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
-          clone.style.display = '';
-          document.querySelectorAll('.list-drag-over').forEach(c => c.classList.remove('list-drag-over'));
-          const hc = el && el.closest('.todo-card');
-          if (hc && hc !== srcCard) hc.classList.add('list-drag-over');
-          e.preventDefault();
-        }, { passive: false });
-        handle.addEventListener('touchend', e => {
-          if (!clone) return;
-          clone.style.display = 'none';
-          const el = document.elementFromPoint(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
-          clone.style.display = '';
-          const hc = el && el.closest('.todo-card');
-          if (hc && hc !== srcCard) {
-            const toListId = parseInt(hc.dataset.listId);
-            if (dragListId !== toListId) moveList(dragListId, toListId, isDefault);
+      if (!handle) return;
+
+      // ── Mouse drag (desktop) ──
+      handle.addEventListener('mousedown', e => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        const startY = e.clientY;
+        let clone = null, moved = false;
+        const srcListId = parseInt(card.dataset.listId);
+        const offY = e.clientY - card.getBoundingClientRect().top;
+
+        const onMove = e => {
+          if (!moved && Math.abs(e.clientY - startY) < 4) return;
+          if (!moved) {
+            moved = true;
+            clone = card.cloneNode(true);
+            clone.style.cssText = 'position:fixed;left:' + card.getBoundingClientRect().left + 'px;width:' + card.offsetWidth + 'px;z-index:600;opacity:0.85;pointer-events:none;background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:var(--radius-md);box-shadow:0 4px 20px rgba(0,0,0,0.4);';
+            document.body.appendChild(clone);
+            card.classList.add('list-dragging');
+            dragListId = srcListId;
           }
-          clone.remove(); clone = null;
-          srcCard.classList.remove('list-dragging');
+          clone.style.top = (e.clientY - offY) + 'px';
           document.querySelectorAll('.list-drag-over').forEach(c => c.classList.remove('list-drag-over'));
+          const el = document.elementFromPoint(e.clientX, e.clientY);
+          const hc = el && el.closest('.todo-card');
+          if (hc && hc !== card) hc.classList.add('list-drag-over');
+        };
+
+        const onUp = e => {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          if (!moved) return;
+          clone && clone.remove();
+          card.classList.remove('list-dragging');
+          document.querySelectorAll('.list-drag-over').forEach(c => c.classList.remove('list-drag-over'));
+          const el = document.elementFromPoint(e.clientX, e.clientY);
+          const hc = el && el.closest('.todo-card');
+          if (hc && hc !== card) {
+            const toListId = parseInt(hc.dataset.listId);
+            if (srcListId !== toListId) moveList(srcListId, toListId, isDefault);
+          }
           dragListId = null;
-        });
-      }
+        };
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+
+      // ── Touch drag (mobile) ──
+      let clone = null, offY = 0, srcCard = null;
+      handle.addEventListener('touchstart', e => {
+        srcCard = card;
+        dragListId = parseInt(card.dataset.listId);
+        offY = e.touches[0].clientY - card.getBoundingClientRect().top;
+        clone = card.cloneNode(true);
+        clone.style.cssText = 'position:fixed;left:0;right:0;z-index:600;opacity:0.85;pointer-events:none;background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:var(--radius-md);';
+        clone.style.top = (e.touches[0].clientY - offY) + 'px';
+        document.body.appendChild(clone);
+        card.classList.add('list-dragging');
+        e.preventDefault();
+      }, { passive: false });
+      handle.addEventListener('touchmove', e => {
+        if (!clone) return;
+        clone.style.top = (e.touches[0].clientY - offY) + 'px';
+        clone.style.display = 'none';
+        const el = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
+        clone.style.display = '';
+        document.querySelectorAll('.list-drag-over').forEach(c => c.classList.remove('list-drag-over'));
+        const hc = el && el.closest('.todo-card');
+        if (hc && hc !== srcCard) hc.classList.add('list-drag-over');
+        e.preventDefault();
+      }, { passive: false });
+      handle.addEventListener('touchend', e => {
+        if (!clone) return;
+        clone.style.display = 'none';
+        const el = document.elementFromPoint(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+        clone.style.display = '';
+        const hc = el && el.closest('.todo-card');
+        if (hc && hc !== srcCard) {
+          const toListId = parseInt(hc.dataset.listId);
+          if (dragListId !== toListId) moveList(dragListId, toListId, isDefault);
+        }
+        clone.remove(); clone = null;
+        srcCard.classList.remove('list-dragging');
+        document.querySelectorAll('.list-drag-over').forEach(c => c.classList.remove('list-drag-over'));
+        dragListId = null;
+      });
     });
   });
 }
