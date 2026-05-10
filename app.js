@@ -417,18 +417,23 @@ function initListDragDrop() {
         let clone = null, moved = false;
         const srcListId = parseInt(card.dataset.listId);
         const offY = e.clientY - card.getBoundingClientRect().top;
+        const offX = e.clientX - card.getBoundingClientRect().left;
 
         const onMove = e => {
           if (!moved && Math.abs(e.clientY - startY) < 4) return;
           if (!moved) {
             moved = true;
+            const rect = card.getBoundingClientRect();
             clone = card.cloneNode(true);
-            clone.style.cssText = 'position:fixed;left:' + card.getBoundingClientRect().left + 'px;width:' + card.offsetWidth + 'px;z-index:600;opacity:0.85;pointer-events:none;background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:var(--radius-md);box-shadow:0 4px 20px rgba(0,0,0,0.4);';
+            clone.style.cssText = 'position:fixed;width:' + card.offsetWidth + 'px;z-index:600;opacity:0.85;pointer-events:none;background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:var(--radius-md);box-shadow:0 4px 20px rgba(0,0,0,0.4);';
+            clone.style.left = rect.left + 'px';
+            clone.style.top  = rect.top + 'px';
             document.body.appendChild(clone);
             card.classList.add('list-dragging');
             dragListId = srcListId;
           }
-          clone.style.top = (e.clientY - offY) + 'px';
+          clone.style.left = (e.clientX - offX) + 'px';
+          clone.style.top  = (e.clientY - offY) + 'px';
           document.querySelectorAll('.list-drag-over').forEach(c => c.classList.remove('list-drag-over'));
           const el = document.elementFromPoint(e.clientX, e.clientY);
           const hc = el && el.closest('.todo-card');
