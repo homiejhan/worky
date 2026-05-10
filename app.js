@@ -428,11 +428,11 @@ function initListDragDrop() {
           if (!moved) {
             moved = true;
             clone = card.cloneNode(true);
-            clone.style.cssText = 'position:fixed;z-index:600;opacity:0.85;pointer-events:none;background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:var(--radius-md);box-shadow:0 4px 20px rgba(0,0,0,0.4);';
+            clone.style.cssText = 'position:fixed;z-index:9999;opacity:0.85;pointer-events:none;background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:var(--radius-md);box-shadow:0 4px 20px rgba(0,0,0,0.4);';
             clone.style.width = card.offsetWidth + 'px';
             clone.style.left  = (e.clientX - offX) + 'px';
             clone.style.top   = (e.clientY - offY) + 'px';
-            document.body.appendChild(clone);
+            document.documentElement.appendChild(clone);
             card.classList.add('list-dragging');
             dragListId = srcListId;
           }
