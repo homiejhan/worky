@@ -2,7 +2,7 @@
 // Mutable defaults — updated when Format mode is committed
 let TIMER_DEFAULTS = [
   { label: 'Productivity Timer',   seconds: 6*3600, color: '#378ADD' },
-  { label: 'Personal Development', seconds: 3*3600, color: '#EC3636' },
+  { label: 'Personal Development', seconds: 4*3600, color: '#EC3636' },
   { label: 'Time with God',        seconds: 2*3600, color: '#8B5CF6' },
   { label: 'Skill Development',    seconds: 1*3600, color: '#F97316' },
 ];
@@ -318,12 +318,20 @@ function toggleTask(listId, taskId) {
   saveToLocal();
 }
 
+const LIST_DRAG_HANDLE_SVG = `<svg width="10" height="14" viewBox="0 0 10 14" fill="none"><circle cx="3" cy="3" r="1.2" fill="currentColor"/><circle cx="7" cy="3" r="1.2" fill="currentColor"/><circle cx="3" cy="7" r="1.2" fill="currentColor"/><circle cx="7" cy="7" r="1.2" fill="currentColor"/><circle cx="3" cy="11" r="1.2" fill="currentColor"/><circle cx="7" cy="11" r="1.2" fill="currentColor"/></svg>`;
+
 function buildCard(list, pfx) {
+  // List is draggable if: it's a custom list (always), or it's a daily list in format mode
+  const listDraggable = !list.isDefault || formatMode;
   const card = document.createElement('div');
   card.className = 'todo-card';
+  card.dataset.listId = list.id;
+  card.dataset.isDefault = list.isDefault ? '1' : '0';
+  if (listDraggable) card.setAttribute('draggable', 'true');
   card.innerHTML = `
     <div class="todo-accent-strip todo-strip-${list.id}" style="background:${list.color}"></div>
     <div class="todo-card-header">
+      ${listDraggable ? `<div class="list-drag-handle" title="Drag to reorder">${LIST_DRAG_HANDLE_SVG}</div>` : ''}
       <div class="color-swatch todo-swatch-${list.id}" style="background:${list.color}">
         <input type="color" value="${list.color}"
           oninput="changeTodoColor(${list.id},this.value); saveToLocal();">
@@ -382,11 +390,132 @@ function renderTodos() {
 /* ─────────── DRAG & DROP (My Lists only) ─────────── */
 let dragTaskId = null;
 let dragFromListId = null;
+let dragListId = null;   // for list-level reordering
 
 function initDragDrop() {
+  initListDragDrop();   // list reordering
+  initTaskDragDrop();   // task reordering (existing)
+}
+
+/* ── List-level drag & drop ── */
+function initListDragDrop() {
+  const containers = ['defaultContainer-d','defaultContainer-m','todoContainer-d','todoContainer-m'];
+
+  containers.forEach(containerId => {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const isDefault = containerId.startsWith('default');
+
+    container.querySelectorAll('.todo-card[draggable="true"]').forEach(card => {
+      card.addEventListener('dragstart', e => {
+        // Only start drag from the handle
+        if (!e.target.closest('.list-drag-handle')) { e.preventDefault(); return; }
+        dragListId = parseInt(card.dataset.listId);
+        card.classList.add('list-dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.stopPropagation();
+      });
+      card.addEventListener('dragend', () => {
+        card.classList.remove('list-dragging');
+        document.querySelectorAll('.list-drag-over').forEach(el => el.classList.remove('list-drag-over'));
+        dragListId = null;
+      });
+      card.addEventListener('dragover', e => {
+        if (dragListId === null) return;
+        e.preventDefault(); e.stopPropagation();
+        document.querySelectorAll('.list-drag-over').forEach(el => el.classList.remove('list-drag-over'));
+        card.classList.add('list-drag-over');
+      });
+      card.addEventListener('drop', e => {
+        if (dragListId === null) return;
+        e.preventDefault(); e.stopPropagation();
+        card.classList.remove('list-drag-over');
+        const toListId = parseInt(card.dataset.listId);
+        if (dragListId !== toListId) moveList(dragListId, toListId, isDefault);
+        dragListId = null;
+      });
+    });
+
+    // Touch drag for list cards
+    container.querySelectorAll('.todo-card[draggable="true"] .list-drag-handle').forEach(handle => {
+      let clone = null, startY = 0, offY = 0, srcCard = null;
+
+      handle.addEventListener('touchstart', e => {
+        srcCard = handle.closest('.todo-card');
+        if (!srcCard) return;
+        dragListId = parseInt(srcCard.dataset.listId);
+        startY = e.touches[0].clientY;
+        offY = startY - srcCard.getBoundingClientRect().top;
+        clone = srcCard.cloneNode(true);
+        clone.style.cssText = `position:fixed;left:0;right:0;z-index:600;opacity:0.85;pointer-events:none;background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:var(--radius-md);`;
+        clone.style.top = (startY - offY) + 'px';
+        document.body.appendChild(clone);
+        srcCard.classList.add('list-dragging');
+        e.preventDefault();
+      }, { passive: false });
+
+      handle.addEventListener('touchmove', e => {
+        if (!clone) return;
+        const y = e.touches[0].clientY;
+        clone.style.top = (y - offY) + 'px';
+        clone.style.display = 'none';
+        const el = document.elementFromPoint(e.touches[0].clientX, y);
+        clone.style.display = '';
+        document.querySelectorAll('.list-drag-over').forEach(c => c.classList.remove('list-drag-over'));
+        const hoverCard = el?.closest('.todo-card');
+        if (hoverCard && hoverCard !== srcCard) hoverCard.classList.add('list-drag-over');
+        e.preventDefault();
+      }, { passive: false });
+
+      handle.addEventListener('touchend', e => {
+        if (!clone) return;
+        const y = e.changedTouches[0].clientY;
+        clone.style.display = 'none';
+        const el = document.elementFromPoint(e.changedTouches[0].clientX, y);
+        clone.style.display = '';
+        const hoverCard = el?.closest('.todo-card');
+        const isDefault = containerId.startsWith('default');
+        if (hoverCard && hoverCard !== srcCard) {
+          const toListId = parseInt(hoverCard.dataset.listId);
+          if (dragListId !== toListId) moveList(dragListId, toListId, isDefault);
+        }
+        clone.remove(); clone = null;
+        srcCard?.classList.remove('list-dragging');
+        document.querySelectorAll('.list-drag-over').forEach(c => c.classList.remove('list-drag-over'));
+        dragListId = null;
+      });
+    });
+  });
+}
+
+function moveList(fromListId, toListId, isDefault) {
+  const arr = isDefault
+    ? todoLists.filter(l => l.isDefault)
+    : todoLists.filter(l => !l.isDefault);
+
+  const fromIdx = arr.findIndex(l => l.id === fromListId);
+  const toIdx   = arr.findIndex(l => l.id === toListId);
+  if (fromIdx === -1 || toIdx === -1) return;
+
+  // Splice within the sub-array then reconstruct todoLists preserving relative order of other group
+  const [moved] = arr.splice(fromIdx, 1);
+  arr.splice(toIdx, 0, moved);
+
+  // Rebuild todoLists: daily lists first (in new order), then custom lists (in new order)
+  const dailyLists  = isDefault ? arr : todoLists.filter(l => l.isDefault);
+  const customLists = isDefault ? todoLists.filter(l => !l.isDefault) : arr;
+  todoLists = [...dailyLists, ...customLists];
+
+  renderTodos();
+  saveToLocal();
+}
+
+/* ── Task-level drag & drop (unchanged) ── */
+function initTaskDragDrop() {
   // Desktop: HTML5 drag events
   document.querySelectorAll('.task-row[draggable="true"]').forEach(row => {
     row.addEventListener('dragstart', e => {
+      if (dragListId !== null) { e.preventDefault(); return; } // list drag takes priority
       dragTaskId = parseInt(row.dataset.taskId);
       dragFromListId = parseInt(row.dataset.listId);
       row.classList.add('dragging');
