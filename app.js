@@ -413,21 +413,25 @@ function initListDragDrop() {
       handle.addEventListener('mousedown', e => {
         if (e.button !== 0) return;
         e.preventDefault();
+        const startX = e.clientX;
         const startY = e.clientY;
         let clone = null, moved = false;
         const srcListId = parseInt(card.dataset.listId);
-        const offY = e.clientY - card.getBoundingClientRect().top;
-        const offX = e.clientX - card.getBoundingClientRect().left;
+        const rect0 = card.getBoundingClientRect();
+        const offX = e.clientX - rect0.left;
+        const offY = e.clientY - rect0.top;
 
         const onMove = e => {
-          if (!moved && Math.abs(e.clientY - startY) < 4) return;
+          const dx = e.clientX - startX;
+          const dy = e.clientY - startY;
+          if (!moved && Math.sqrt(dx*dx + dy*dy) < 4) return;
           if (!moved) {
             moved = true;
-            const rect = card.getBoundingClientRect();
             clone = card.cloneNode(true);
-            clone.style.cssText = 'position:fixed;width:' + card.offsetWidth + 'px;z-index:600;opacity:0.85;pointer-events:none;background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:var(--radius-md);box-shadow:0 4px 20px rgba(0,0,0,0.4);';
-            clone.style.left = rect.left + 'px';
-            clone.style.top  = rect.top + 'px';
+            clone.style.cssText = 'position:fixed;z-index:600;opacity:0.85;pointer-events:none;background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:var(--radius-md);box-shadow:0 4px 20px rgba(0,0,0,0.4);';
+            clone.style.width = card.offsetWidth + 'px';
+            clone.style.left  = (e.clientX - offX) + 'px';
+            clone.style.top   = (e.clientY - offY) + 'px';
             document.body.appendChild(clone);
             card.classList.add('list-dragging');
             dragListId = srcListId;
@@ -435,7 +439,9 @@ function initListDragDrop() {
           clone.style.left = (e.clientX - offX) + 'px';
           clone.style.top  = (e.clientY - offY) + 'px';
           document.querySelectorAll('.list-drag-over').forEach(c => c.classList.remove('list-drag-over'));
+          clone.style.display = 'none';
           const el = document.elementFromPoint(e.clientX, e.clientY);
+          clone.style.display = '';
           const hc = el && el.closest('.todo-card');
           if (hc && hc !== card) hc.classList.add('list-drag-over');
         };
