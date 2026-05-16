@@ -1040,6 +1040,7 @@ function loadFromLocal() {
     const state = JSON.parse(raw);
     if (!state || state.version !== 1) return false;
     wokenUp = !!state.wokenUp;
+    if (state.timerDefaults) TIMER_DEFAULTS = state.timerDefaults;
     timers = state.timers.map(t => ({
       id: t.id, label: t.label, color: t.color,
       seconds: t.seconds, running: t.running,
