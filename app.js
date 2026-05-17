@@ -1458,6 +1458,7 @@ function calToggleWeekMode() {
 
 /* ── User mode modal ── */
 function openCalModal(dateKey, evId, defaultStart) {
+  if (gcalIsConnected()) gcalReconcile(); // refresh link state before showing modal
   calEditDate = dateKey;
   calEditDow  = null;
   calEditId   = (evId !== undefined && evId !== null) ? evId : null;
@@ -2013,22 +2014,38 @@ async function gcalSyncAll() {
       if (!data.items) return;
       data.items.forEach(ev => {
         if (!ev.start) return;
-        // All-day events have date, timed events have dateTime
         const startStr = ev.start.dateTime || ev.start.date;
         const endStr   = ev.end?.dateTime  || ev.end?.date;
         const dateKey  = startStr.slice(0, 10);
         if (!gcalEvents[dateKey]) gcalEvents[dateKey] = [];
-        gcalEvents[dateKey].push({
-          gcalId:     ev.id,
-          calId:      cal.id,
-          calName:    cal.summary,
-          calColor:   cal.color,
-          title:      ev.summary || '(no title)',
-          start:      ev.start.dateTime ? startStr.slice(11,16) : '00:00',
-          end:        ev.end?.dateTime  ? endStr.slice(11,16)   : '23:59',
-          allDay:     !ev.start.dateTime,
-          htmlLink:   ev.htmlLink,
-          color:      cal.color,
+
+        // Parse times in local timezone (not UTC slice)
+        let startLocal = '00:00', endLocal = '23:59';
+        if (ev.start.dateTime) {
+          const sd = new Date(ev.start.dateTime);
+          startLocal = `${String(sd.getHours()).padStart(2,'0')}:${String(sd.getMinutes()).padStart(2,'0')}`;
+        }
+        if (ev.end?.dateTime) {
+          const ed = new Date(ev.end.dateTime);
+          endLocal = `${String(ed.getHours()).padStart(2,'0')}:${String(ed.getMinutes()).padStart(2,'0')}`;
+        }
+        // Use local date key too (event might cross midnight in UTC)
+        const localDateKey = ev.start.dateTime
+          ? (() => { const d = new Date(ev.start.dateTime); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })()
+          : dateKey;
+
+        if (!gcalEvents[localDateKey]) gcalEvents[localDateKey] = [];
+        gcalEvents[localDateKey].push({
+          gcalId:   ev.id,
+          calId:    cal.id,
+          calName:  cal.summary,
+          calColor: cal.color,
+          title:    ev.summary || '(no title)',
+          start:    startLocal,
+          end:      endLocal,
+          allDay:   !ev.start.dateTime,
+          htmlLink: ev.htmlLink,
+          color:    cal.color,
         });
       });
     }));
@@ -2042,11 +2059,17 @@ async function gcalSyncAll() {
 }
 
 /* ── Reconcile local events against fetched GCal events ──
- *  1. Break links where title or times no longer match
+ *  1. Break links where title or times no longer match, or GCal event deleted
  *  2. Auto-link unlinked local events that exactly match a GCal event
  */
 function gcalReconcile() {
   const validKeys = calDisplayDays().map(calDateKey);
+
+  // Build a flat map of all fetched GCal events by gcalId for quick lookup
+  const gcalById = {};
+  Object.values(gcalEvents).forEach(evs => {
+    evs.forEach(g => { gcalById[g.gcalId] = g; });
+  });
 
   validKeys.forEach(dateKey => {
     const localEvs = calEvents[dateKey] || [];
@@ -2057,23 +2080,22 @@ function gcalReconcile() {
 
       if (localEv.gcalId) {
         // ── Validate existing link ──
-        const linked = gcalEvs.find(g => g.gcalId === localEv.gcalId);
-        const titleMatch = linked && linked.title.trim() === (localEv.title || '').trim();
-        const startMatch = linked && linked.start === localEv.start;
-        const endMatch   = linked && linked.end   === localEv.end;
+        const linked = gcalById[localEv.gcalId];
+        const valid  = linked
+          && linked.title.trim() === (localEv.title || '').trim()
+          && linked.start        === localEv.start
+          && linked.end          === localEv.end;
 
-        if (!linked || !titleMatch || !startMatch || !endMatch) {
-          // Break the link — event still exists on both sides, just unlinked
+        if (!valid) {
+          // Break link — GCal event deleted, moved, or renamed
           localEv.gcalId    = null;
           localEv.gcalCalId = null;
         }
       } else {
-        // ── Auto-link: find a GCal event with matching title + times ──
-        // Skip GCal events already linked to another local event
-        const linkedGcalIds = new Set(
-          localEvs.filter(e => e.gcalId).map(e => e.gcalId)
-        );
+        // ── Auto-link: find exact title + time match in same day's GCal events ──
+        const linkedGcalIds = new Set(localEvs.filter(e => e.gcalId).map(e => e.gcalId));
         const match = gcalEvs.find(g =>
+          !g.allDay &&
           !linkedGcalIds.has(g.gcalId) &&
           g.title.trim() === (localEv.title || '').trim() &&
           g.start === localEv.start &&
@@ -2086,6 +2108,8 @@ function gcalReconcile() {
       }
     });
   });
+
+  calSave();
 }
 
 /* ── Push a local event to GCal ── */
