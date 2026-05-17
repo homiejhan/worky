@@ -2135,18 +2135,73 @@ calRenderDayCol = function(col, dateKey) {
 
 /* ── GCal event detail popup ── */
 function gcalOpenEventDetail(ev) {
+  const modal = document.getElementById('gcalDetailModal');
   document.getElementById('gcalDetailTitle').textContent  = ev.title;
   document.getElementById('gcalDetailCal').textContent    = ev.calName;
   document.getElementById('gcalDetailCal').style.color    = ev.color;
   document.getElementById('gcalDetailTime').textContent   = ev.allDay ? 'All day' : `${calFmtTime(ev.start)} – ${calFmtTime(ev.end)}`;
   document.getElementById('gcalDetailLink').href          = ev.htmlLink || '#';
-  document.getElementById('gcalDetailModal').classList.add('show');
-  // Store for potential delete
-  document.getElementById('gcalDetailModal').dataset.gcalId = ev.gcalId;
-  document.getElementById('gcalDetailModal').dataset.calId  = ev.calId;
+  modal.dataset.gcalId = ev.gcalId;
+  modal.dataset.calId  = ev.calId;
+  // Store full event for sync
+  modal._gcalEv = ev;
+
+  // Show Sync button only for non-all-day events not already in app
+  const syncBtn = document.getElementById('gcalSyncToAppBtn');
+  if (syncBtn) {
+    const alreadyLocal = !ev.allDay && calDisplayDays().some(day => {
+      const key = calDateKey(day);
+      return (calEvents[key] || []).some(e => e.gcalId === ev.gcalId);
+    });
+    syncBtn.style.display = (!ev.allDay && !alreadyLocal) ? 'block' : 'none';
+    syncBtn.textContent = 'Sync to app';
+    syncBtn.disabled = false;
+  }
+
+  modal.classList.add('show');
 }
 function gcalCloseDetail() {
   document.getElementById('gcalDetailModal').classList.remove('show');
+}
+
+function gcalSyncToApp() {
+  const modal = document.getElementById('gcalDetailModal');
+  const ev    = modal._gcalEv;
+  if (!ev || ev.allDay) return;
+
+  const dateKey = ev.start.length > 5 ? ev.start.slice(0, 10)
+    : calDateKey(calDisplayDays().find(d => calDateKey(d) === modal.dataset.dateKey) || calToday());
+
+  // Find the correct date key from gcalEvents
+  let foundKey = null;
+  Object.entries(gcalEvents).forEach(([k, evs]) => {
+    if (evs.some(e => e.gcalId === ev.gcalId)) foundKey = k;
+  });
+  if (!foundKey) { showToast('Could not find event date.'); return; }
+
+  calEnsureDay(foundKey);
+
+  // Create local event linked to this GCal event (so it won't be re-pushed)
+  const localEv = {
+    id:           calEventIdCtr++,
+    title:        ev.title,
+    start:        ev.start,
+    end:          ev.end,
+    color:        CAL_COLORS[0],
+    type:         'event',
+    fromTemplate: false,
+    gcalId:       ev.gcalId,
+    gcalCalId:    ev.calId,
+  };
+  calEvents[foundKey].push(localEv);
+  calSave();
+  calRefresh();
+
+  // Hide button — it's now synced
+  const syncBtn = document.getElementById('gcalSyncToAppBtn');
+  if (syncBtn) { syncBtn.textContent = '✓ Synced!'; syncBtn.disabled = true; }
+  setTimeout(() => gcalCloseDetail(), 1000);
+  showToast('Event added to app ✓');
 }
 async function gcalDeleteFromDetail() {
   const modal  = document.getElementById('gcalDetailModal');
