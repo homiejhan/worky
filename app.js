@@ -2036,7 +2036,56 @@ async function gcalSyncAll() {
 
   gcalSyncing = false;
   gcalUpdateSyncBtn();
+  gcalReconcile(); // validate + auto-link before rendering
   calRefresh();
+  calSave();
+}
+
+/* ── Reconcile local events against fetched GCal events ──
+ *  1. Break links where title or times no longer match
+ *  2. Auto-link unlinked local events that exactly match a GCal event
+ */
+function gcalReconcile() {
+  const validKeys = calDisplayDays().map(calDateKey);
+
+  validKeys.forEach(dateKey => {
+    const localEvs = calEvents[dateKey] || [];
+    const gcalEvs  = gcalEvents[dateKey] || [];
+
+    localEvs.forEach(localEv => {
+      if (localEv.type === 'divider' || localEv.fromTemplate) return;
+
+      if (localEv.gcalId) {
+        // ── Validate existing link ──
+        const linked = gcalEvs.find(g => g.gcalId === localEv.gcalId);
+        const titleMatch = linked && linked.title.trim() === (localEv.title || '').trim();
+        const startMatch = linked && linked.start === localEv.start;
+        const endMatch   = linked && linked.end   === localEv.end;
+
+        if (!linked || !titleMatch || !startMatch || !endMatch) {
+          // Break the link — event still exists on both sides, just unlinked
+          localEv.gcalId    = null;
+          localEv.gcalCalId = null;
+        }
+      } else {
+        // ── Auto-link: find a GCal event with matching title + times ──
+        // Skip GCal events already linked to another local event
+        const linkedGcalIds = new Set(
+          localEvs.filter(e => e.gcalId).map(e => e.gcalId)
+        );
+        const match = gcalEvs.find(g =>
+          !linkedGcalIds.has(g.gcalId) &&
+          g.title.trim() === (localEv.title || '').trim() &&
+          g.start === localEv.start &&
+          g.end   === localEv.end
+        );
+        if (match) {
+          localEv.gcalId    = match.gcalId;
+          localEv.gcalCalId = match.calId;
+        }
+      }
+    });
+  });
 }
 
 /* ── Push a local event to GCal ── */
