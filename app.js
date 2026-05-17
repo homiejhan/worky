@@ -318,17 +318,12 @@ function toggleTask(listId, taskId) {
   saveToLocal();
 }
 
-const LIST_DRAG_HANDLE_HTML = '<div class="list-drag-handle" title="Drag to reorder"><svg width="10" height="14" viewBox="0 0 10 14" fill="none"><circle cx="3" cy="3" r="1.2" fill="currentColor"/><circle cx="7" cy="3" r="1.2" fill="currentColor"/><circle cx="3" cy="7" r="1.2" fill="currentColor"/><circle cx="7" cy="7" r="1.2" fill="currentColor"/><circle cx="3" cy="11" r="1.2" fill="currentColor"/><circle cx="7" cy="11" r="1.2" fill="currentColor"/></svg></div>';
-
 function buildCard(list, pfx) {
-  const listDraggable = !list.isDefault || formatMode;
   const card = document.createElement('div');
-  card.className = 'todo-card' + (listDraggable ? ' list-reorderable' : '');
-  card.dataset.listId = list.id;
+  card.className = 'todo-card';
   card.innerHTML = `
     <div class="todo-accent-strip todo-strip-${list.id}" style="background:${list.color}"></div>
     <div class="todo-card-header">
-      ${listDraggable ? LIST_DRAG_HANDLE_HTML : ''}
       <div class="color-swatch todo-swatch-${list.id}" style="background:${list.color}">
         <input type="color" value="${list.color}"
           oninput="changeTodoColor(${list.id},this.value); saveToLocal();">
@@ -384,148 +379,14 @@ function renderTodos() {
   initDragDrop();
 }
 
-/* ─────────── DRAG & DROP ─────────── */
+/* ─────────── DRAG & DROP (My Lists only) ─────────── */
 let dragTaskId = null;
 let dragFromListId = null;
-let dragListId = null;
-let _listDragAllowed = false;
 
 function initDragDrop() {
-  initListDragDrop();
-  initTaskDragDrop();
-}
-
-function initListDragDrop() {
-  const specs = [
-    { id: 'defaultContainer-d', isDefault: true },
-    { id: 'defaultContainer-m', isDefault: true },
-    { id: 'todoContainer-d',    isDefault: false },
-    { id: 'todoContainer-m',    isDefault: false },
-  ];
-  specs.forEach(({ id: containerId, isDefault }) => {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-    container.querySelectorAll('.todo-card.list-reorderable').forEach(card => {
-      const handle = card.querySelector('.list-drag-handle');
-      if (!handle) return;
-
-      // ── Mouse drag (desktop) ──
-      handle.addEventListener('mousedown', e => {
-        if (e.button !== 0) return;
-        e.preventDefault();
-        const startX = e.clientX;
-        const startY = e.clientY;
-        let clone = null, moved = false;
-        const srcListId = parseInt(card.dataset.listId);
-        const rect0 = card.getBoundingClientRect();
-        const offX = e.clientX - rect0.left;
-        const offY = e.clientY - rect0.top;
-
-        const onMove = e => {
-          const dx = e.clientX - startX;
-          const dy = e.clientY - startY;
-          if (!moved && Math.sqrt(dx*dx + dy*dy) < 4) return;
-          if (!moved) {
-            moved = true;
-            clone = card.cloneNode(true);
-            clone.style.cssText = 'position:fixed;z-index:9999;opacity:0.85;pointer-events:none;background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:var(--radius-md);box-shadow:0 4px 20px rgba(0,0,0,0.4);';
-            clone.style.width = card.offsetWidth + 'px';
-            clone.style.left  = (e.clientX - offX) + 'px';
-            clone.style.top   = (e.clientY - offY) + 'px';
-            document.documentElement.appendChild(clone);
-            card.classList.add('list-dragging');
-            dragListId = srcListId;
-          }
-          clone.style.left = (e.clientX - offX) + 'px';
-          clone.style.top  = (e.clientY - offY) + 'px';
-          document.querySelectorAll('.list-drag-over').forEach(c => c.classList.remove('list-drag-over'));
-          clone.style.display = 'none';
-          const el = document.elementFromPoint(e.clientX, e.clientY);
-          clone.style.display = '';
-          const hc = el && el.closest('.todo-card');
-          if (hc && hc !== card) hc.classList.add('list-drag-over');
-        };
-
-        const onUp = e => {
-          document.removeEventListener('mousemove', onMove);
-          document.removeEventListener('mouseup', onUp);
-          if (!moved) return;
-          clone && clone.remove();
-          card.classList.remove('list-dragging');
-          document.querySelectorAll('.list-drag-over').forEach(c => c.classList.remove('list-drag-over'));
-          const el = document.elementFromPoint(e.clientX, e.clientY);
-          const hc = el && el.closest('.todo-card');
-          if (hc && hc !== card) {
-            const toListId = parseInt(hc.dataset.listId);
-            if (srcListId !== toListId) moveList(srcListId, toListId, isDefault);
-          }
-          dragListId = null;
-        };
-
-        document.addEventListener('mousemove', onMove);
-        document.addEventListener('mouseup', onUp);
-      });
-
-      // ── Touch drag (mobile) ──
-      let clone = null, offY = 0, srcCard = null;
-      handle.addEventListener('touchstart', e => {
-        srcCard = card;
-        dragListId = parseInt(card.dataset.listId);
-        offY = e.touches[0].clientY - card.getBoundingClientRect().top;
-        clone = card.cloneNode(true);
-        clone.style.cssText = 'position:fixed;left:0;right:0;z-index:600;opacity:0.85;pointer-events:none;background:var(--bg-elevated);border:1px solid var(--border-mid);border-radius:var(--radius-md);';
-        clone.style.top = (e.touches[0].clientY - offY) + 'px';
-        document.body.appendChild(clone);
-        card.classList.add('list-dragging');
-        e.preventDefault();
-      }, { passive: false });
-      handle.addEventListener('touchmove', e => {
-        if (!clone) return;
-        clone.style.top = (e.touches[0].clientY - offY) + 'px';
-        clone.style.display = 'none';
-        const el = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
-        clone.style.display = '';
-        document.querySelectorAll('.list-drag-over').forEach(c => c.classList.remove('list-drag-over'));
-        const hc = el && el.closest('.todo-card');
-        if (hc && hc !== srcCard) hc.classList.add('list-drag-over');
-        e.preventDefault();
-      }, { passive: false });
-      handle.addEventListener('touchend', e => {
-        if (!clone) return;
-        clone.style.display = 'none';
-        const el = document.elementFromPoint(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
-        clone.style.display = '';
-        const hc = el && el.closest('.todo-card');
-        if (hc && hc !== srcCard) {
-          const toListId = parseInt(hc.dataset.listId);
-          if (dragListId !== toListId) moveList(dragListId, toListId, isDefault);
-        }
-        clone.remove(); clone = null;
-        srcCard.classList.remove('list-dragging');
-        document.querySelectorAll('.list-drag-over').forEach(c => c.classList.remove('list-drag-over'));
-        dragListId = null;
-      });
-    });
-  });
-}
-
-function moveList(fromListId, toListId, isDefault) {
-  const group = todoLists.filter(l => l.isDefault === isDefault);
-  const fromIdx = group.findIndex(l => l.id === fromListId);
-  const toIdx   = group.findIndex(l => l.id === toListId);
-  if (fromIdx === -1 || toIdx === -1) return;
-  const [moved] = group.splice(fromIdx, 1);
-  group.splice(toIdx, 0, moved);
-  const other = todoLists.filter(l => l.isDefault !== isDefault);
-  todoLists = isDefault ? [...group, ...other] : [...other, ...group];
-  renderTodos();
-  saveToLocal();
-}
-
-function initTaskDragDrop() {
+  // Desktop: HTML5 drag events
   document.querySelectorAll('.task-row[draggable="true"]').forEach(row => {
     row.addEventListener('dragstart', e => {
-      if (dragListId !== null) { e.preventDefault(); return; }
       dragTaskId = parseInt(row.dataset.taskId);
       dragFromListId = parseInt(row.dataset.listId);
       row.classList.add('dragging');
@@ -712,7 +573,6 @@ function enterFormatMode() {
   document.body.classList.add('format-mode');
   const btn = document.getElementById('fmtBtn');
   if (btn) { btn.textContent = '✓ Done'; btn.classList.add('active'); }
-  renderTodos();
 }
 
 function commitFormatMode() {
@@ -742,7 +602,6 @@ function commitFormatMode() {
 
   // Re-render so displays show live remaining time again
   renderTimers();
-  renderTodos();
 
   saveToLocal();
   showToast('Format saved ✓');
@@ -1040,7 +899,6 @@ function loadFromLocal() {
     const state = JSON.parse(raw);
     if (!state || state.version !== 1) return false;
     wokenUp = !!state.wokenUp;
-    if (state.timerDefaults) TIMER_DEFAULTS = state.timerDefaults;
     timers = state.timers.map(t => ({
       id: t.id, label: t.label, color: t.color,
       seconds: t.seconds, running: t.running,
@@ -1458,14 +1316,28 @@ function calToggleWeekMode() {
 
 /* ── User mode modal ── */
 function openCalModal(dateKey, evId, defaultStart) {
-  if (gcalIsConnected()) gcalReconcile(); // update gcalId state before reading event
+  // Reconcile just this day before showing modal, if we have synced GCal data
+  if (gcalIsConnected() && Object.keys(gcalEvents).length > 0) {
+    const localEvs = calEvents[dateKey] || [];
+    const gcalEvs  = gcalEvents[dateKey] || [];
+    const claimed  = new Set();
+    localEvs.forEach(localEv => {
+      if (localEv.type === 'divider') return;
+      const match = gcalEvs.find(g =>
+        !g.allDay && !claimed.has(g.gcalId) &&
+        g.title.trim() === (localEv.title || '').trim() &&
+        g.start === localEv.start && g.end === localEv.end
+      );
+      if (match) { localEv.gcalId = match.gcalId; localEv.gcalCalId = match.calId; claimed.add(match.gcalId); }
+      else { localEv.gcalId = null; localEv.gcalCalId = null; }
+    });
+  }
   calEditDate = dateKey;
   calEditDow  = null;
   calEditId   = (evId !== undefined && evId !== null) ? evId : null;
 
-  // Re-fetch event AFTER reconcile so gcalId is current
-  const existingEv = (calEvents[dateKey]||[]).find(e => e.id === evId) || null;
-  _buildCalModal(evId, defaultStart, false, existingEv);
+  _buildCalModal(evId, defaultStart, false,
+    (calEvents[dateKey]||[]).find(e=>e.id===evId) || null);
 }
 
 /* ── Format mode modal (template editing) ── */
@@ -1493,8 +1365,7 @@ function _buildCalModal(evId, defaultStart, isFmt, existingEv) {
     swatchEl.appendChild(dot);
   });
 
-  const deleteBtn    = document.getElementById('calEventDeleteBtn');
-  const sendGcalBtn  = document.getElementById('calSendToGcalBtn');
+  const deleteBtn = document.getElementById('calEventDeleteBtn');
   const titleEl   = document.getElementById('calEventModalTitle');
   const tmplRow   = document.getElementById('calTemplateRow');
 
@@ -1534,14 +1405,6 @@ function _buildCalModal(evId, defaultStart, isFmt, existingEv) {
     setCalEventType(existingEv.type || 'event');
     titleEl.textContent = isFmt ? 'Edit template' : 'Edit event';
     deleteBtn.style.display = 'block';
-    // Show "Send to GCal" only if: connected, user mode, not a divider, not already synced
-    if (sendGcalBtn) {
-      const alreadySynced = !!(existingEv.gcalId);
-      const showSend = gcalIsConnected() && !isFmt && (existingEv.type || 'event') !== 'divider' && !alreadySynced;
-      sendGcalBtn.style.display = showSend ? 'block' : 'none';
-      sendGcalBtn.textContent = 'Send to Google Calendar';
-      sendGcalBtn.disabled = false;
-    }
     document.querySelectorAll('.cal-color-dot').forEach(d =>
       d.classList.toggle('selected', d.style.background === calSelectedColor || d.style.backgroundColor === calSelectedColor)
     );
@@ -1553,7 +1416,6 @@ function _buildCalModal(evId, defaultStart, isFmt, existingEv) {
     setCalEventType('event');
     titleEl.textContent = isFmt ? 'Add template' : 'Add event';
     deleteBtn.style.display = 'none';
-    if (sendGcalBtn) sendGcalBtn.style.display = 'none';
   }
 
   document.getElementById('calEventModal').classList.add('show');
@@ -1562,39 +1424,6 @@ function _buildCalModal(evId, defaultStart, isFmt, existingEv) {
 function closeCalModal() {
   document.getElementById('calEventModal').classList.remove('show');
   calEditId = null; calEditDate = null; calEditDow = null;
-}
-
-async function calSendToGcal() {
-  if (!gcalIsConnected() || !calEditDate || calEditId === null) return;
-  const ev = (calEvents[calEditDate] || []).find(e => e.id === calEditId);
-  if (!ev || ev.type === 'divider' || ev.gcalId) return;
-
-  // Pick calendar — prefer first enabled, else prompt user via existing topic select if visible
-  const select = document.getElementById('calTopicSelect');
-  const calId  = (select && select.value) ? select.value
-               : gcalCalendars.find(c => c.enabled)?.id;
-  if (!calId) { showToast('No Google Calendar selected.'); return; }
-
-  const btn = document.getElementById('calSendToGcalBtn');
-  btn.textContent = 'Sending…';
-  btn.disabled = true;
-
-  const gcalId = await gcalPushEvent(ev, calEditDate, calId);
-  if (gcalId) {
-    ev.gcalId    = gcalId;
-    ev.gcalCalId = calId;
-    calSave();
-    btn.textContent = '✓ Sent!';
-    btn.style.color = '#4285f4';
-    setTimeout(() => {
-      btn.style.display = 'none'; // hide — it's now synced
-    }, 1500);
-    await gcalSyncAll();
-    showToast('Sent to Google Calendar ✓');
-  } else {
-    btn.textContent = 'Send to Google Calendar';
-    btn.disabled = false;
-  }
 }
 
 function setCalEventType(type) {
@@ -2015,38 +1844,22 @@ async function gcalSyncAll() {
       if (!data.items) return;
       data.items.forEach(ev => {
         if (!ev.start) return;
+        // All-day events have date, timed events have dateTime
         const startStr = ev.start.dateTime || ev.start.date;
         const endStr   = ev.end?.dateTime  || ev.end?.date;
         const dateKey  = startStr.slice(0, 10);
         if (!gcalEvents[dateKey]) gcalEvents[dateKey] = [];
-
-        // Parse times in local timezone (not UTC slice)
-        let startLocal = '00:00', endLocal = '23:59';
-        if (ev.start.dateTime) {
-          const sd = new Date(ev.start.dateTime);
-          startLocal = `${String(sd.getHours()).padStart(2,'0')}:${String(sd.getMinutes()).padStart(2,'0')}`;
-        }
-        if (ev.end?.dateTime) {
-          const ed = new Date(ev.end.dateTime);
-          endLocal = `${String(ed.getHours()).padStart(2,'0')}:${String(ed.getMinutes()).padStart(2,'0')}`;
-        }
-        // Use local date key too (event might cross midnight in UTC)
-        const localDateKey = ev.start.dateTime
-          ? (() => { const d = new Date(ev.start.dateTime); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })()
-          : dateKey;
-
-        if (!gcalEvents[localDateKey]) gcalEvents[localDateKey] = [];
-        gcalEvents[localDateKey].push({
-          gcalId:   ev.id,
-          calId:    cal.id,
-          calName:  cal.summary,
-          calColor: cal.color,
-          title:    ev.summary || '(no title)',
-          start:    startLocal,
-          end:      endLocal,
-          allDay:   !ev.start.dateTime,
-          htmlLink: ev.htmlLink,
-          color:    cal.color,
+        gcalEvents[dateKey].push({
+          gcalId:     ev.id,
+          calId:      cal.id,
+          calName:    cal.summary,
+          calColor:   cal.color,
+          title:      ev.summary || '(no title)',
+          start:      ev.start.dateTime ? startStr.slice(11,16) : '00:00',
+          end:        ev.end?.dateTime  ? endStr.slice(11,16)   : '23:59',
+          allDay:     !ev.start.dateTime,
+          htmlLink:   ev.htmlLink,
+          color:      cal.color,
         });
       });
     }));
@@ -2054,33 +1867,17 @@ async function gcalSyncAll() {
 
   gcalSyncing = false;
   gcalUpdateSyncBtn();
-  gcalReconcile(); // validate + auto-link before rendering
-  calRefresh();
-  calSave();
-}
 
-/* ── Reconcile local events against fetched GCal events ──
- *  For every local event on every visible day:
- *  - Find a GCal event with identical title, start, and end
- *  - If found → set gcalId/gcalCalId to that event (sync confirmed)
- *  - If not found → clear gcalId/gcalCalId (unsynced)
- *  This runs from scratch every time — we never trust stale gcalId values.
- */
-function gcalReconcile() {
-  // If we haven't synced yet this session, gcalEvents is empty —
-  // don't wipe existing gcalIds since we have nothing to compare against
-  const hasSyncedData = Object.keys(gcalEvents).length > 0;
-
-  const validKeys = calDisplayDays().map(calDateKey);
-
-  validKeys.forEach(dateKey => {
+  // Reconcile: for every local event, find a GCal match by title+start+end.
+  // If found → link. If not found (including deleted GCal events) → clear gcalId.
+  // Only runs on days we just fetched (all display days), so we have authoritative data.
+  const fetchedKeys = new Set(calDisplayDays().map(calDateKey));
+  fetchedKeys.forEach(dateKey => {
     const localEvs = calEvents[dateKey] || [];
     const gcalEvs  = gcalEvents[dateKey] || [];
     const claimed  = new Set();
-
     localEvs.forEach(localEv => {
-      if (localEv.type === 'divider' || localEv.fromTemplate) return;
-
+      if (localEv.type === 'divider') return;
       const match = gcalEvs.find(g =>
         !g.allDay &&
         !claimed.has(g.gcalId) &&
@@ -2088,22 +1885,19 @@ function gcalReconcile() {
         g.start === localEv.start &&
         g.end   === localEv.end
       );
-
       if (match) {
-        // Always link when we find a match
         localEv.gcalId    = match.gcalId;
         localEv.gcalCalId = match.calId;
         claimed.add(match.gcalId);
-      } else if (hasSyncedData) {
-        // Only clear if we actually have fresh GCal data to compare against
+      } else {
+        // No match on a freshly-fetched day → definitely unsynced
         localEv.gcalId    = null;
         localEv.gcalCalId = null;
       }
-      // If !hasSyncedData and no match: leave gcalId untouched
     });
   });
-
   calSave();
+  calRefresh();
 }
 
 /* ── Push a local event to GCal ── */
@@ -2202,73 +1996,18 @@ calRenderDayCol = function(col, dateKey) {
 
 /* ── GCal event detail popup ── */
 function gcalOpenEventDetail(ev) {
-  const modal = document.getElementById('gcalDetailModal');
   document.getElementById('gcalDetailTitle').textContent  = ev.title;
   document.getElementById('gcalDetailCal').textContent    = ev.calName;
   document.getElementById('gcalDetailCal').style.color    = ev.color;
   document.getElementById('gcalDetailTime').textContent   = ev.allDay ? 'All day' : `${calFmtTime(ev.start)} – ${calFmtTime(ev.end)}`;
   document.getElementById('gcalDetailLink').href          = ev.htmlLink || '#';
-  modal.dataset.gcalId = ev.gcalId;
-  modal.dataset.calId  = ev.calId;
-  // Store full event for sync
-  modal._gcalEv = ev;
-
-  // Show Sync button only for non-all-day events not already in app
-  const syncBtn = document.getElementById('gcalSyncToAppBtn');
-  if (syncBtn) {
-    const alreadyLocal = !ev.allDay && calDisplayDays().some(day => {
-      const key = calDateKey(day);
-      return (calEvents[key] || []).some(e => e.gcalId === ev.gcalId);
-    });
-    syncBtn.style.display = (!ev.allDay && !alreadyLocal) ? 'block' : 'none';
-    syncBtn.textContent = 'Sync to app';
-    syncBtn.disabled = false;
-  }
-
-  modal.classList.add('show');
+  document.getElementById('gcalDetailModal').classList.add('show');
+  // Store for potential delete
+  document.getElementById('gcalDetailModal').dataset.gcalId = ev.gcalId;
+  document.getElementById('gcalDetailModal').dataset.calId  = ev.calId;
 }
 function gcalCloseDetail() {
   document.getElementById('gcalDetailModal').classList.remove('show');
-}
-
-function gcalSyncToApp() {
-  const modal = document.getElementById('gcalDetailModal');
-  const ev    = modal._gcalEv;
-  if (!ev || ev.allDay) return;
-
-  const dateKey = ev.start.length > 5 ? ev.start.slice(0, 10)
-    : calDateKey(calDisplayDays().find(d => calDateKey(d) === modal.dataset.dateKey) || calToday());
-
-  // Find the correct date key from gcalEvents
-  let foundKey = null;
-  Object.entries(gcalEvents).forEach(([k, evs]) => {
-    if (evs.some(e => e.gcalId === ev.gcalId)) foundKey = k;
-  });
-  if (!foundKey) { showToast('Could not find event date.'); return; }
-
-  calEnsureDay(foundKey);
-
-  // Create local event linked to this GCal event (so it won't be re-pushed)
-  const localEv = {
-    id:           calEventIdCtr++,
-    title:        ev.title,
-    start:        ev.start,
-    end:          ev.end,
-    color:        CAL_COLORS[0],
-    type:         'event',
-    fromTemplate: false,
-    gcalId:       ev.gcalId,
-    gcalCalId:    ev.calId,
-  };
-  calEvents[foundKey].push(localEv);
-  calSave();
-  calRefresh();
-
-  // Hide button — it's now synced
-  const syncBtn = document.getElementById('gcalSyncToAppBtn');
-  if (syncBtn) { syncBtn.textContent = '✓ Synced!'; syncBtn.disabled = true; }
-  setTimeout(() => gcalCloseDetail(), 1000);
-  showToast('Event added to app ✓');
 }
 async function gcalDeleteFromDetail() {
   const modal  = document.getElementById('gcalDetailModal');
