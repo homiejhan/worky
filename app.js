@@ -1316,11 +1316,14 @@ function calToggleWeekMode() {
 
 /* ── User mode modal ── */
 function openCalModal(dateKey, evId, defaultStart) {
-  // Reconcile just this day before showing modal, if we have synced GCal data
-  if (gcalIsConnected() && Object.keys(gcalEvents).length > 0) {
+  // Reconcile just this one day before building the modal.
+  // Even if gcalEvents is empty (no sync yet), we clear gcalId on unmatched events
+  // so "Send to GCal" always reflects reality.
+  if (gcalIsConnected()) {
     const localEvs = calEvents[dateKey] || [];
     const gcalEvs  = gcalEvents[dateKey] || [];
     const claimed  = new Set();
+    const hasDayData = gcalEvs.length > 0 || Object.keys(gcalEvents).length > 0;
     localEvs.forEach(localEv => {
       if (localEv.type === 'divider') return;
       const match = gcalEvs.find(g =>
@@ -1328,16 +1331,20 @@ function openCalModal(dateKey, evId, defaultStart) {
         g.title.trim() === (localEv.title || '').trim() &&
         g.start === localEv.start && g.end === localEv.end
       );
-      if (match) { localEv.gcalId = match.gcalId; localEv.gcalCalId = match.calId; claimed.add(match.gcalId); }
-      else { localEv.gcalId = null; localEv.gcalCalId = null; }
+      if (match) {
+        localEv.gcalId = match.gcalId; localEv.gcalCalId = match.calId;
+        claimed.add(match.gcalId);
+      } else if (hasDayData) {
+        localEv.gcalId = null; localEv.gcalCalId = null;
+      }
     });
   }
   calEditDate = dateKey;
   calEditDow  = null;
   calEditId   = (evId !== undefined && evId !== null) ? evId : null;
-
-  _buildCalModal(evId, defaultStart, false,
-    (calEvents[dateKey]||[]).find(e=>e.id===evId) || null);
+  // Re-fetch event AFTER reconcile so gcalId is current
+  const existingEv = (calEvents[dateKey]||[]).find(e => e.id === evId) || null;
+  _buildCalModal(evId, defaultStart, false, existingEv);
 }
 
 /* ── Format mode modal (template editing) ── */
@@ -1365,7 +1372,8 @@ function _buildCalModal(evId, defaultStart, isFmt, existingEv) {
     swatchEl.appendChild(dot);
   });
 
-  const deleteBtn = document.getElementById('calEventDeleteBtn');
+  const deleteBtn    = document.getElementById('calEventDeleteBtn');
+  const sendGcalBtn  = document.getElementById('calSendToGcalBtn');
   const titleEl   = document.getElementById('calEventModalTitle');
   const tmplRow   = document.getElementById('calTemplateRow');
 
@@ -1405,6 +1413,13 @@ function _buildCalModal(evId, defaultStart, isFmt, existingEv) {
     setCalEventType(existingEv.type || 'event');
     titleEl.textContent = isFmt ? 'Edit template' : 'Edit event';
     deleteBtn.style.display = 'block';
+    if (sendGcalBtn) {
+      const alreadySynced = !!(existingEv.gcalId);
+      const showSend = gcalIsConnected() && !isFmt && (existingEv.type || 'event') !== 'divider' && !alreadySynced;
+      sendGcalBtn.style.display = showSend ? 'block' : 'none';
+      sendGcalBtn.textContent = 'Send to Google Calendar';
+      sendGcalBtn.disabled = false;
+    }
     document.querySelectorAll('.cal-color-dot').forEach(d =>
       d.classList.toggle('selected', d.style.background === calSelectedColor || d.style.backgroundColor === calSelectedColor)
     );
@@ -1416,6 +1431,7 @@ function _buildCalModal(evId, defaultStart, isFmt, existingEv) {
     setCalEventType('event');
     titleEl.textContent = isFmt ? 'Add template' : 'Add event';
     deleteBtn.style.display = 'none';
+    if (sendGcalBtn) sendGcalBtn.style.display = 'none';
   }
 
   document.getElementById('calEventModal').classList.add('show');
@@ -1424,6 +1440,29 @@ function _buildCalModal(evId, defaultStart, isFmt, existingEv) {
 function closeCalModal() {
   document.getElementById('calEventModal').classList.remove('show');
   calEditId = null; calEditDate = null; calEditDow = null;
+}
+
+async function calSendToGcal() {
+  if (!gcalIsConnected() || !calEditDate || calEditId === null) return;
+  const ev = (calEvents[calEditDate] || []).find(e => e.id === calEditId);
+  if (!ev || ev.type === 'divider' || ev.gcalId) return;
+  const calId = gcalCalendars.find(c => c.enabled)?.id;
+  if (!calId) { showToast('No Google Calendar selected.'); return; }
+  const btn = document.getElementById('calSendToGcalBtn');
+  btn.textContent = 'Sending…'; btn.disabled = true;
+  const gcalId = await gcalPushEvent(ev, calEditDate, calId);
+  if (gcalId) {
+    ev.gcalId = gcalId; ev.gcalCalId = calId;
+    calSave();
+    btn.textContent = '✓ Sent!';
+    btn.style.color = '#4285f4';
+    setTimeout(() => { btn.style.display = 'none'; }, 1500);
+    await gcalSyncAll();
+    showToast('Sent to Google Calendar ✓');
+  } else {
+    btn.textContent = 'Send to Google Calendar';
+    btn.disabled = false;
+  }
 }
 
 function setCalEventType(type) {
@@ -1867,37 +1906,36 @@ async function gcalSyncAll() {
 
   gcalSyncing = false;
   gcalUpdateSyncBtn();
+  gcalReconcile();
+  calRefresh();
+  calSave();
+}
 
-  // Reconcile: for every local event, find a GCal match by title+start+end.
-  // If found → link. If not found (including deleted GCal events) → clear gcalId.
-  // Only runs on days we just fetched (all display days), so we have authoritative data.
-  const fetchedKeys = new Set(calDisplayDays().map(calDateKey));
-  fetchedKeys.forEach(dateKey => {
+function gcalReconcile() {
+  const hasSyncedData = Object.keys(gcalEvents).length > 0;
+  const validKeys = calDisplayDays().map(calDateKey);
+  validKeys.forEach(dateKey => {
     const localEvs = calEvents[dateKey] || [];
     const gcalEvs  = gcalEvents[dateKey] || [];
     const claimed  = new Set();
     localEvs.forEach(localEv => {
       if (localEv.type === 'divider') return;
       const match = gcalEvs.find(g =>
-        !g.allDay &&
-        !claimed.has(g.gcalId) &&
+        !g.allDay && !claimed.has(g.gcalId) &&
         g.title.trim() === (localEv.title || '').trim() &&
-        g.start === localEv.start &&
-        g.end   === localEv.end
+        g.start === localEv.start && g.end === localEv.end
       );
       if (match) {
         localEv.gcalId    = match.gcalId;
         localEv.gcalCalId = match.calId;
         claimed.add(match.gcalId);
-      } else {
-        // No match on a freshly-fetched day → definitely unsynced
+      } else if (hasSyncedData) {
         localEv.gcalId    = null;
         localEv.gcalCalId = null;
       }
     });
   });
   calSave();
-  calRefresh();
 }
 
 /* ── Push a local event to GCal ── */
@@ -1996,18 +2034,50 @@ calRenderDayCol = function(col, dateKey) {
 
 /* ── GCal event detail popup ── */
 function gcalOpenEventDetail(ev) {
-  document.getElementById('gcalDetailTitle').textContent  = ev.title;
-  document.getElementById('gcalDetailCal').textContent    = ev.calName;
-  document.getElementById('gcalDetailCal').style.color    = ev.color;
-  document.getElementById('gcalDetailTime').textContent   = ev.allDay ? 'All day' : `${calFmtTime(ev.start)} – ${calFmtTime(ev.end)}`;
-  document.getElementById('gcalDetailLink').href          = ev.htmlLink || '#';
-  document.getElementById('gcalDetailModal').classList.add('show');
-  // Store for potential delete
-  document.getElementById('gcalDetailModal').dataset.gcalId = ev.gcalId;
-  document.getElementById('gcalDetailModal').dataset.calId  = ev.calId;
+  const modal = document.getElementById('gcalDetailModal');
+  document.getElementById('gcalDetailTitle').textContent = ev.title;
+  document.getElementById('gcalDetailCal').textContent   = ev.calName;
+  document.getElementById('gcalDetailCal').style.color   = ev.color;
+  document.getElementById('gcalDetailTime').textContent  = ev.allDay ? 'All day' : `${calFmtTime(ev.start)} – ${calFmtTime(ev.end)}`;
+  document.getElementById('gcalDetailLink').href         = ev.htmlLink || '#';
+  modal.dataset.gcalId = ev.gcalId;
+  modal.dataset.calId  = ev.calId;
+  modal._gcalEv = ev;
+  const syncBtn = document.getElementById('gcalSyncToAppBtn');
+  if (syncBtn) {
+    const alreadyLocal = !ev.allDay && calDisplayDays().some(day => {
+      const key = calDateKey(day);
+      return (calEvents[key] || []).some(e => e.gcalId === ev.gcalId);
+    });
+    syncBtn.style.display = (!ev.allDay && !alreadyLocal) ? 'block' : 'none';
+    syncBtn.textContent = 'Sync to app';
+    syncBtn.disabled = false;
+  }
+  modal.classList.add('show');
 }
 function gcalCloseDetail() {
   document.getElementById('gcalDetailModal').classList.remove('show');
+}
+function gcalSyncToApp() {
+  const modal = document.getElementById('gcalDetailModal');
+  const ev    = modal._gcalEv;
+  if (!ev || ev.allDay) return;
+  let foundKey = null;
+  Object.entries(gcalEvents).forEach(([k, evs]) => {
+    if (evs.some(e => e.gcalId === ev.gcalId)) foundKey = k;
+  });
+  if (!foundKey) { showToast('Could not find event date.'); return; }
+  calEnsureDay(foundKey);
+  calEvents[foundKey].push({
+    id: calEventIdCtr++, title: ev.title, start: ev.start, end: ev.end,
+    color: CAL_COLORS[0], type: 'event', fromTemplate: false,
+    gcalId: ev.gcalId, gcalCalId: ev.calId,
+  });
+  calSave(); calRefresh();
+  const syncBtn = document.getElementById('gcalSyncToAppBtn');
+  if (syncBtn) { syncBtn.textContent = '✓ Synced!'; syncBtn.disabled = true; }
+  setTimeout(() => gcalCloseDetail(), 1000);
+  showToast('Event added to app ✓');
 }
 async function gcalDeleteFromDetail() {
   const modal  = document.getElementById('gcalDetailModal');
