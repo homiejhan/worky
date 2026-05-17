@@ -2059,52 +2059,40 @@ async function gcalSyncAll() {
 }
 
 /* ── Reconcile local events against fetched GCal events ──
- *  1. Break links where title or times no longer match, or GCal event deleted
- *  2. Auto-link unlinked local events that exactly match a GCal event
+ *  For every local event on every visible day:
+ *  - Find a GCal event with identical title, start, and end
+ *  - If found → set gcalId/gcalCalId to that event (sync confirmed)
+ *  - If not found → clear gcalId/gcalCalId (unsynced)
+ *  This runs from scratch every time — we never trust stale gcalId values.
  */
 function gcalReconcile() {
   const validKeys = calDisplayDays().map(calDateKey);
-
-  // Build a flat map of all fetched GCal events by gcalId for quick lookup
-  const gcalById = {};
-  Object.values(gcalEvents).forEach(evs => {
-    evs.forEach(g => { gcalById[g.gcalId] = g; });
-  });
 
   validKeys.forEach(dateKey => {
     const localEvs = calEvents[dateKey] || [];
     const gcalEvs  = gcalEvents[dateKey] || [];
 
+    // Track which GCal event IDs have been claimed so we don't double-link
+    const claimed = new Set();
+
     localEvs.forEach(localEv => {
       if (localEv.type === 'divider' || localEv.fromTemplate) return;
 
-      if (localEv.gcalId) {
-        // ── Validate existing link ──
-        const linked = gcalById[localEv.gcalId];
-        const valid  = linked
-          && linked.title.trim() === (localEv.title || '').trim()
-          && linked.start        === localEv.start
-          && linked.end          === localEv.end;
+      const match = gcalEvs.find(g =>
+        !g.allDay &&
+        !claimed.has(g.gcalId) &&
+        g.title.trim() === (localEv.title || '').trim() &&
+        g.start === localEv.start &&
+        g.end   === localEv.end
+      );
 
-        if (!valid) {
-          // Break link — GCal event deleted, moved, or renamed
-          localEv.gcalId    = null;
-          localEv.gcalCalId = null;
-        }
+      if (match) {
+        localEv.gcalId    = match.gcalId;
+        localEv.gcalCalId = match.calId;
+        claimed.add(match.gcalId);
       } else {
-        // ── Auto-link: find exact title + time match in same day's GCal events ──
-        const linkedGcalIds = new Set(localEvs.filter(e => e.gcalId).map(e => e.gcalId));
-        const match = gcalEvs.find(g =>
-          !g.allDay &&
-          !linkedGcalIds.has(g.gcalId) &&
-          g.title.trim() === (localEv.title || '').trim() &&
-          g.start === localEv.start &&
-          g.end   === localEv.end
-        );
-        if (match) {
-          localEv.gcalId    = match.gcalId;
-          localEv.gcalCalId = match.calId;
-        }
+        localEv.gcalId    = null;
+        localEv.gcalCalId = null;
       }
     });
   });
