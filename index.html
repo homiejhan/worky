@@ -211,6 +211,42 @@
   </div>
 </div>
 <div class="toast" id="toast"></div>
+
+<!-- ── GCAL CALENDAR LIST MODAL ── -->
+<div class="modal-overlay" id="gcalModal">
+  <div class="modal-box" style="width:min(440px,96vw);max-height:85vh;overflow-y:auto">
+    <div class="modal-title">Google Calendars</div>
+    <div class="gcal-section-label">Visible calendars</div>
+    <div class="modal-sub" style="margin-top:-6px">Toggle which calendars show in Focus.</div>
+    <div id="gcalCalList" style="display:flex;flex-direction:column;gap:10px"></div>
+    <div class="gcal-section-label" id="gcalLinkLabel" style="margin-top:8px">Link local events to GCal</div>
+    <div class="modal-sub" style="margin-top:-6px">Assign existing events to a Google Calendar.</div>
+    <div id="gcalLinkList" style="display:flex;flex-direction:column;gap:6px;max-height:260px;overflow-y:auto"></div>
+    <div class="modal-actions" style="margin-top:8px">
+      <button class="modal-cancel" onclick="gcalDisconnect()" style="color:#e05555;border-color:rgba(220,60,60,0.3)">Disconnect</button>
+      <button class="modal-primary" id="gcalSyncBtn" onclick="gcalSyncAll()">Sync now</button>
+    </div>
+    <button class="modal-cancel" style="width:100%;margin-top:4px" onclick="gcalCloseModal()">Close</button>
+  </div>
+</div>
+
+<!-- ── GCAL EVENT DETAIL MODAL ── -->
+<div class="modal-overlay" id="gcalDetailModal">
+  <div class="modal-box">
+    <div class="modal-title" id="gcalDetailTitle"></div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font-size:12px;font-weight:500" id="gcalDetailCal"></div>
+      <div style="font-size:12px;color:var(--text-secondary)" id="gcalDetailTime"></div>
+    </div>
+    <div class="modal-actions" style="margin-top:4px">
+      <button class="modal-cancel" onclick="gcalCloseDetail()">Close</button>
+      <a id="gcalDetailLink" target="_blank" rel="noopener" style="flex:1">
+        <button class="modal-primary" style="width:100%">Open in GCal ↗</button>
+      </a>
+    </div>
+    <button class="cal-delete-btn" onclick="gcalDeleteFromDetail()" style="margin-top:4px">Delete from Google Calendar</button>
+  </div>
+</div>
 <script src="app.js"></script>
 </body>
 </html>
