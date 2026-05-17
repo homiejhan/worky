@@ -1491,7 +1491,8 @@ function _buildCalModal(evId, defaultStart, isFmt, existingEv) {
     swatchEl.appendChild(dot);
   });
 
-  const deleteBtn = document.getElementById('calEventDeleteBtn');
+  const deleteBtn    = document.getElementById('calEventDeleteBtn');
+  const sendGcalBtn  = document.getElementById('calSendToGcalBtn');
   const titleEl   = document.getElementById('calEventModalTitle');
   const tmplRow   = document.getElementById('calTemplateRow');
 
@@ -1531,6 +1532,14 @@ function _buildCalModal(evId, defaultStart, isFmt, existingEv) {
     setCalEventType(existingEv.type || 'event');
     titleEl.textContent = isFmt ? 'Edit template' : 'Edit event';
     deleteBtn.style.display = 'block';
+    // Show "Send to GCal" only if: connected, user mode, not a divider, not already synced
+    if (sendGcalBtn) {
+      const alreadySynced = !!(existingEv.gcalId);
+      const showSend = gcalIsConnected() && !isFmt && (existingEv.type || 'event') !== 'divider' && !alreadySynced;
+      sendGcalBtn.style.display = showSend ? 'block' : 'none';
+      sendGcalBtn.textContent = 'Send to Google Calendar';
+      sendGcalBtn.disabled = false;
+    }
     document.querySelectorAll('.cal-color-dot').forEach(d =>
       d.classList.toggle('selected', d.style.background === calSelectedColor || d.style.backgroundColor === calSelectedColor)
     );
@@ -1542,6 +1551,7 @@ function _buildCalModal(evId, defaultStart, isFmt, existingEv) {
     setCalEventType('event');
     titleEl.textContent = isFmt ? 'Add template' : 'Add event';
     deleteBtn.style.display = 'none';
+    if (sendGcalBtn) sendGcalBtn.style.display = 'none';
   }
 
   document.getElementById('calEventModal').classList.add('show');
@@ -1550,6 +1560,39 @@ function _buildCalModal(evId, defaultStart, isFmt, existingEv) {
 function closeCalModal() {
   document.getElementById('calEventModal').classList.remove('show');
   calEditId = null; calEditDate = null; calEditDow = null;
+}
+
+async function calSendToGcal() {
+  if (!gcalIsConnected() || !calEditDate || calEditId === null) return;
+  const ev = (calEvents[calEditDate] || []).find(e => e.id === calEditId);
+  if (!ev || ev.type === 'divider' || ev.gcalId) return;
+
+  // Pick calendar — prefer first enabled, else prompt user via existing topic select if visible
+  const select = document.getElementById('calTopicSelect');
+  const calId  = (select && select.value) ? select.value
+               : gcalCalendars.find(c => c.enabled)?.id;
+  if (!calId) { showToast('No Google Calendar selected.'); return; }
+
+  const btn = document.getElementById('calSendToGcalBtn');
+  btn.textContent = 'Sending…';
+  btn.disabled = true;
+
+  const gcalId = await gcalPushEvent(ev, calEditDate, calId);
+  if (gcalId) {
+    ev.gcalId    = gcalId;
+    ev.gcalCalId = calId;
+    calSave();
+    btn.textContent = '✓ Sent!';
+    btn.style.color = '#4285f4';
+    setTimeout(() => {
+      btn.style.display = 'none'; // hide — it's now synced
+    }, 1500);
+    await gcalSyncAll();
+    showToast('Sent to Google Calendar ✓');
+  } else {
+    btn.textContent = 'Send to Google Calendar';
+    btn.disabled = false;
+  }
 }
 
 function setCalEventType(type) {
