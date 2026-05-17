@@ -214,7 +214,8 @@
 
 <!-- ── GCAL CALENDAR LIST MODAL ── -->
 <div class="modal-overlay" id="gcalModal">
-  <div class="modal-box" style="width:min(440px,96vw);max-height:85vh;overflow-y:auto">
+  <div class="modal-box" style="width:min(440px,96vw);max-height:85vh;overflow-y:auto;position:relative">
+    <button onclick="gcalCloseModal()" style="position:absolute;top:12px;right:12px;background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;line-height:1;padding:2px 6px;" title="Close">×</button>
     <div class="modal-title">Google Calendars</div>
     <div class="gcal-section-label">Visible calendars</div>
     <div class="modal-sub" style="margin-top:-6px">Toggle which calendars show in Focus.</div>
@@ -226,7 +227,6 @@
       <button class="modal-cancel" onclick="gcalDisconnect()" style="color:#e05555;border-color:rgba(220,60,60,0.3)">Disconnect</button>
       <button class="modal-primary" id="gcalSyncBtn" onclick="gcalSyncAll()">Sync now</button>
     </div>
-    <button class="modal-cancel" style="width:100%;margin-top:4px" onclick="gcalCloseModal()">Close</button>
   </div>
 </div>
 
