@@ -963,20 +963,19 @@
 .cal-fmt-col { background: rgba(93,202,165,0.02); }
 .cal-fmt-col-header { color: var(--accent-green) !important; opacity: 0.8; }
 
-/* ── List-level drag & drop ── */
-.list-drag-handle {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  flex-shrink: 0;
-  color: var(--text-muted);
-  cursor: grab;
-  touch-action: none;
-  user-select: none;
+/* Send to GCal button in event modal */
+.gcal-send-btn {
+  width: 100%;
+  padding: 10px;
+  margin-top: 6px;
+  border-radius: var(--radius-md);
+  font-size: 12px; font-weight: 500; font-family: var(--font-sans);
+  background: rgba(66,133,244,0.08);
+  color: #4285f4;
+  border: 1px solid rgba(66,133,244,0.3);
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+  touch-action: manipulation;
 }
-.list-drag-handle:active { cursor: grabbing; }
-.todo-card.list-reorderable:hover .list-drag-handle,
-.todo-card.list-reorderable .list-drag-handle { display: flex; }
-.todo-card.list-dragging { opacity: 0.35; }
-.todo-card.list-drag-over { outline: 2px solid var(--accent-green); outline-offset: -2px; border-radius: var(--radius-md); }
+.gcal-send-btn:hover:not(:disabled) { background: rgba(66,133,244,0.15); }
+.gcal-send-btn:disabled { opacity: 0.6; cursor: default; }
