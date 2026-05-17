@@ -1458,13 +1458,14 @@ function calToggleWeekMode() {
 
 /* ── User mode modal ── */
 function openCalModal(dateKey, evId, defaultStart) {
-  if (gcalIsConnected()) gcalReconcile(); // refresh link state before showing modal
+  if (gcalIsConnected()) gcalReconcile(); // update gcalId state before reading event
   calEditDate = dateKey;
   calEditDow  = null;
   calEditId   = (evId !== undefined && evId !== null) ? evId : null;
 
-  _buildCalModal(evId, defaultStart, false,
-    (calEvents[dateKey]||[]).find(e=>e.id===evId) || null);
+  // Re-fetch event AFTER reconcile so gcalId is current
+  const existingEv = (calEvents[dateKey]||[]).find(e => e.id === evId) || null;
+  _buildCalModal(evId, defaultStart, false, existingEv);
 }
 
 /* ── Format mode modal (template editing) ── */
@@ -2066,14 +2067,16 @@ async function gcalSyncAll() {
  *  This runs from scratch every time — we never trust stale gcalId values.
  */
 function gcalReconcile() {
+  // If we haven't synced yet this session, gcalEvents is empty —
+  // don't wipe existing gcalIds since we have nothing to compare against
+  const hasSyncedData = Object.keys(gcalEvents).length > 0;
+
   const validKeys = calDisplayDays().map(calDateKey);
 
   validKeys.forEach(dateKey => {
     const localEvs = calEvents[dateKey] || [];
     const gcalEvs  = gcalEvents[dateKey] || [];
-
-    // Track which GCal event IDs have been claimed so we don't double-link
-    const claimed = new Set();
+    const claimed  = new Set();
 
     localEvs.forEach(localEv => {
       if (localEv.type === 'divider' || localEv.fromTemplate) return;
@@ -2087,13 +2090,16 @@ function gcalReconcile() {
       );
 
       if (match) {
+        // Always link when we find a match
         localEv.gcalId    = match.gcalId;
         localEv.gcalCalId = match.calId;
         claimed.add(match.gcalId);
-      } else {
+      } else if (hasSyncedData) {
+        // Only clear if we actually have fresh GCal data to compare against
         localEv.gcalId    = null;
         localEv.gcalCalId = null;
       }
+      // If !hasSyncedData and no match: leave gcalId untouched
     });
   });
 
