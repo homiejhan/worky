@@ -5,105 +5,131 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Focus — Productivity Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&family=Lora:wght@300;400&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=Lora:ital,wght@1,400;1,500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<!-- ── DESKTOP ── -->
+
+<!-- ════════ DESKTOP LAYOUT ════════ -->
 <div class="desktop-app" id="desktopApp">
-  <div class="left-panel" id="leftPanel">
-    <div class="wakeup-row" id="wakeupRow-d" onclick="toggleWakeup()">
+
+  <aside class="left-panel" id="leftPanel">
+    <div class="wakeup-row" id="wakeupRow-d">
       <div class="wakeup-box" id="wakeupBox-d">
         <svg class="wakeup-check" width="10" height="10" viewBox="0 0 10 10" fill="none">
           <path d="M1.5 5L4 7.5L8.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </div>
-      <span class="wakeup-label" id="wakeupLabel-d">Woke up</span>
+      <span class="wakeup-label">Woke up</span>
     </div>
+
+    <button class="cal-nav-tab" id="calDesktopNavTab">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+        <rect x="1" y="2" width="10" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2"/>
+        <path d="M1 5h10" stroke="currentColor" stroke-width="1.2"/>
+        <path d="M4 1v2M8 1v2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+      </svg>
+      Calendar
+    </button>
+    <button class="cal-week-mode-btn" id="calWeekModeBtn">Sun – Sat</button>
+
     <div class="section-label">Timers</div>
+    <div class="timer-stack" id="timerStack-d"></div>
     <div class="timer-summary" id="timerSummary-d"></div>
-    <button class="fmt-add-timer" onclick="addFormatTimer('d')">
+    <button class="fmt-add-timer" id="addTimerBtn-d">
       <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1V10M1 5.5H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
       Add timer
     </button>
-  </div>
 
-  <div class="right-panel" id="rightPanel">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:4px">
-      <div class="section-label" style="padding:0">Daily</div>
-      <button class="fmt-add-daily" onclick="addFormatDaily()">+ Add list</button>
+    <div class="left-panel-spacer"></div>
+    <button class="gcal-connect-btn" id="gcalConnectBtn">+ Google Cal</button>
+  </aside>
+
+  <main class="right-panel" id="rightPanel">
+    <div class="panel-header">
+      <span class="section-label">Daily</span>
+      <button class="fmt-add-daily" id="addDailyBtn">+ Add list</button>
     </div>
     <div class="lists-grid" id="defaultContainer-d"></div>
-    <div class="section-divider"></div>
+
+    <hr class="section-divider">
+
     <div class="panel-header">
-      <span class="section-label" style="padding:0">My lists</span>
-      <button class="add-btn" onclick="addTodoList()">+ New list</button>
+      <span class="section-label">My lists</span>
+      <button class="add-btn" id="addListBtn-d">+ New list</button>
     </div>
     <div class="lists-grid" id="todoContainer-d">
       <div class="empty-state" id="emptyState-d">No lists yet.<br>Click "+ New list" to get started.</div>
     </div>
-  </div>
+  </main>
 </div>
 
-<!-- ── MOBILE ── -->
+<!-- ════════ MOBILE LAYOUT ════════ -->
 <div class="mobile-app" id="mobileApp">
-  <div class="tab-bar">
-    <button class="tab-btn active" id="tab-0" onclick="goTab(0,true)">Timers</button>
-    <button class="tab-btn"        id="tab-1" onclick="goTab(1,true)">Daily</button>
-    <button class="tab-btn"        id="tab-2" onclick="goTab(2,true)">My Lists</button>
-    <button class="tab-btn"        id="tab-3" onclick="goTab(3,true)">Calendar</button>
-  </div>
+  <nav class="tab-bar">
+    <button class="tab-btn active" id="tab-0">Timers</button>
+    <button class="tab-btn" id="tab-1">Daily</button>
+    <button class="tab-btn" id="tab-2">My Lists</button>
+    <button class="tab-btn" id="tab-3">Calendar</button>
+  </nav>
+
   <div class="swipe-container" id="swipeContainer">
     <div class="swipe-track" id="swipeTrack">
-      <!-- Tab 0: Woke up + Timers -->
-      <div class="swipe-panel" id="mobileTimerPanel">
-        <div class="wakeup-row" id="wakeupRow-m" onclick="toggleWakeup()">
+
+      <!-- Tab 0: Timers -->
+      <section class="swipe-panel" id="mobileTimerPanel">
+        <div class="wakeup-row" id="wakeupRow-m">
           <div class="wakeup-box" id="wakeupBox-m">
             <svg class="wakeup-check" width="10" height="10" viewBox="0 0 10 10" fill="none">
               <path d="M1.5 5L4 7.5L8.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </div>
-          <span class="wakeup-label" id="wakeupLabel-m">Woke up</span>
+          <span class="wakeup-label">Woke up</span>
         </div>
         <div class="section-label">Timers</div>
+        <div class="timer-stack" id="timerStack-m"></div>
         <div class="timer-summary" id="timerSummary-m"></div>
-        <button class="fmt-add-timer" onclick="addFormatTimer('m')">
+        <button class="fmt-add-timer" id="addTimerBtn-m">
           <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1V10M1 5.5H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           Add timer
         </button>
-      </div>
-      <!-- Tab 1: Daily lists -->
-      <div class="swipe-panel">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:4px">
-          <div class="section-label" style="padding:0">Daily</div>
-          <button class="fmt-add-daily" onclick="addFormatDaily()">+ Add list</button>
+      </section>
+
+      <!-- Tab 1: Daily -->
+      <section class="swipe-panel">
+        <div class="panel-header">
+          <span class="section-label">Daily</span>
+          <button class="fmt-add-daily" id="addDailyBtn-m">+ Add list</button>
         </div>
         <div id="defaultContainer-m"></div>
-      </div>
-      <!-- Tab 2: My lists -->
-      <div class="swipe-panel">
+      </section>
+
+      <!-- Tab 2: My Lists -->
+      <section class="swipe-panel">
         <div class="panel-header">
-          <span class="section-label" style="padding:0">My lists</span>
-          <button class="add-btn" onclick="addTodoList()">+ New list</button>
+          <span class="section-label">My lists</span>
+          <button class="add-btn" id="addListBtn-m">+ New list</button>
         </div>
         <div id="todoContainer-m">
           <div class="empty-state" id="emptyState-m">No lists yet.<br>Tap "+ New list" to get started.</div>
         </div>
-      </div>
-      <!-- Tab 3: Calendar (mobile) -->
-      <div class="swipe-panel cal-swipe-panel" id="mobileCalPanel">
+      </section>
+
+      <!-- Tab 3: Calendar -->
+      <section class="swipe-panel cal-swipe-panel" id="mobileCalPanel">
         <div class="cal-mobile-header">
-          <button class="cal-nav-btn" onclick="calNavDay(-1)">&#8249;</button>
+          <button class="cal-nav-btn" id="calNavPrev">&#8249;</button>
           <div class="cal-day-title" id="calDayTitle"></div>
-          <button class="cal-nav-btn" onclick="calNavDay(1)">&#8250;</button>
+          <button class="cal-nav-btn" id="calNavNext">&#8250;</button>
         </div>
         <div class="cal-grid-wrap" id="calMobileGrid"></div>
-      </div>
+      </section>
+
     </div>
   </div>
 </div>
 
-<!-- ── DESKTOP CALENDAR PANEL ── -->
+<!-- ════════ DESKTOP CALENDAR PANEL ════════ -->
 <div class="cal-desktop-panel" id="calDesktopPanel">
   <div class="cal-desktop-header">
     <div class="cal-desktop-title" id="calDesktopTitle"></div>
@@ -119,135 +145,131 @@
   </div>
 </div>
 
-<!-- ── CALENDAR EVENT MODAL ── -->
+<!-- ════════ EVENT MODAL ════════ -->
 <div class="modal-overlay" id="calEventModal">
   <div class="modal-box">
     <div class="modal-title" id="calEventModalTitle">Add event</div>
-    <input class="cal-event-input" id="calEventTitle" type="text" placeholder="Event title">
+    <input class="cal-event-input" id="calEventTitle" type="text" placeholder="Event title" autocomplete="off">
     <div class="cal-event-row">
       <div class="cal-event-field">
-        <label class="cal-event-label">Start</label>
+        <label class="cal-event-label" for="calEventStart">Start</label>
         <input class="cal-event-input cal-time-input" id="calEventStart" type="time">
       </div>
-      <div class="cal-event-field">
-        <label class="cal-event-label">End</label>
+      <div class="cal-event-field" id="calEventEndField">
+        <label class="cal-event-label" for="calEventEnd">End</label>
         <input class="cal-event-input cal-time-input" id="calEventEnd" type="time">
       </div>
     </div>
     <div class="cal-event-row">
-      <label class="cal-event-label">Color</label>
+      <span class="cal-event-label">Color</span>
       <div class="cal-color-swatches" id="calColorSwatches"></div>
     </div>
-    <div class="cal-event-type-row">
-      <label class="cal-event-label">Type</label>
-      <div style="display:flex;gap:8px;flex:1">
-        <button class="cal-type-btn active" id="calTypeEvent" onclick="setCalEventType('event')">Event</button>
-        <button class="cal-type-btn" id="calTypeDivider" onclick="setCalEventType('divider')">Divider</button>
+    <div class="cal-event-row">
+      <span class="cal-event-label">Type</span>
+      <div class="cal-type-toggle">
+        <button class="cal-type-btn active" id="calTypeEvent">Event</button>
+        <button class="cal-type-btn" id="calTypeDivider">Divider</button>
       </div>
     </div>
-    <div class="cal-template-row" id="calTemplateRow">
-      <label class="cal-event-label" style="cursor:pointer;display:flex;align-items:center;gap:6px">
-        <input type="checkbox" id="calEventTemplate"> Template (repeats daily)
-      </label>
+    <div class="cal-dow-row" id="calDowRow"></div>
+    <div class="modal-actions">
+      <button class="modal-cancel" id="calModalCancel">Cancel</button>
+      <button class="modal-primary" id="calEventSaveBtn">Save</button>
     </div>
-    <div class="modal-actions" style="margin-top:4px">
-      <button class="modal-cancel" onclick="closeCalModal()">Cancel</button>
-      <button class="modal-primary" id="calEventSaveBtn" onclick="saveCalEvent()">Save</button>
-    </div>
-    <button class="cal-delete-btn" id="calEventDeleteBtn" onclick="deleteCalEvent()" style="display:none">Delete event</button>
-    <button class="gcal-send-btn" id="calSendToGcalBtn" onclick="calSendToGcal()" style="display:none">Send to Google Calendar</button>
+    <button class="cal-delete-btn" id="calEventDeleteBtn">Delete event</button>
+    <button class="gcal-send-btn" id="calSendToGcalBtn">Send to Google Calendar</button>
   </div>
 </div>
 
-<!-- ── PERSISTENT DATA BAR (both layouts) ── -->
-<div class="data-bar">
-  <button class="fmt-btn" id="fmtBtn" onclick="toggleFormatMode()">Formats</button>
-  <span class="fmt-banner">Format mode</span>
+<!-- ════════ DATA BAR ════════ -->
+<footer class="data-bar">
+  <button class="fmt-btn" id="fmtBtn">Formats</button>
+  <span class="fmt-banner">Format mode — editing defaults</span>
   <div class="data-spacer"></div>
-  <button class="data-btn" onclick="openExportModal()">Export</button>
-  <button class="data-btn accent" onclick="openImportModal()">Import</button>
-  <input type="file" id="fileInput" accept=".json" style="display:none" onchange="loadStateFile(this)">
-  <button class="data-btn reset-all-btn" onclick="confirmResetAll()">Reset all</button>
-</div>
+  <button class="data-btn" id="exportBtn">Export</button>
+  <button class="data-btn accent" id="importBtn">Import</button>
+  <input type="file" id="fileInput" accept=".json" style="display:none">
+  <button class="data-btn danger" id="resetAllBtn">Reset all</button>
+  <button class="data-btn danger" id="clearStorageBtn">Clear storage</button>
+</footer>
 
-<!-- ── EXPORT MODAL ── -->
+<!-- ════════ EXPORT MODAL ════════ -->
 <div class="modal-overlay" id="exportModal">
   <div class="modal-box">
+    <button class="modal-x" data-close="exportModal" title="Close">×</button>
     <div class="modal-title">Export data</div>
     <div class="modal-sub">Copy your data to clipboard or download it as a file.</div>
-    <textarea class="modal-textarea" id="exportTextarea" readonly placeholder="Your data will appear here..."></textarea>
+    <textarea class="modal-textarea" id="exportTextarea" readonly></textarea>
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="closeModal('exportModal')">Close</button>
-      <button class="modal-primary" onclick="exportCopy()">Copy to clipboard</button>
+      <button class="modal-primary" id="exportCopyBtn">Copy to clipboard</button>
     </div>
     <div class="modal-divider">or</div>
-    <button class="modal-file-btn" onclick="exportDownload()">Download as .json file</button>
+    <button class="modal-file-btn" id="exportDownloadBtn">Download as .json file</button>
   </div>
 </div>
 
-<!-- ── IMPORT MODAL ── -->
+<!-- ════════ IMPORT MODAL ════════ -->
 <div class="modal-overlay" id="importModal">
   <div class="modal-box">
+    <button class="modal-x" data-close="importModal" title="Close">×</button>
     <div class="modal-title">Import data</div>
     <div class="modal-sub">Paste exported data below, or load from a file.</div>
     <textarea class="modal-textarea" id="importTextarea" placeholder="Paste your data here..."></textarea>
     <div class="modal-actions">
-      <button class="modal-cancel" onclick="closeModal('importModal')">Cancel</button>
-      <button class="modal-primary" onclick="importFromText()">Import</button>
+      <button class="modal-primary" id="importTextBtn">Import</button>
     </div>
     <div class="modal-divider">or</div>
-    <button class="modal-file-btn" onclick="document.getElementById('fileInput').click()">Load from file</button>
+    <button class="modal-file-btn" id="importFileBtn">Load from file</button>
   </div>
 </div>
 
-<div class="confirm-overlay" id="confirmOverlay">
-  <div class="confirm-box">
-    <div class="confirm-title">Reset everything?</div>
-    <div class="confirm-sub">Timers reset to defaults and daily tasks unchecked. Your custom lists are untouched.</div>
-    <div class="confirm-actions">
-      <button class="confirm-cancel" onclick="closeConfirm()">Cancel</button>
-      <button class="confirm-confirm" onclick="resetAll()">Reset all</button>
+<!-- ════════ CONFIRM RESET ════════ -->
+<div class="modal-overlay" id="confirmOverlay">
+  <div class="modal-box confirm-box">
+    <div class="modal-title">Reset everything?</div>
+    <div class="modal-sub">Timers reset to defaults and daily tasks unchecked. Your custom lists are untouched.</div>
+    <div class="modal-actions">
+      <button class="modal-cancel" id="confirmCancelBtn">Cancel</button>
+      <button class="modal-danger" id="confirmResetBtn">Reset all</button>
     </div>
   </div>
 </div>
-<div class="toast" id="toast"></div>
 
-<!-- ── GCAL CALENDAR LIST MODAL ── -->
+<!-- ════════ GCAL CALENDARS MODAL ════════ -->
 <div class="modal-overlay" id="gcalModal">
-  <div class="modal-box" style="width:min(440px,96vw);max-height:85vh;overflow-y:auto;position:relative">
-    <button onclick="gcalCloseModal()" style="position:absolute;top:12px;right:12px;background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;line-height:1;padding:2px 6px;" title="Close">×</button>
+  <div class="modal-box gcal-modal-box">
+    <button class="modal-x" data-close="gcalModal" title="Close">×</button>
     <div class="modal-title">Google Calendars</div>
     <div class="gcal-section-label">Visible calendars</div>
-    <div class="modal-sub" style="margin-top:-6px">Toggle which calendars show in Focus.</div>
-    <div id="gcalCalList" style="display:flex;flex-direction:column;gap:10px"></div>
-    <div class="gcal-section-label" id="gcalLinkLabel" style="margin-top:8px">Link local events to GCal</div>
-    <div class="modal-sub" style="margin-top:-6px">Assign existing events to a Google Calendar.</div>
-    <div id="gcalLinkList" style="display:flex;flex-direction:column;gap:6px;max-height:260px;overflow-y:auto"></div>
-    <div class="modal-actions" style="margin-top:8px">
-      <button class="modal-cancel" onclick="gcalDisconnect()" style="color:#e05555;border-color:rgba(220,60,60,0.3)">Disconnect</button>
-      <button class="modal-primary" id="gcalSyncBtn" onclick="gcalSyncAll()">Sync now</button>
+    <div class="modal-sub">Toggle which calendars show in Focus.</div>
+    <div class="gcal-cal-list" id="gcalCalList"></div>
+    <div class="modal-actions">
+      <button class="modal-cancel gcal-disconnect" id="gcalDisconnectBtn">Disconnect</button>
+      <button class="modal-primary" id="gcalSyncBtn">Sync now</button>
     </div>
   </div>
 </div>
 
-<!-- ── GCAL EVENT DETAIL MODAL ── -->
+<!-- ════════ GCAL EVENT DETAIL MODAL ════════ -->
 <div class="modal-overlay" id="gcalDetailModal">
   <div class="modal-box">
+    <button class="modal-x" data-close="gcalDetailModal" title="Close">×</button>
     <div class="modal-title" id="gcalDetailTitle"></div>
-    <div style="display:flex;flex-direction:column;gap:6px">
-      <div style="font-size:12px;font-weight:500" id="gcalDetailCal"></div>
-      <div style="font-size:12px;color:var(--text-secondary)" id="gcalDetailTime"></div>
+    <div class="gcal-detail-meta">
+      <div class="gcal-detail-cal" id="gcalDetailCal"></div>
+      <div class="gcal-detail-time" id="gcalDetailTime"></div>
     </div>
-    <div class="modal-actions" style="margin-top:4px">
-      <button class="modal-cancel" onclick="gcalCloseDetail()">Close</button>
-      <a id="gcalDetailLink" target="_blank" rel="noopener" style="flex:1">
+    <div class="modal-actions">
+      <a id="gcalDetailLink" target="_blank" rel="noopener" class="gcal-open-link">
         <button class="modal-primary" style="width:100%">Open in GCal ↗</button>
       </a>
     </div>
-    <button class="cal-delete-btn" onclick="gcalDeleteFromDetail()" style="margin-top:4px">Delete from Google Calendar</button>
-    <button class="gcal-send-btn" id="gcalSyncToAppBtn" onclick="gcalSyncToApp()" style="display:none;margin-top:4px">Sync to app</button>
+    <button class="cal-delete-btn" id="gcalDetailDeleteBtn">Delete from Google Calendar</button>
+    <button class="gcal-send-btn" id="gcalSyncToAppBtn">Sync to app</button>
   </div>
 </div>
+
+<div class="toast" id="toast"></div>
 <script src="app.js"></script>
 </body>
 </html>
