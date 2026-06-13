@@ -97,6 +97,7 @@ function playIcon()  { return '<svg width="10" height="12" viewBox="0 0 10 12" f
 function pauseIcon() { return '<svg width="10" height="12" viewBox="0 0 10 12" fill="none"><rect x="1" y="1" width="3" height="10" rx="1" fill="currentColor"/><rect x="6" y="1" width="3" height="10" rx="1" fill="currentColor"/></svg>'; }
 function resetIcon() { return '<svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M1.5 5.5A4 4 0 1 0 2.9 2.7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M1.5 2V5.5H5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }
 const GRIP_SVG = '<svg width="10" height="14" viewBox="0 0 10 14" fill="none"><circle cx="3" cy="3" r="1.2" fill="currentColor"/><circle cx="7" cy="3" r="1.2" fill="currentColor"/><circle cx="3" cy="7" r="1.2" fill="currentColor"/><circle cx="7" cy="7" r="1.2" fill="currentColor"/><circle cx="3" cy="11" r="1.2" fill="currentColor"/><circle cx="7" cy="11" r="1.2" fill="currentColor"/></svg>';
+const DOTS_SVG = '<svg width="4" height="14" viewBox="0 0 4 14" fill="none"><circle cx="2" cy="2" r="1.5" fill="currentColor"/><circle cx="2" cy="7" r="1.5" fill="currentColor"/><circle cx="2" cy="12" r="1.5" fill="currentColor"/></svg>';
 
 function escAttr(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -157,7 +158,11 @@ function compressState(st) {
   };
   const cDef  = t => ({ lb:t.label, c:t.color, s:t.seconds });
   const cTask = t => { const o = { i:t.id, tx:t.text }; if (t.done) o.dn=1; return o; };
-  const cList = l => ({ i:l.id, ti:l.title, c:l.color, d:l.isDefault?1:0, tk:l.tasks.map(cTask) });
+  const cList = l => {
+    const o = { i:l.id, ti:l.title, c:l.color, d:l.isDefault?1:0, tk:l.tasks.map(cTask) };
+    if (l.activeDays && l.activeDays.length) o.ad = l.activeDays;
+    return o;
+  };
   const cCalEv = e => {
     const o = { i:e.id, ti:e.title, s:e.start, e:e.end, c:e.color };
     if (e.type && e.type !== 'event') o.tp = e.type;
@@ -189,7 +194,7 @@ function decompressState(c) {
     running:!!t.r, startedAt:t.sa ?? null, secondsAtStart:t.ss ?? null });
   const dDef  = t => ({ label:t.lb, color:t.c, seconds:t.s });
   const dTask = t => ({ id:t.i, text:t.tx, done:!!t.dn });
-  const dList = l => ({ id:l.i, title:l.ti, color:l.c, isDefault:!!l.d, tasks:(l.tk||[]).map(dTask) });
+  const dList = l => ({ id:l.i, title:l.ti, color:l.c, isDefault:!!l.d, activeDays:(l.ad && l.ad.length)?l.ad:null, tasks:(l.tk||[]).map(dTask) });
   const dCalEv = e => ({
     id:e.i, title:e.ti, start:e.s, end:e.e, color:e.c,
     type:e.tp || 'event', fromTemplate:!!e.ft,
@@ -226,6 +231,7 @@ function gatherState() {
     taskIdCounter,
     todoLists: todoLists.map(l => ({
       id: l.id, title: l.title, color: l.color, isDefault: !!l.isDefault,
+      activeDays: (l.activeDays && l.activeDays.length) ? l.activeDays : null,
       tasks: l.tasks.map(t => ({ id: t.id, text: t.text, done: t.done }))
     })),
     calendar: { calEvents, calTemplates, calEventIdCtr },
@@ -246,6 +252,7 @@ function applyState(state) {
   taskIdCounter = st.taskIdCounter ?? taskIdCounter;
   todoLists = st.todoLists.map(l => ({
     id: l.id, title: l.title, color: l.color, isDefault: !!l.isDefault,
+    activeDays: (l.activeDays && l.activeDays.length) ? l.activeDays : null,
     tasks: l.tasks.map(t => ({ id: t.id, text: t.text, done: t.done }))
   }));
   if (st.calendar) {
@@ -283,6 +290,7 @@ function loadFromLocal() {
     taskIdCounter = state.taskIdCounter ?? taskIdCounter;
     todoLists = state.todoLists.map(l => ({
       id: l.id, title: l.title, color: l.color, isDefault: !!l.isDefault,
+      activeDays: (l.activeDays && l.activeDays.length) ? l.activeDays : null,
       tasks: l.tasks.map(t => ({ id: t.id, text: t.text, done: t.done }))
     }));
     if (state.calendar) {
@@ -528,6 +536,17 @@ function buildCard(list, pfx) {
   const removeBtn = list.isDefault
     ? `<button class="fmt-remove-daily" onclick="removeFormatDaily(${list.id})" title="Remove list">×</button>`
     : `<button class="todo-delete-btn" onclick="removeTodoList(${list.id})" title="Delete list">×</button>`;
+  const scheduleBtn = list.isDefault
+    ? `<button class="list-sched-btn" onclick="openScheduleModal(${list.id})" title="Set active days">${DOTS_SVG}</button>`
+    : '';
+  const schedSummary = list.isDefault ? fmtDays(list.activeDays) : '';
+  const schedRow = list.isDefault
+    ? `<div class="list-sched-row">${
+        schedSummary
+          ? `<span class="list-sched-pill">${schedSummary}</span>`
+          : `<span class="list-sched-pill muted">Every day</span>`
+      }</div>`
+    : '';
 
   const taskRows = list.tasks.map(task => {
     const rowHandle = !list.isDefault
@@ -560,8 +579,10 @@ function buildCard(list, pfx) {
       </div>
       <input class="todo-title-input" id="todo-title-${list.id}-${pfx}" value="${escAttr(list.title)}" placeholder="List title"
         oninput="setListTitle(${list.id}, this.value)">
+      ${scheduleBtn}
       ${removeBtn}
     </div>
+    ${schedRow}
     <div class="todo-tasks" data-list-id="${list.id}">${taskRows}</div>
     <div class="todo-add-task">
       <button class="add-task-btn" onclick="addTask(${list.id})">
@@ -574,17 +595,39 @@ function buildCard(list, pfx) {
   return card;
 }
 
+function isListActiveToday(list) {
+  if (!list.activeDays || !list.activeDays.length) return true;
+  return list.activeDays.includes(new Date().getDay());
+}
+
+function fmtDays(days) {
+  if (!days || !days.length || days.length === 7) return '';
+  return days.slice().sort((a,b) => a-b).map(d => CAL_DOW[d]).join(', ');
+}
+
 function renderTodos() {
   ['d','m'].forEach(pfx => {
     const defEl   = $(`defaultContainer-${pfx}`);
     const custEl  = $(`todoContainer-${pfx}`);
     const emptyEl = $(`emptyState-${pfx}`);
     if (!defEl || !custEl) return;
-    defEl.querySelectorAll('.todo-card').forEach(c => c.remove());
+    defEl.querySelectorAll('.todo-card, .daily-empty').forEach(c => c.remove());
     custEl.querySelectorAll('.todo-card').forEach(c => c.remove());
+
+    const dailyLists  = todoLists.filter(l => l.isDefault);
     const customLists = todoLists.filter(l => !l.isDefault);
+    // Format mode shows every daily list (for editing); user mode only today's.
+    const visibleDaily = formatMode ? dailyLists : dailyLists.filter(isListActiveToday);
+
     if (emptyEl) emptyEl.style.display = customLists.length === 0 ? 'block' : 'none';
-    todoLists.filter(l => l.isDefault).forEach(l => defEl.appendChild(buildCard(l, pfx)));
+    visibleDaily.forEach(l => defEl.appendChild(buildCard(l, pfx)));
+
+    if (!formatMode && visibleDaily.length === 0 && dailyLists.length > 0) {
+      const hint = document.createElement('div');
+      hint.className = 'empty-state daily-empty';
+      hint.textContent = 'No lists scheduled for today.';
+      defEl.appendChild(hint);
+    }
     customLists.forEach(l => custEl.appendChild(buildCard(l, pfx)));
   });
   bindAllDrags();
@@ -980,7 +1023,7 @@ function removeFormatTimer(id) {
 function addFormatDaily() {
   if (!formatMode) return;
   const id = todoIdCounter++;
-  todoLists.push({ id, title: 'New List', color: '#5DCAA5', isDefault: true, tasks: [] });
+  todoLists.push({ id, title: 'New List', color: '#5DCAA5', isDefault: true, activeDays: null, tasks: [] });
   renderTodos();
   saveToLocal();
   setTimeout(() => {
@@ -994,6 +1037,61 @@ function removeFormatDaily(id) {
   todoLists = todoLists.filter(l => l.id !== id);
   renderTodos();
   saveToLocal();
+}
+
+/* ── Daily-list day-of-week schedule ── */
+let scheduleEditListId = null;
+
+function openScheduleModal(listId) {
+  const list = listById(listId);
+  if (!list) return;
+  scheduleEditListId = listId;
+  $('scheduleSub').textContent =
+    `Choose which days "${list.title || 'this list'}" appears in Daily.`;
+  const row = $('scheduleDowRow');
+  row.innerHTML = '';
+  const active = list.activeDays || [];
+  CAL_DOW.forEach((name, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'cal-dow-btn' + (active.includes(i) ? ' active' : '');
+    btn.textContent = name[0];
+    btn.title = name;
+    btn.dataset.dow = i;
+    btn.onclick = () => { btn.classList.toggle('active'); updateScheduleHint(); };
+    row.appendChild(btn);
+  });
+  updateScheduleHint();
+  $('scheduleModal').classList.add('show');
+}
+
+function scheduleSelectedDays() {
+  return Array.from(document.querySelectorAll('#scheduleDowRow .cal-dow-btn.active'))
+    .map(b => parseInt(b.dataset.dow));
+}
+
+function updateScheduleHint() {
+  const active = scheduleSelectedDays();
+  const hint = $('scheduleHint');
+  if (!active.length || active.length === 7) hint.textContent = 'Shows every day.';
+  else hint.textContent = 'Shows on: ' + active.sort((a,b)=>a-b).map(d => CAL_DOW[d]).join(', ');
+}
+
+function scheduleEveryDay() {
+  document.querySelectorAll('#scheduleDowRow .cal-dow-btn').forEach(b => b.classList.remove('active'));
+  updateScheduleHint();
+}
+
+function saveSchedule() {
+  const list = listById(scheduleEditListId);
+  if (!list) { closeModal('scheduleModal'); return; }
+  const active = scheduleSelectedDays();
+  // 0 or all 7 selected = "every day" → store null to keep data clean
+  list.activeDays = (active.length === 0 || active.length === 7) ? null : active.sort((a,b)=>a-b);
+  closeModal('scheduleModal');
+  scheduleEditListId = null;
+  renderTodos();
+  saveToLocal();
+  showToast('Schedule saved ✓');
 }
 
 /* ───────────────────────── EXPORT / IMPORT / RESET ───────────────────────── */
@@ -2222,6 +2320,11 @@ function bindStatic() {
   /* confirm */
   $('confirmCancelBtn')?.addEventListener('click', () => closeModal('confirmOverlay'));
   $('confirmResetBtn')?.addEventListener('click', resetAll);
+
+  /* schedule */
+  $('scheduleCancelBtn')?.addEventListener('click', () => closeModal('scheduleModal'));
+  $('scheduleSaveBtn')?.addEventListener('click', saveSchedule);
+  $('scheduleEveryDayBtn')?.addEventListener('click', scheduleEveryDay);
 
   /* export / import */
   $('exportCopyBtn')?.addEventListener('click', exportCopy);
