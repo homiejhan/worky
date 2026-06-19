@@ -789,8 +789,6 @@ function makeDrag(handle, opts) {
     const src = opts.source();
     if (!src) return;
 
-    try { handle.setPointerCapture(e.pointerId); } catch(_) {}
-
     const onMove = ev => {
       if (!active) {
         if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 5) return;
@@ -813,11 +811,16 @@ function makeDrag(handle, opts) {
       ev.preventDefault();
     };
 
-    const finish = ev => {
-      try { handle.releasePointerCapture(e.pointerId); } catch(_) {}
-      handle.removeEventListener('pointermove', onMove);
-      handle.removeEventListener('pointerup', onUp);
-      handle.removeEventListener('pointercancel', onCancel);
+    // Listeners live on window (not the handle) so cleanup still fires even
+    // when onDrop rebuilds the DOM and removes the handle mid-gesture.
+    const cleanup = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+    };
+
+    const finish = () => {
+      cleanup();
       if (active) {
         _suppressClicksUntil = Date.now() + 250;
         src.classList.remove('drag-src');
@@ -830,16 +833,16 @@ function makeDrag(handle, opts) {
     const onUp = ev => {
       if (active) {
         const g = ghost;
-        ghost && (ghost.style.display = 'none');
+        if (ghost) ghost.style.display = 'none';
         opts.onDrop(ev.clientX, ev.clientY, g);
       }
-      finish(ev);
+      finish();
     };
-    const onCancel = ev => finish(ev);
+    const onCancel = () => finish();
 
-    handle.addEventListener('pointermove', onMove);
-    handle.addEventListener('pointerup', onUp);
-    handle.addEventListener('pointercancel', onCancel);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
   });
 }
 
@@ -2113,13 +2116,15 @@ async function gcalUpdateEvent(gcalId, calId, ev, dateKey) {
 }
 
 async function gcalDeleteEvent(gcalId, calId) {
-  if (!gcalIsConnected() || !gcalId) return;
+  if (!gcalIsConnected() || !gcalId) return false;
   try {
-    await fetch(
+    const res = await fetch(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events/${gcalId}`,
       { method: 'DELETE', headers: { Authorization: `Bearer ${gcalToken.access_token}` } }
     );
-  } catch(e) {}
+    // 200/204 = deleted; 404/410 = already gone, also fine.
+    return res.ok || res.status === 404 || res.status === 410;
+  } catch(e) { return false; }
 }
 
 function gcalDisconnect() {
@@ -2189,6 +2194,12 @@ function gcalOpenEventDetail(ev) {
   syncBtn.textContent = 'Sync to app';
   syncBtn.disabled = false;
 
+  // Delete is available for any real GCal event while connected.
+  const delBtn = $('gcalDetailDeleteBtn');
+  delBtn.classList.toggle('shown', gcalIsConnected() && !!ev.gcalId);
+  delBtn.textContent = 'Delete from Google Calendar';
+  delBtn.disabled = false;
+
   modal.classList.add('show');
 }
 
@@ -2226,10 +2237,33 @@ async function gcalDeleteFromDetail() {
   const gcalId = modal.dataset.gcalId;
   const calId  = modal.dataset.calId;
   if (!gcalId || !calId) return;
-  await gcalDeleteEvent(gcalId, calId);
+
+  const ev = modal._gcalEv;
+  const title = ev?.title || 'this event';
+  if (!confirm(`Delete "${title}" from Google Calendar? This can't be undone.`)) return;
+
+  const delBtn = $('gcalDetailDeleteBtn');
+  delBtn.textContent = 'Deleting…';
+  delBtn.disabled = true;
+
+  const ok = await gcalDeleteEvent(gcalId, calId);
+  if (!ok) {
+    delBtn.textContent = 'Delete from Google Calendar';
+    delBtn.disabled = false;
+    showToast('Could not delete — check connection and try again.');
+    return;
+  }
+
+  // Remove any local copy linked to this GCal event so no orphan remains.
+  Object.keys(calEvents).forEach(key => {
+    calEvents[key] = (calEvents[key] || []).filter(e => e.gcalId !== gcalId);
+  });
+  calSave();
+  saveToLocal();
+
   closeModal('gcalDetailModal');
   await gcalSyncAll();
-  showToast('Event deleted from Google Calendar');
+  showToast('Event deleted from Google Calendar ✓');
 }
 
 /* ── GCal calendars modal ── */
