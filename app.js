@@ -98,6 +98,7 @@ function pauseIcon() { return '<svg width="10" height="12" viewBox="0 0 10 12" f
 function resetIcon() { return '<svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M1.5 5.5A4 4 0 1 0 2.9 2.7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M1.5 2V5.5H5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }
 const GRIP_SVG = '<svg width="10" height="14" viewBox="0 0 10 14" fill="none"><circle cx="3" cy="3" r="1.2" fill="currentColor"/><circle cx="7" cy="3" r="1.2" fill="currentColor"/><circle cx="3" cy="7" r="1.2" fill="currentColor"/><circle cx="7" cy="7" r="1.2" fill="currentColor"/><circle cx="3" cy="11" r="1.2" fill="currentColor"/><circle cx="7" cy="11" r="1.2" fill="currentColor"/></svg>';
 const DOTS_SVG = '<svg width="4" height="14" viewBox="0 0 4 14" fill="none"><circle cx="2" cy="2" r="1.5" fill="currentColor"/><circle cx="2" cy="7" r="1.5" fill="currentColor"/><circle cx="2" cy="12" r="1.5" fill="currentColor"/></svg>';
+const SYNC_SVG = '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M5.8 8.2a2.4 2.4 0 0 1 0-3.4l1.5-1.5a2.4 2.4 0 0 1 3.4 3.4l-.8.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M8.2 5.8a2.4 2.4 0 0 1 0 3.4l-1.5 1.5a2.4 2.4 0 0 1-3.4-3.4l.8-.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
 
 function escAttr(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -553,6 +554,9 @@ function buildCard(list, pfx) {
       ? '<div class="drag-handle" title="Drag to reorder">' + GRIP_SVG + '</div>'
       : '';
     const checkStyle = task.done ? `background:${list.color};border-color:${list.color}` : '';
+    const syncBadge = isTaskSynced(list, task)
+      ? `<span class="task-sync-badge" title="Synced with matching daily tasks — checking one checks them all">${SYNC_SVG}</span>`
+      : '';
     return `
       <div class="task-row" data-task-id="${task.id}" data-list-id="${list.id}">
         ${rowHandle}
@@ -565,7 +569,9 @@ function buildCard(list, pfx) {
         <input class="task-text task-text-${task.id} ${task.done?'done':''}"
           value="${escAttr(task.text)}" placeholder="Task…"
           oninput="setTaskText(${list.id},${task.id},this.value)"
+          onblur="refreshSyncBadges()"
           onkeydown="if(event.key==='Enter'){event.preventDefault();addTask(${list.id});}">
+        ${syncBadge}
         <button class="task-del" onclick="removeTask(${list.id},${task.id})">×</button>
       </div>`;
   }).join('');
@@ -605,7 +611,55 @@ function fmtDays(days) {
   return days.slice().sort((a,b) => a-b).map(d => CAL_DOW[d]).join(', ');
 }
 
+/* ── Daily task auto-sync (Approach 1): tasks with the same name across Daily
+ *    lists stay in lockstep. Match is trimmed + case-insensitive; blank names
+ *    never sync. Derived purely from names, so nothing extra is persisted.    */
+function normTaskName(s) { return (s || '').trim().toLowerCase(); }
+
+// Recomputed each render: name-keys that appear on 2+ Daily tasks (→ show link badge).
+let _syncedNameKeys = new Set();
+function computeSyncedKeys() {
+  const counts = {};
+  todoLists.forEach(l => {
+    if (!l.isDefault) return;
+    l.tasks.forEach(tk => {
+      const k = normTaskName(tk.text);
+      if (k) counts[k] = (counts[k] || 0) + 1;
+    });
+  });
+  _syncedNameKeys = new Set(Object.keys(counts).filter(k => counts[k] >= 2));
+}
+function isTaskSynced(list, task) {
+  return !!(list.isDefault && _syncedNameKeys.has(normTaskName(task.text)));
+}
+
+// All Daily tasks (incl. the source) that share the source task's name.
+function syncedTaskTargets(srcList, srcTask) {
+  const out = [{ list: srcList, task: srcTask }];
+  if (!srcList.isDefault) return out;       // only Daily lists sync
+  const key = normTaskName(srcTask.text);
+  if (!key) return out;                     // blank names never sync
+  todoLists.forEach(l => {
+    if (!l.isDefault) return;
+    l.tasks.forEach(tk => {
+      if (l === srcList && tk === srcTask) return;
+      if (normTaskName(tk.text) === key) out.push({ list: l, task: tk });
+    });
+  });
+  return out;
+}
+
+function paintTaskState(list, task) {
+  document.querySelectorAll(`.task-checks-${task.id}`).forEach(el => {
+    el.classList.toggle('done', task.done);
+    el.style.background  = task.done ? list.color : '';
+    el.style.borderColor = task.done ? list.color : '';
+  });
+  document.querySelectorAll(`.task-text-${task.id}`).forEach(el => el.classList.toggle('done', task.done));
+}
+
 function renderTodos() {
+  computeSyncedKeys();
   ['d','m'].forEach(pfx => {
     const defEl   = $(`defaultContainer-${pfx}`);
     const custEl  = $(`todoContainer-${pfx}`);
@@ -699,18 +753,43 @@ function setTaskText(listId, taskId, value) {
   if (task) { task.text = value; saveToLocal(); }
 }
 
+// Add/remove the link badge in place after a rename, without rebuilding inputs
+// (a full re-render would steal focus mid-edit).
+function refreshSyncBadges() {
+  computeSyncedKeys();
+  document.querySelectorAll('.task-row').forEach(row => {
+    const listId = parseInt(row.dataset.listId);
+    const taskId = parseInt(row.dataset.taskId);
+    const list = listById(listId);
+    const task = list && list.tasks.find(t => t.id === taskId);
+    if (!list || !task) return;
+    const existing = row.querySelector('.task-sync-badge');
+    const should = isTaskSynced(list, task);
+    if (should && !existing) {
+      const span = document.createElement('span');
+      span.className = 'task-sync-badge';
+      span.title = 'Synced with matching daily tasks — checking one checks them all';
+      span.innerHTML = SYNC_SVG;
+      row.insertBefore(span, row.querySelector('.task-del'));
+    } else if (!should && existing) {
+      existing.remove();
+    }
+  });
+}
+
 function toggleTask(listId, taskId) {
   const list = listById(listId);
   if (!list) return;
   const task = list.tasks.find(t => t.id === taskId);
   if (!task) return;
-  task.done = !task.done;
-  document.querySelectorAll(`.task-checks-${taskId}`).forEach(el => {
-    el.classList.toggle('done', task.done);
-    el.style.background  = task.done ? list.color : '';
-    el.style.borderColor = task.done ? list.color : '';
+  const newDone = !task.done;
+
+  // Apply to this task and every synced twin across Daily lists.
+  const targets = syncedTaskTargets(list, task);
+  targets.forEach(({ list: l, task: tk }) => {
+    tk.done = newDone;
+    paintTaskState(l, tk);
   });
-  document.querySelectorAll(`.task-text-${taskId}`).forEach(el => el.classList.toggle('done', task.done));
   saveToLocal();
 }
 
