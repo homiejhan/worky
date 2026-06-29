@@ -418,6 +418,21 @@ body.format-mode .list-sched-row { display: flex; }
 }
 .task-row:hover .task-sync-badge { opacity: 0.9; }
 
+/* Parent-task badge uses a slightly warmer tint to distinguish from sync badge */
+.task-parent-badge { color: var(--accent); }
+
+/* Badge shown in a list's header when the list is linked to a parent task */
+.list-child-badge {
+  display: flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px;
+  flex-shrink: 0;
+  color: var(--accent);
+  opacity: 0.55;
+  transition: opacity 0.15s;
+  cursor: help;
+}
+.todo-card-header:hover .list-child-badge { opacity: 0.9; }
+
 .todo-add-task { padding: 2px 8px 8px; }
 .add-task-btn {
   display: flex; align-items: center; gap: 6px;

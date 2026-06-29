@@ -98,7 +98,9 @@ function pauseIcon() { return '<svg width="10" height="12" viewBox="0 0 10 12" f
 function resetIcon() { return '<svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M1.5 5.5A4 4 0 1 0 2.9 2.7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M1.5 2V5.5H5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }
 const GRIP_SVG = '<svg width="10" height="14" viewBox="0 0 10 14" fill="none"><circle cx="3" cy="3" r="1.2" fill="currentColor"/><circle cx="7" cy="3" r="1.2" fill="currentColor"/><circle cx="3" cy="7" r="1.2" fill="currentColor"/><circle cx="7" cy="7" r="1.2" fill="currentColor"/><circle cx="3" cy="11" r="1.2" fill="currentColor"/><circle cx="7" cy="11" r="1.2" fill="currentColor"/></svg>';
 const DOTS_SVG = '<svg width="4" height="14" viewBox="0 0 4 14" fill="none"><circle cx="2" cy="2" r="1.5" fill="currentColor"/><circle cx="2" cy="7" r="1.5" fill="currentColor"/><circle cx="2" cy="12" r="1.5" fill="currentColor"/></svg>';
-const SYNC_SVG = '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M5.8 8.2a2.4 2.4 0 0 1 0-3.4l1.5-1.5a2.4 2.4 0 0 1 3.4 3.4l-.8.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M8.2 5.8a2.4 2.4 0 0 1 0 3.4l-1.5 1.5a2.4 2.4 0 0 1-3.4-3.4l.8-.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+const SYNC_SVG  = '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M5.8 8.2a2.4 2.4 0 0 1 0-3.4l1.5-1.5a2.4 2.4 0 0 1 3.4 3.4l-.8.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M8.2 5.8a2.4 2.4 0 0 1 0 3.4l-1.5 1.5a2.4 2.4 0 0 1-3.4-3.4l.8-.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+// Badge shown on a task that has a linked child list, and on the child list header.
+const CHILD_SVG = '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><rect x="1" y="1.5" width="12" height="3.5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="9" width="12" height="3.5" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M7 5v4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
 
 function escAttr(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -541,6 +543,11 @@ function buildCard(list, pfx) {
     ? `<button class="list-sched-btn" onclick="openScheduleModal(${list.id})" title="Set active days">${DOTS_SVG}</button>`
     : '';
   const schedSummary = list.isDefault ? fmtDays(list.activeDays) : '';
+  // Child-list badge: shown on the list header when this list is linked to a parent task.
+  const childListParents = parentTasksForList(list);
+  const childListBadge = childListParents.length
+    ? `<span class="list-child-badge" title="This list is linked to the &quot;${escAttr(list.title)}&quot; task — complete all tasks here to auto-check it">${CHILD_SVG}</span>`
+    : '';
   const schedRow = list.isDefault
     ? `<div class="list-sched-row">${
         schedSummary
@@ -557,6 +564,9 @@ function buildCard(list, pfx) {
     const syncBadge = isTaskSynced(list, task)
       ? `<span class="task-sync-badge" title="Synced with matching daily tasks — checking one checks them all">${SYNC_SVG}</span>`
       : '';
+    const parentBadge = (list.isDefault && childListsForTask(task).length)
+      ? `<span class="task-sync-badge task-parent-badge" title="Linked to the &quot;${escAttr(task.text)}&quot; list — all subtasks complete = this task checks off">${CHILD_SVG}</span>`
+      : '';
     return `
       <div class="task-row" data-task-id="${task.id}" data-list-id="${list.id}">
         ${rowHandle}
@@ -572,6 +582,7 @@ function buildCard(list, pfx) {
           onblur="refreshSyncBadges()"
           onkeydown="if(event.key==='Enter'){event.preventDefault();addTask(${list.id});}">
         ${syncBadge}
+        ${parentBadge}
         <button class="task-del" onclick="removeTask(${list.id},${task.id})">×</button>
       </div>`;
   }).join('');
@@ -584,7 +595,9 @@ function buildCard(list, pfx) {
         <input type="color" value="${list.color}" oninput="changeTodoColor(${list.id}, this.value)">
       </div>
       <input class="todo-title-input" id="todo-title-${list.id}-${pfx}" value="${escAttr(list.title)}" placeholder="List title"
-        oninput="setListTitle(${list.id}, this.value)">
+        oninput="setListTitle(${list.id}, this.value)"
+        onblur="refreshSyncBadges()">
+      ${childListBadge}
       ${scheduleBtn}
       ${removeBtn}
     </div>
@@ -647,6 +660,62 @@ function syncedTaskTargets(srcList, srcTask) {
     });
   });
   return out;
+}
+
+/* ── List↔Task linking (Approach 2): a Daily list whose title matches a Daily
+ *    task name acts as a "child" of that task.
+ *    • Checking all tasks in the child list → auto-checks the parent task(s)
+ *      (and all their cross-list synced twins via the existing Approach 1 logic).
+ *    • Unchecking the parent task → unchecks every task in the child list.
+ *    Match is trimmed + case-insensitive; blank titles never link.             */
+
+// Find all Daily lists whose title matches the given task name key.
+function childListsForTask(task) {
+  const key = normTaskName(task.text);
+  if (!key) return [];
+  return todoLists.filter(l => l.isDefault && normTaskName(l.title) === key);
+}
+
+// Find all {list, task} pairs (across all Daily lists) whose task text matches
+// the given list's title — i.e. the "parent" tasks of a child list.
+function parentTasksForList(list) {
+  if (!list.isDefault) return [];
+  const key = normTaskName(list.title);
+  if (!key) return [];
+  const out = [];
+  todoLists.forEach(l => {
+    if (!l.isDefault) return;
+    l.tasks.forEach(tk => {
+      if (normTaskName(tk.text) === key) out.push({ list: l, task: tk });
+    });
+  });
+  return out;
+}
+
+// Returns true when every task in the list is done (or the list has no tasks).
+function isListComplete(list) {
+  return list.tasks.length > 0 && list.tasks.every(t => t.done);
+}
+
+// After any task state change: walk up the parent chain and keep parent tasks
+// in sync with their child-list completion state.
+// `visitedListIds` guards against hypothetical circular references.
+function propagateUpFromList(list, visitedListIds = new Set()) {
+  if (visitedListIds.has(list.id)) return;
+  visitedListIds.add(list.id);
+  const parents = parentTasksForList(list);
+  if (!parents.length) return;
+  const complete = isListComplete(list);
+  parents.forEach(({ list: pList, task: pTask }) => {
+    if (pTask.done === complete) return;          // already correct, skip
+    // Use syncedTaskTargets so Approach 1 cross-list sync still fires.
+    syncedTaskTargets(pList, pTask).forEach(({ list: l, task: tk }) => {
+      tk.done = complete;
+      paintTaskState(l, tk);
+    });
+    // Recurse: this parent task's list may itself be a child of something else.
+    propagateUpFromList(pList, visitedListIds);
+  });
 }
 
 function paintTaskState(list, task) {
@@ -757,22 +826,63 @@ function setTaskText(listId, taskId, value) {
 // (a full re-render would steal focus mid-edit).
 function refreshSyncBadges() {
   computeSyncedKeys();
+
+  // ── Task-row badges (Approach 1 sync + Approach 2 parent badge) ──────────
   document.querySelectorAll('.task-row').forEach(row => {
     const listId = parseInt(row.dataset.listId);
     const taskId = parseInt(row.dataset.taskId);
     const list = listById(listId);
     const task = list && list.tasks.find(t => t.id === taskId);
     if (!list || !task) return;
-    const existing = row.querySelector('.task-sync-badge');
-    const should = isTaskSynced(list, task);
-    if (should && !existing) {
+    const delBtn = row.querySelector('.task-del');
+
+    // Approach 1: cross-list sync badge
+    const existingSync = row.querySelector('.task-sync-badge:not(.task-parent-badge)');
+    const shouldSync = isTaskSynced(list, task);
+    if (shouldSync && !existingSync) {
       const span = document.createElement('span');
       span.className = 'task-sync-badge';
       span.title = 'Synced with matching daily tasks — checking one checks them all';
       span.innerHTML = SYNC_SVG;
-      row.insertBefore(span, row.querySelector('.task-del'));
-    } else if (!should && existing) {
-      existing.remove();
+      row.insertBefore(span, delBtn);
+    } else if (!shouldSync && existingSync) {
+      existingSync.remove();
+    }
+
+    // Approach 2: parent-task badge (task has a linked child list)
+    const existingParent = row.querySelector('.task-parent-badge');
+    const shouldParent = list.isDefault && childListsForTask(task).length > 0;
+    if (shouldParent && !existingParent) {
+      const span = document.createElement('span');
+      span.className = 'task-sync-badge task-parent-badge';
+      span.title = 'Linked to the "' + task.text + '" list — all subtasks complete = this task checks off';
+      span.innerHTML = CHILD_SVG;
+      row.insertBefore(span, delBtn);
+    } else if (!shouldParent && existingParent) {
+      existingParent.remove();
+    }
+  });
+
+  // ── List-header child badge (Approach 2: this list is a child of a parent task) ──
+  document.querySelectorAll('.todo-card').forEach(card => {
+    const listId = parseInt(card.dataset.listId);
+    const list = listById(listId);
+    if (!list) return;
+    const header = card.querySelector('.todo-card-header');
+    if (!header) return;
+    const existingChildBadge = header.querySelector('.list-child-badge');
+    const parents = parentTasksForList(list);
+    if (parents.length && !existingChildBadge) {
+      const span = document.createElement('span');
+      span.className = 'list-child-badge';
+      span.title = 'This list is linked to the "' + list.title + '" task — complete all tasks here to auto-check it';
+      span.innerHTML = CHILD_SVG;
+      // Insert before the sched button (or remove button if no sched button).
+      const schedBtn = header.querySelector('.list-sched-btn');
+      const anchor = schedBtn || header.querySelector('.fmt-remove-daily') || header.querySelector('.todo-delete-btn');
+      header.insertBefore(span, anchor || null);
+    } else if (!parents.length && existingChildBadge) {
+      existingChildBadge.remove();
     }
   });
 }
@@ -784,12 +894,29 @@ function toggleTask(listId, taskId) {
   if (!task) return;
   const newDone = !task.done;
 
-  // Apply to this task and every synced twin across Daily lists.
+  // Apply to this task and every synced twin across Daily lists (Approach 1).
   const targets = syncedTaskTargets(list, task);
   targets.forEach(({ list: l, task: tk }) => {
     tk.done = newDone;
     paintTaskState(l, tk);
+
+    // ── Approach 2 ──────────────────────────────────────────────────────────
+    // DOWN: unchecking a task clears all tasks in its linked child list(s).
+    if (!newDone) {
+      childListsForTask(tk).forEach(childList => {
+        childList.tasks.forEach(ct => {
+          if (!ct.done) return;
+          ct.done = false;
+          paintTaskState(childList, ct);
+        });
+      });
+    }
   });
+
+  // UP: after toggling, re-evaluate whether this task's own list is now
+  // complete (or incomplete) and cascade that to its parent task(s).
+  propagateUpFromList(list);
+
   saveToLocal();
 }
 
