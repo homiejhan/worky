@@ -887,6 +887,26 @@ function refreshSyncBadges() {
   });
 }
 
+// After a parent task's done-state changes: push that state onto every task
+// in its linked child list(s) — both directions (check AND uncheck).
+// Recurses in case a child-list task is itself a parent of another list.
+// `visitedListIds` guards against hypothetical circular references.
+function propagateDownFromTask(task, done, visitedListIds = new Set()) {
+  childListsForTask(task).forEach(childList => {
+    if (visitedListIds.has(childList.id)) return;
+    visitedListIds.add(childList.id);
+    childList.tasks.forEach(ct => {
+      if (ct.done === done) return;               // already correct, skip
+      // Use syncedTaskTargets so Approach 1 cross-list sync still fires.
+      syncedTaskTargets(childList, ct).forEach(({ list: l, task: tk }) => {
+        tk.done = done;
+        paintTaskState(l, tk);
+      });
+      propagateDownFromTask(ct, done, visitedListIds);
+    });
+  });
+}
+
 function toggleTask(listId, taskId) {
   const list = listById(listId);
   if (!list) return;
@@ -901,16 +921,9 @@ function toggleTask(listId, taskId) {
     paintTaskState(l, tk);
 
     // ── Approach 2 ──────────────────────────────────────────────────────────
-    // DOWN: unchecking a task clears all tasks in its linked child list(s).
-    if (!newDone) {
-      childListsForTask(tk).forEach(childList => {
-        childList.tasks.forEach(ct => {
-          if (!ct.done) return;
-          ct.done = false;
-          paintTaskState(childList, ct);
-        });
-      });
-    }
+    // DOWN: checking OR unchecking a task pushes that same state onto every
+    // task in its linked child list(s).
+    propagateDownFromTask(tk, newDone);
   });
 
   // UP: after toggling, re-evaluate whether this task's own list is now
