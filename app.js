@@ -163,7 +163,7 @@ function compressState(st) {
   const cTask = t => { const o = { i:t.id, tx:t.text }; if (t.done) o.dn=1; return o; };
   const cList = l => {
     const o = { i:l.id, ti:l.title, c:l.color, d:l.isDefault?1:0, tk:l.tasks.map(cTask) };
-    if (l.activeDays && l.activeDays.length) o.ad = l.activeDays;
+    if (Array.isArray(l.activeDays)) o.ad = l.activeDays;   // [] (hidden) must survive
     return o;
   };
   const cCalEv = e => {
@@ -197,7 +197,7 @@ function decompressState(c) {
     running:!!t.r, startedAt:t.sa ?? null, secondsAtStart:t.ss ?? null });
   const dDef  = t => ({ label:t.lb, color:t.c, seconds:t.s });
   const dTask = t => ({ id:t.i, text:t.tx, done:!!t.dn });
-  const dList = l => ({ id:l.i, title:l.ti, color:l.c, isDefault:!!l.d, activeDays:(l.ad && l.ad.length)?l.ad:null, tasks:(l.tk||[]).map(dTask) });
+  const dList = l => ({ id:l.i, title:l.ti, color:l.c, isDefault:!!l.d, activeDays: Array.isArray(l.ad) ? l.ad : null, tasks:(l.tk||[]).map(dTask) });
   const dCalEv = e => ({
     id:e.i, title:e.ti, start:e.s, end:e.e, color:e.c,
     type:e.tp || 'event', fromTemplate:!!e.ft,
@@ -234,7 +234,7 @@ function gatherState() {
     taskIdCounter,
     todoLists: todoLists.map(l => ({
       id: l.id, title: l.title, color: l.color, isDefault: !!l.isDefault,
-      activeDays: (l.activeDays && l.activeDays.length) ? l.activeDays : null,
+      activeDays: Array.isArray(l.activeDays) ? l.activeDays : null,
       tasks: l.tasks.map(t => ({ id: t.id, text: t.text, done: t.done }))
     })),
     calendar: { calEvents, calTemplates, calEventIdCtr },
@@ -255,7 +255,7 @@ function applyState(state) {
   taskIdCounter = st.taskIdCounter ?? taskIdCounter;
   todoLists = st.todoLists.map(l => ({
     id: l.id, title: l.title, color: l.color, isDefault: !!l.isDefault,
-    activeDays: (l.activeDays && l.activeDays.length) ? l.activeDays : null,
+    activeDays: Array.isArray(l.activeDays) ? l.activeDays : null,
     tasks: l.tasks.map(t => ({ id: t.id, text: t.text, done: t.done }))
   }));
   if (st.calendar) {
@@ -293,7 +293,7 @@ function loadFromLocal() {
     taskIdCounter = state.taskIdCounter ?? taskIdCounter;
     todoLists = state.todoLists.map(l => ({
       id: l.id, title: l.title, color: l.color, isDefault: !!l.isDefault,
-      activeDays: (l.activeDays && l.activeDays.length) ? l.activeDays : null,
+      activeDays: Array.isArray(l.activeDays) ? l.activeDays : null,
       tasks: l.tasks.map(t => ({ id: t.id, text: t.text, done: t.done }))
     }));
     if (state.calendar) {
@@ -548,11 +548,14 @@ function buildCard(list, pfx) {
   const childListBadge = childListParents.length
     ? `<span class="list-child-badge" title="This list is linked to the &quot;${escAttr(list.title)}&quot; task — complete all tasks here to auto-check it">${CHILD_SVG}</span>`
     : '';
+  const isHidden = list.isDefault && Array.isArray(list.activeDays) && list.activeDays.length === 0;
   const schedRow = list.isDefault
     ? `<div class="list-sched-row">${
-        schedSummary
-          ? `<span class="list-sched-pill">${schedSummary}</span>`
-          : `<span class="list-sched-pill muted">Every day</span>`
+        isHidden
+          ? `<span class="list-sched-pill muted">Hidden — no days selected</span>`
+          : schedSummary
+            ? `<span class="list-sched-pill">${schedSummary}</span>`
+            : `<span class="list-sched-pill muted">Every day</span>`
       }</div>`
     : '';
 
@@ -615,7 +618,8 @@ function buildCard(list, pfx) {
 }
 
 function isListActiveToday(list) {
-  if (!list.activeDays || !list.activeDays.length) return true;
+  if (!list.activeDays) return true;                  // null → shows every day
+  if (list.activeDays.length === 0) return false;     // [] → no days selected → hidden
   return list.activeDays.includes(new Date().getDay());
 }
 
@@ -709,12 +713,16 @@ function propagateUpFromList(list, visitedListIds = new Set()) {
   parents.forEach(({ list: pList, task: pTask }) => {
     if (pTask.done === complete) return;          // already correct, skip
     // Use syncedTaskTargets so Approach 1 cross-list sync still fires.
+    // Collect every list a twin lives in — any of them may have just become
+    // complete/incomplete, so each must be re-evaluated upward (not just pList).
+    const twinLists = new Set();
     syncedTaskTargets(pList, pTask).forEach(({ list: l, task: tk }) => {
       tk.done = complete;
       paintTaskState(l, tk);
+      twinLists.add(l);
     });
-    // Recurse: this parent task's list may itself be a child of something else.
-    propagateUpFromList(pList, visitedListIds);
+    // Recurse: each of these lists may itself be a child of something else.
+    twinLists.forEach(l => propagateUpFromList(l, visitedListIds));
   });
 }
 
@@ -891,18 +899,22 @@ function refreshSyncBadges() {
 // in its linked child list(s) — both directions (check AND uncheck).
 // Recurses in case a child-list task is itself a parent of another list.
 // `visitedListIds` guards against hypothetical circular references.
-function propagateDownFromTask(task, done, visitedListIds = new Set()) {
+function propagateDownFromTask(task, done, visitedListIds = new Set(), affectedLists = null) {
   childListsForTask(task).forEach(childList => {
     if (visitedListIds.has(childList.id)) return;
     visitedListIds.add(childList.id);
+    if (affectedLists) affectedLists.add(childList);
     childList.tasks.forEach(ct => {
       if (ct.done === done) return;               // already correct, skip
       // Use syncedTaskTargets so Approach 1 cross-list sync still fires.
       syncedTaskTargets(childList, ct).forEach(({ list: l, task: tk }) => {
         tk.done = done;
         paintTaskState(l, tk);
+        // A twin in ANOTHER list changed too → that list may now be
+        // complete/incomplete, so it must be re-checked in the UP pass.
+        if (affectedLists) affectedLists.add(l);
       });
-      propagateDownFromTask(ct, done, visitedListIds);
+      propagateDownFromTask(ct, done, visitedListIds, affectedLists);
     });
   });
 }
@@ -914,21 +926,30 @@ function toggleTask(listId, taskId) {
   if (!task) return;
   const newDone = !task.done;
 
+  // Track every list whose task state changes during this toggle, so the
+  // UP pass can re-evaluate ALL of them (not just the list that was clicked).
+  const affectedLists = new Set([list]);
+
   // Apply to this task and every synced twin across Daily lists (Approach 1).
   const targets = syncedTaskTargets(list, task);
   targets.forEach(({ list: l, task: tk }) => {
     tk.done = newDone;
     paintTaskState(l, tk);
+    affectedLists.add(l);
 
     // ── Approach 2 ──────────────────────────────────────────────────────────
     // DOWN: checking OR unchecking a task pushes that same state onto every
     // task in its linked child list(s).
-    propagateDownFromTask(tk, newDone);
+    propagateDownFromTask(tk, newDone, new Set(), affectedLists);
   });
 
-  // UP: after toggling, re-evaluate whether this task's own list is now
-  // complete (or incomplete) and cascade that to its parent task(s).
-  propagateUpFromList(list);
+  // UP: re-evaluate completion for every list that changed. Previously this
+  // only ran on the clicked list, so checking a synced twin from another list
+  // (e.g. "Subtask 1" via "Morning") completed the "Task 1" list but never
+  // checked its parent task. Now each affected list is walked upward.
+  affectedLists.forEach(l => {
+    if (l && l.isDefault) propagateUpFromList(l);
+  });
 
   saveToLocal();
 }
@@ -1272,7 +1293,11 @@ function openScheduleModal(listId) {
     `Choose which days "${list.title || 'this list'}" appears in Daily.`;
   const row = $('scheduleDowRow');
   row.innerHTML = '';
-  const active = list.activeDays || [];
+  // null = "every day" → pre-select all 7 buttons (otherwise an untouched
+  // Save would read as 0 selected and wrongly hide the list).
+  const active = list.activeDays === null || list.activeDays === undefined
+    ? [0,1,2,3,4,5,6]
+    : list.activeDays;
   CAL_DOW.forEach((name, i) => {
     const btn = document.createElement('button');
     btn.className = 'cal-dow-btn' + (active.includes(i) ? ' active' : '');
@@ -1294,12 +1319,15 @@ function scheduleSelectedDays() {
 function updateScheduleHint() {
   const active = scheduleSelectedDays();
   const hint = $('scheduleHint');
-  if (!active.length || active.length === 7) hint.textContent = 'Shows every day.';
+  if (active.length === 0) hint.textContent = 'Hidden — this list won\u2019t appear on any day.';
+  else if (active.length === 7) hint.textContent = 'Shows every day.';
   else hint.textContent = 'Shows on: ' + active.sort((a,b)=>a-b).map(d => CAL_DOW[d]).join(', ');
 }
 
 function scheduleEveryDay() {
-  document.querySelectorAll('#scheduleDowRow .cal-dow-btn').forEach(b => b.classList.remove('active'));
+  // Under the new semantics, zero selected = hidden — so "every day" must
+  // SELECT all seven buttons (saveSchedule normalizes 7/7 back to null).
+  document.querySelectorAll('#scheduleDowRow .cal-dow-btn').forEach(b => b.classList.add('active'));
   updateScheduleHint();
 }
 
@@ -1307,8 +1335,11 @@ function saveSchedule() {
   const list = listById(scheduleEditListId);
   if (!list) { closeModal('scheduleModal'); return; }
   const active = scheduleSelectedDays();
-  // 0 or all 7 selected = "every day" → store null to keep data clean
-  list.activeDays = (active.length === 0 || active.length === 7) ? null : active.sort((a,b)=>a-b);
+  // All 7 selected = "every day" → store null to keep data clean.
+  // 0 selected = "hidden" → store [] so the list never appears in Daily.
+  list.activeDays = active.length === 7 ? null
+                  : active.length === 0 ? []
+                  : active.sort((a,b)=>a-b);
   closeModal('scheduleModal');
   scheduleEditListId = null;
   renderTodos();
