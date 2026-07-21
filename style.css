@@ -363,6 +363,22 @@ body.format-mode .list-sched-row { display: flex; }
 }
 .todo-delete-btn:hover { color: var(--danger); background: var(--danger-dim); }
 
+/* star ("more important") toggle on list headers */
+.list-star-btn {
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  color: var(--ink-3);
+  flex-shrink: 0;
+  transition: all 0.15s;
+  touch-action: manipulation;
+}
+.list-star-btn:hover { color: #E8B341; background: rgba(232, 179, 65, 0.12); }
+.list-star-btn.starred { color: #E8B341; }
+.list-star-btn.starred .star-path { fill: #E8B341; }
+.todo-card.starred { border-color: rgba(232, 179, 65, 0.45); }
+.todo-card.starred:hover { border-color: rgba(232, 179, 65, 0.7); }
+
 .todo-tasks { padding: 6px 8px; min-height: 8px; }
 
 .task-row {

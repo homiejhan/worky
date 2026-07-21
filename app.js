@@ -101,6 +101,7 @@ const DOTS_SVG = '<svg width="4" height="14" viewBox="0 0 4 14" fill="none"><cir
 const SYNC_SVG  = '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M5.8 8.2a2.4 2.4 0 0 1 0-3.4l1.5-1.5a2.4 2.4 0 0 1 3.4 3.4l-.8.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M8.2 5.8a2.4 2.4 0 0 1 0 3.4l-1.5 1.5a2.4 2.4 0 0 1-3.4-3.4l.8-.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
 // Badge shown on a task that has a linked child list, and on the child list header.
 const CHILD_SVG = '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><rect x="1" y="1.5" width="12" height="3.5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="9" width="12" height="3.5" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M7 5v4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+const STAR_SVG  = '<svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 1.3l1.75 3.55 3.92.57-2.84 2.77.67 3.9L7 10.25l-3.5 1.84.67-3.9L1.33 5.42l3.92-.57L7 1.3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none" class="star-path"/></svg>';
 
 function escAttr(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -148,7 +149,7 @@ function calPxToMins(px) { return Math.round((px/CAL_HOUR_PX)*60/15)*15; }
  *   todoIdCounter→tic taskIdCounter→tac todoLists→tl
  *   calendar→cal calEvents→ce calTemplates→ct calEventIdCtr→cec
  *   timer: id→i label→lb color→c seconds→s running→r startedAt→sa secondsAtStart→ss
- *   list:  id→i title→ti color→c isDefault→d tasks→tk
+ *   list:  id→i title→ti color→c isDefault→d starred→sr tasks→tk
  *   task:  id→i text→tx done→dn
  *   calEvent: id→i title→ti start→s end→e color→c type→tp
  *     fromTemplate→ft templateId→tid repeatDays→rd gcalId→gi gcalCalId→gc
@@ -164,6 +165,7 @@ function compressState(st) {
   const cList = l => {
     const o = { i:l.id, ti:l.title, c:l.color, d:l.isDefault?1:0, tk:l.tasks.map(cTask) };
     if (Array.isArray(l.activeDays)) o.ad = l.activeDays;   // [] (hidden) must survive
+    if (l.starred) o.sr = 1;
     return o;
   };
   const cCalEv = e => {
@@ -197,7 +199,7 @@ function decompressState(c) {
     running:!!t.r, startedAt:t.sa ?? null, secondsAtStart:t.ss ?? null });
   const dDef  = t => ({ label:t.lb, color:t.c, seconds:t.s });
   const dTask = t => ({ id:t.i, text:t.tx, done:!!t.dn });
-  const dList = l => ({ id:l.i, title:l.ti, color:l.c, isDefault:!!l.d, activeDays: Array.isArray(l.ad) ? l.ad : null, tasks:(l.tk||[]).map(dTask) });
+  const dList = l => ({ id:l.i, title:l.ti, color:l.c, isDefault:!!l.d, starred:!!l.sr, activeDays: Array.isArray(l.ad) ? l.ad : null, tasks:(l.tk||[]).map(dTask) });
   const dCalEv = e => ({
     id:e.i, title:e.ti, start:e.s, end:e.e, color:e.c,
     type:e.tp || 'event', fromTemplate:!!e.ft,
@@ -234,6 +236,7 @@ function gatherState() {
     taskIdCounter,
     todoLists: todoLists.map(l => ({
       id: l.id, title: l.title, color: l.color, isDefault: !!l.isDefault,
+      starred: !!l.starred,
       activeDays: Array.isArray(l.activeDays) ? l.activeDays : null,
       tasks: l.tasks.map(t => ({ id: t.id, text: t.text, done: t.done }))
     })),
@@ -255,6 +258,7 @@ function applyState(state) {
   taskIdCounter = st.taskIdCounter ?? taskIdCounter;
   todoLists = st.todoLists.map(l => ({
     id: l.id, title: l.title, color: l.color, isDefault: !!l.isDefault,
+    starred: !!l.starred,
     activeDays: Array.isArray(l.activeDays) ? l.activeDays : null,
     tasks: l.tasks.map(t => ({ id: t.id, text: t.text, done: t.done }))
   }));
@@ -529,7 +533,7 @@ function listById(id) { return todoLists.find(l => l.id === id); }
 function buildCard(list, pfx) {
   const listDraggable = !list.isDefault || formatMode;
   const card = document.createElement('div');
-  card.className = 'todo-card' + (listDraggable ? ' list-reorderable' : '');
+  card.className = 'todo-card' + (listDraggable ? ' list-reorderable' : '') + (list.starred ? ' starred' : '');
   card.dataset.listId = list.id;
   card.dataset.isDefault = list.isDefault ? '1' : '0';
 
@@ -539,6 +543,9 @@ function buildCard(list, pfx) {
   const removeBtn = list.isDefault
     ? `<button class="fmt-remove-daily" onclick="removeFormatDaily(${list.id})" title="Remove list">×</button>`
     : `<button class="todo-delete-btn" onclick="removeTodoList(${list.id})" title="Delete list">×</button>`;
+  const starBtn =
+    `<button class="list-star-btn ${list.starred ? 'starred' : ''}" onclick="toggleStarList(${list.id})"
+       title="${list.starred ? 'Unstar list' : 'Star list as more important'}">${STAR_SVG}</button>`;
   const scheduleBtn = list.isDefault
     ? `<button class="list-sched-btn" onclick="openScheduleModal(${list.id})" title="Set active days">${DOTS_SVG}</button>`
     : '';
@@ -601,6 +608,7 @@ function buildCard(list, pfx) {
         oninput="setListTitle(${list.id}, this.value)"
         onblur="refreshSyncBadges()">
       ${childListBadge}
+      ${starBtn}
       ${scheduleBtn}
       ${removeBtn}
     </div>
@@ -767,6 +775,14 @@ function renderTodos() {
 function setListTitle(id, value) {
   const l = listById(id);
   if (l) { l.title = value; saveToLocal(); }
+}
+
+function toggleStarList(id) {
+  const l = listById(id);
+  if (!l) return;
+  l.starred = !l.starred;
+  renderTodos();
+  saveToLocal();
 }
 
 function addTodoList() {
