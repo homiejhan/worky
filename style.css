@@ -379,6 +379,92 @@ body.format-mode .list-sched-row { display: flex; }
 .todo-card.starred { border-color: rgba(232, 179, 65, 0.45); }
 .todo-card.starred:hover { border-color: rgba(232, 179, 65, 0.7); }
 
+/* ═══════════════════════════════════════════════════════
+   DAY-BY-DAY TASKS (My Lists tab)
+   ═══════════════════════════════════════════════════════ */
+.dbd-section-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 14px 0 8px;
+}
+.section-sublabel {
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.dbd-add-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 10px;
+}
+.dbd-new-text {
+  flex: 1; min-width: 0;
+  font-size: 13px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.dbd-new-text:focus { border-color: var(--border-strong); }
+.dbd-new-date, .dbd-date-input {
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--ink-2);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px 6px;
+  outline: none;
+  flex-shrink: 0;
+  transition: border-color 0.15s;
+}
+.dbd-new-date:focus, .dbd-date-input:focus { border-color: var(--border-strong); }
+.dbd-add-btn { flex-shrink: 0; }
+
+.dbd-stack { display: flex; flex-direction: column; gap: 10px; }
+
+.dbd-group {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px 8px 6px;
+}
+.dbd-group-header {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 2px 5px 6px;
+}
+.dbd-count {
+  font-size: 10px; font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: var(--danger-dim);
+  color: var(--danger);
+}
+
+.dbd-check.done { background: var(--accent); border-color: var(--accent); }
+.dbd-date-input { max-width: 118px; }
+.dbd-row .dbd-date-input { opacity: 0.7; }
+.dbd-row:hover .dbd-date-input { opacity: 1; }
+
+/* overdue styling */
+.dbd-group-overdue { border-color: var(--danger-dim); }
+.dbd-header-overdue { color: var(--danger); }
+.dbd-overdue-row .task-text { color: var(--danger); }
+.dbd-overdue-row .dbd-date-input { color: var(--danger); border-color: var(--danger-dim); }
+
+/* completed-past styling */
+.dbd-group-done { opacity: 0.65; }
+
+.dbd-empty { padding: 14px 0; }
+
+@media (max-width: 640px) {
+  .dbd-new-date { max-width: 128px; }
+}
+
 .todo-tasks { padding: 6px 8px; min-height: 8px; }
 
 .task-row {

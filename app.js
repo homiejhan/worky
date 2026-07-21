@@ -49,6 +49,10 @@ let todoLists = [
     tasks: makeTasks(['1','2','3','4','5']) },
 ];
 
+/* day-by-day tasks (dated one-off tasks under My Lists) */
+let dbdTasks = [];        // { id, text, due:'YYYY-MM-DD', done }
+let dbdIdCounter = 1;
+
 /* calendar state */
 let calEvents       = {};   // { 'YYYY-MM-DD': [ev,...] }
 let calTemplates    = [];
@@ -151,6 +155,7 @@ function calPxToMins(px) { return Math.round((px/CAL_HOUR_PX)*60/15)*15; }
  *   timer: id→i label→lb color→c seconds→s running→r startedAt→sa secondsAtStart→ss
  *   list:  id→i title→ti color→c isDefault→d starred→sr tasks→tk
  *   task:  id→i text→tx done→dn
+ *   dbdTask: id→i text→tx due→du done→dn
  *   calEvent: id→i title→ti start→s end→e color→c type→tp
  *     fromTemplate→ft templateId→tid repeatDays→rd gcalId→gi gcalCalId→gc
  */
@@ -178,6 +183,7 @@ function compressState(st) {
     if (e.gcalCalId) o.gc = e.gcalCalId;
     return o;
   };
+  const cDbd = t => { const o = { i:t.id, tx:t.text, du:t.due }; if (t.done) o.dn=1; return o; };
   const cEvents = {};
   Object.entries(st.calendar.calEvents || {}).forEach(([k, evs]) => { cEvents[k] = evs.map(cCalEv); });
   return {
@@ -188,6 +194,8 @@ function compressState(st) {
     tic: st.todoIdCounter,
     tac: st.taskIdCounter,
     tl: st.todoLists.map(cList),
+    db: (st.dbdTasks||[]).map(cDbd),
+    dbc: st.dbdIdCounter || 1,
     cal: { ce: cEvents, ct: (st.calendar.calTemplates||[]).map(cCalEv), cec: st.calendar.calEventIdCtr },
   };
 }
@@ -206,6 +214,7 @@ function decompressState(c) {
     templateId:e.tid ?? null, repeatDays:e.rd || null,
     gcalId:e.gi ?? null, gcalCalId:e.gc ?? null,
   });
+  const dDbd = t => ({ id:t.i, text:t.tx, due:t.du, done:!!t.dn });
   const dEvents = {};
   Object.entries(c.cal.ce || {}).forEach(([k, evs]) => { dEvents[k] = evs.map(dCalEv); });
   return {
@@ -216,6 +225,8 @@ function decompressState(c) {
     todoIdCounter: c.tic,
     taskIdCounter: c.tac,
     todoLists: (c.tl||[]).map(dList),
+    dbdTasks: (c.db||[]).map(dDbd),
+    dbdIdCounter: c.dbc || 1,
     calendar: { calEvents: dEvents, calTemplates: (c.cal.ct||[]).map(dCalEv), calEventIdCtr: c.cal.cec || 1 },
   };
 }
@@ -240,6 +251,8 @@ function gatherState() {
       activeDays: Array.isArray(l.activeDays) ? l.activeDays : null,
       tasks: l.tasks.map(t => ({ id: t.id, text: t.text, done: t.done }))
     })),
+    dbdTasks: dbdTasks.map(t => ({ id: t.id, text: t.text, due: t.due, done: t.done })),
+    dbdIdCounter,
     calendar: { calEvents, calTemplates, calEventIdCtr },
   };
 }
@@ -262,6 +275,8 @@ function applyState(state) {
     activeDays: Array.isArray(l.activeDays) ? l.activeDays : null,
     tasks: l.tasks.map(t => ({ id: t.id, text: t.text, done: t.done }))
   }));
+  dbdTasks = (st.dbdTasks || []).map(t => ({ id: t.id, text: t.text, due: t.due, done: !!t.done }));
+  dbdIdCounter = st.dbdIdCounter ?? dbdIdCounter;
   if (st.calendar) {
     calEvents     = st.calendar.calEvents     || {};
     calTemplates  = st.calendar.calTemplates  || [];
@@ -272,6 +287,7 @@ function applyState(state) {
   syncWakeupUI();
   renderTimers();
   renderTodos();
+  renderDbd();
   calRefresh();
   saveToLocal();
   showToast('State restored ✓');
@@ -297,9 +313,12 @@ function loadFromLocal() {
     taskIdCounter = state.taskIdCounter ?? taskIdCounter;
     todoLists = state.todoLists.map(l => ({
       id: l.id, title: l.title, color: l.color, isDefault: !!l.isDefault,
+      starred: !!l.starred,
       activeDays: Array.isArray(l.activeDays) ? l.activeDays : null,
       tasks: l.tasks.map(t => ({ id: t.id, text: t.text, done: t.done }))
     }));
+    dbdTasks = (state.dbdTasks || []).map(t => ({ id: t.id, text: t.text, due: t.due, done: !!t.done }));
+    dbdIdCounter = state.dbdIdCounter ?? dbdIdCounter;
     if (state.calendar) {
       calEvents     = state.calendar.calEvents     || {};
       calTemplates  = state.calendar.calTemplates  || [];
@@ -1296,6 +1315,142 @@ function removeFormatDaily(id) {
   todoLists = todoLists.filter(l => l.id !== id);
   renderTodos();
   saveToLocal();
+}
+
+/* ───────────────────────── DAY-BY-DAY TASKS ─────────────────────────
+ * Flat, dated one-off tasks under the My Lists tab. Unchecked tasks with a
+ * past due date surface in an "Overdue" section; checked past tasks collapse
+ * into a dimmed "Completed" group. Groups re-flow automatically at midnight. */
+function dbdTodayKey() { return calDateKey(calToday()); }
+
+function dbdLabelFor(key) {
+  const today = calToday();
+  const [y, m, d] = key.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const diff = Math.round((date - today) / 86400000);
+  if (diff === 0)  return 'Today';
+  if (diff === 1)  return 'Tomorrow';
+  if (diff === -1) return 'Yesterday';
+  const opts = { weekday: 'short', month: 'short', day: 'numeric' };
+  if (date.getFullYear() !== today.getFullYear()) opts.year = 'numeric';
+  return date.toLocaleDateString(undefined, opts);
+}
+
+function dbdById(id) { return dbdTasks.find(t => t.id === id); }
+
+function addDbdTask(pfx) {
+  const textEl = $(`dbdText-${pfx}`);
+  const dateEl = $(`dbdDate-${pfx}`);
+  const text = (textEl?.value || '').trim();
+  if (!text) { textEl?.focus(); return; }
+  const due = (dateEl?.value) || dbdTodayKey();
+  dbdTasks.push({ id: dbdIdCounter++, text, due, done: false });
+  if (textEl) textEl.value = '';
+  renderDbd();
+  saveToLocal();
+  textEl?.focus();
+}
+
+function toggleDbdTask(id) {
+  const t = dbdById(id);
+  if (!t) return;
+  t.done = !t.done;
+  renderDbd();
+  saveToLocal();
+}
+
+function removeDbdTask(id) {
+  dbdTasks = dbdTasks.filter(t => t.id !== id);
+  renderDbd();
+  saveToLocal();
+}
+
+function setDbdText(id, value) {
+  const t = dbdById(id);
+  if (t) { t.text = value; saveToLocal(); }
+}
+
+function setDbdDue(id, value) {
+  const t = dbdById(id);
+  if (!t || !value) return;
+  t.due = value;
+  renderDbd();
+  saveToLocal();
+}
+
+function dbdRowHtml(t, overdue) {
+  const dueAttr = escAttr(t.due || dbdTodayKey());
+  return `
+    <div class="task-row dbd-row ${overdue ? 'dbd-overdue-row' : ''}" data-dbd-id="${t.id}">
+      <div class="task-check dbd-check ${t.done ? 'done' : ''}" onclick="toggleDbdTask(${t.id})">
+        <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
+          <path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <input class="task-text ${t.done ? 'done' : ''}" value="${escAttr(t.text)}" placeholder="Task…"
+        oninput="setDbdText(${t.id}, this.value)">
+      <input type="date" class="dbd-date-input" value="${dueAttr}"
+        onchange="setDbdDue(${t.id}, this.value)" title="Due date">
+      <button class="task-del" onclick="removeDbdTask(${t.id})">×</button>
+    </div>`;
+}
+
+function renderDbd() {
+  const todayKey = dbdTodayKey();
+  const byDue = (a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : a.id - b.id);
+
+  const overdue   = dbdTasks.filter(t => !t.done && t.due < todayKey).sort(byDue);
+  const upcoming  = dbdTasks.filter(t => t.due >= todayKey).sort(byDue);
+  const donePast  = dbdTasks.filter(t => t.done && t.due < todayKey).sort(byDue);
+
+  // Group upcoming by due-date key, preserving ascending order.
+  const groups = [];
+  upcoming.forEach(t => {
+    const g = groups[groups.length - 1];
+    if (g && g.key === t.due) g.tasks.push(t);
+    else groups.push({ key: t.due, tasks: [t] });
+  });
+
+  let html = '';
+  if (overdue.length) {
+    html += `
+      <div class="dbd-group dbd-group-overdue">
+        <div class="dbd-group-header dbd-header-overdue">Overdue
+          <span class="dbd-count">${overdue.length}</span></div>
+        ${overdue.map(t => dbdRowHtml(t, true)).join('')}
+      </div>`;
+  }
+  groups.forEach(g => {
+    html += `
+      <div class="dbd-group">
+        <div class="dbd-group-header">${dbdLabelFor(g.key)}</div>
+        ${g.tasks.map(t => dbdRowHtml(t, false)).join('')}
+      </div>`;
+  });
+  if (donePast.length) {
+    html += `
+      <div class="dbd-group dbd-group-done">
+        <div class="dbd-group-header dbd-header-done">Completed</div>
+        ${donePast.map(t => dbdRowHtml(t, false)).join('')}
+      </div>`;
+  }
+  if (!html) html = '<div class="empty-state dbd-empty">No day-by-day tasks yet.<br>Add one above with a due date.</div>';
+
+  ['d','m'].forEach(pfx => {
+    const el = $(`dbdContainer-${pfx}`);
+    if (el) el.innerHTML = html;
+  });
+}
+
+/* Midnight rollover: re-flow groups (and default-date inputs) when the day changes. */
+let _dbdDayKey = null;
+function dbdCheckRollover() {
+  const k = dbdTodayKey();
+  if (k === _dbdDayKey) return;
+  _dbdDayKey = k;
+  ['d','m'].forEach(pfx => { const el = $(`dbdDate-${pfx}`); if (el) el.value = k; });
+  renderDbd();
+  renderTodos();   // Daily lists' "active today" can change at midnight too
 }
 
 /* ── Daily-list day-of-week schedule ── */
@@ -2607,6 +2762,8 @@ function bindStatic() {
   $('addTimerBtn-m')?.addEventListener('click', addFormatTimer);
   $('addDailyBtn')?.addEventListener('click', addFormatDaily);
   $('addDailyBtn-m')?.addEventListener('click', addFormatDaily);
+  $('dbdAddBtn-d')?.addEventListener('click', () => addDbdTask('d'));
+  $('dbdAddBtn-m')?.addEventListener('click', () => addDbdTask('m'));
   $('addListBtn-d')?.addEventListener('click', addTodoList);
   $('addListBtn-m')?.addEventListener('click', addTodoList);
 
@@ -2689,6 +2846,9 @@ function bindStatic() {
 
   renderTimers();
   renderTodos();
+  _dbdDayKey = dbdTodayKey();
+  ['d','m'].forEach(pfx => { const el = $(`dbdDate-${pfx}`); if (el && !el.value) el.value = _dbdDayKey; });
+  renderDbd();
   syncWakeupUI();
   setSwipePanelWidths();
   updateTimerSummary();
@@ -2698,6 +2858,11 @@ function bindStatic() {
 
   /* autosave */
   setInterval(saveToLocal, 2000);
+  /* day-by-day midnight rollover (also fires after device sleep) */
+  setInterval(dbdCheckRollover, 30 * 1000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') dbdCheckRollover();
+  });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') saveToLocal();
   });

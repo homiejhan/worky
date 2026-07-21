@@ -67,11 +67,25 @@
 
     <div class="panel-header">
       <span class="section-label">My lists</span>
+    </div>
+    <div class="dbd-section-header">
+      <span class="section-sublabel">Lists</span>
       <button class="add-btn" id="addListBtn-d">+ New list</button>
     </div>
     <div class="lists-grid" id="todoContainer-d">
       <div class="empty-state" id="emptyState-d">No lists yet.<br>Click "+ New list" to get started.</div>
     </div>
+
+    <div class="dbd-section-header">
+      <span class="section-sublabel">Day by Day</span>
+    </div>
+    <div class="dbd-add-row">
+      <input class="dbd-new-text" id="dbdText-d" placeholder="New task…"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();addDbdTask('d');}">
+      <input type="date" class="dbd-new-date" id="dbdDate-d">
+      <button class="add-btn dbd-add-btn" id="dbdAddBtn-d">+ Add</button>
+    </div>
+    <div class="dbd-stack" id="dbdContainer-d"></div>
   </main>
 </div>
 
@@ -119,11 +133,25 @@
       <section class="swipe-panel">
         <div class="panel-header">
           <span class="section-label">My lists</span>
+        </div>
+        <div class="dbd-section-header">
+          <span class="section-sublabel">Lists</span>
           <button class="add-btn" id="addListBtn-m">+ New list</button>
         </div>
         <div id="todoContainer-m">
           <div class="empty-state" id="emptyState-m">No lists yet.<br>Tap "+ New list" to get started.</div>
         </div>
+
+    <div class="dbd-section-header">
+      <span class="section-sublabel">Day by Day</span>
+    </div>
+    <div class="dbd-add-row">
+      <input class="dbd-new-text" id="dbdText-m" placeholder="New task…"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();addDbdTask('m');}">
+      <input type="date" class="dbd-new-mate" id="dbdDate-m">
+      <button class="add-btn dbd-add-btn" id="dbdAddBtn-m">+ Add</button>
+    </div>
+    <div class="dbd-stack" id="dbdContainer-m"></div>
       </section>
 
       <!-- Tab 3: Calendar -->
