@@ -49,6 +49,10 @@ let todoLists = [
     tasks: makeTasks(['1','2','3','4','5']) },
 ];
 
+/* day-by-day tasks (dated one-off tasks under My Lists) */
+let dbdTasks = [];        // { id, text, due:'YYYY-MM-DD', done }
+let dbdIdCounter = 1;
+
 /* calendar state */
 let calEvents       = {};   // { 'YYYY-MM-DD': [ev,...] }
 let calTemplates    = [];
@@ -151,6 +155,7 @@ function calPxToMins(px) { return Math.round((px/CAL_HOUR_PX)*60/15)*15; }
  *   timer: id→i label→lb color→c seconds→s running→r startedAt→sa secondsAtStart→ss
  *   list:  id→i title→ti color→c isDefault→d starred→sr tasks→tk
  *   task:  id→i text→tx done→dn
+ *   dbdTask: id→i text→tx due→du done→dn doneOn→dw
  *   calEvent: id→i title→ti start→s end→e color→c type→tp
  *     fromTemplate→ft templateId→tid repeatDays→rd gcalId→gi gcalCalId→gc
  */
@@ -178,6 +183,7 @@ function compressState(st) {
     if (e.gcalCalId) o.gc = e.gcalCalId;
     return o;
   };
+  const cDbd = t => { const o = { i:t.id, tx:t.text, du:t.due }; if (t.done) o.dn=1; if (t.doneOn) o.dw=t.doneOn; return o; };
   const cEvents = {};
   Object.entries(st.calendar.calEvents || {}).forEach(([k, evs]) => { cEvents[k] = evs.map(cCalEv); });
   return {
@@ -188,6 +194,8 @@ function compressState(st) {
     tic: st.todoIdCounter,
     tac: st.taskIdCounter,
     tl: st.todoLists.map(cList),
+    db: (st.dbdTasks||[]).map(cDbd),
+    dbc: st.dbdIdCounter || 1,
     cal: { ce: cEvents, ct: (st.calendar.calTemplates||[]).map(cCalEv), cec: st.calendar.calEventIdCtr },
   };
 }
@@ -206,6 +214,7 @@ function decompressState(c) {
     templateId:e.tid ?? null, repeatDays:e.rd || null,
     gcalId:e.gi ?? null, gcalCalId:e.gc ?? null,
   });
+  const dDbd = t => ({ id:t.i, text:t.tx, due:t.du, done:!!t.dn, doneOn:t.dw });
   const dEvents = {};
   Object.entries(c.cal.ce || {}).forEach(([k, evs]) => { dEvents[k] = evs.map(dCalEv); });
   return {
@@ -216,6 +225,8 @@ function decompressState(c) {
     todoIdCounter: c.tic,
     taskIdCounter: c.tac,
     todoLists: (c.tl||[]).map(dList),
+    dbdTasks: (c.db||[]).map(dDbd),
+    dbdIdCounter: c.dbc || 1,
     calendar: { calEvents: dEvents, calTemplates: (c.cal.ct||[]).map(dCalEv), calEventIdCtr: c.cal.cec || 1 },
   };
 }
@@ -240,6 +251,8 @@ function gatherState() {
       activeDays: Array.isArray(l.activeDays) ? l.activeDays : null,
       tasks: l.tasks.map(t => ({ id: t.id, text: t.text, done: t.done }))
     })),
+    dbdTasks: dbdTasks.map(t => ({ id: t.id, text: t.text, due: t.due, done: t.done, doneOn: t.doneOn })),
+    dbdIdCounter,
     calendar: { calEvents, calTemplates, calEventIdCtr },
   };
 }
@@ -262,6 +275,8 @@ function applyState(state) {
     activeDays: Array.isArray(l.activeDays) ? l.activeDays : null,
     tasks: l.tasks.map(t => ({ id: t.id, text: t.text, done: t.done }))
   }));
+  dbdTasks = (st.dbdTasks || []).map(t => ({ id: t.id, text: t.text, due: t.due, done: !!t.done, doneOn: t.doneOn }));
+  dbdIdCounter = st.dbdIdCounter ?? dbdIdCounter;
   if (st.calendar) {
     calEvents     = st.calendar.calEvents     || {};
     calTemplates  = st.calendar.calTemplates  || [];
@@ -272,6 +287,7 @@ function applyState(state) {
   syncWakeupUI();
   renderTimers();
   renderTodos();
+  renderDbd();
   calRefresh();
   saveToLocal();
   showToast('State restored ✓');
@@ -297,9 +313,12 @@ function loadFromLocal() {
     taskIdCounter = state.taskIdCounter ?? taskIdCounter;
     todoLists = state.todoLists.map(l => ({
       id: l.id, title: l.title, color: l.color, isDefault: !!l.isDefault,
+      starred: !!l.starred,
       activeDays: Array.isArray(l.activeDays) ? l.activeDays : null,
       tasks: l.tasks.map(t => ({ id: t.id, text: t.text, done: t.done }))
     }));
+    dbdTasks = (state.dbdTasks || []).map(t => ({ id: t.id, text: t.text, due: t.due, done: !!t.done, doneOn: t.doneOn }));
+    dbdIdCounter = state.dbdIdCounter ?? dbdIdCounter;
     if (state.calendar) {
       calEvents     = state.calendar.calEvents     || {};
       calTemplates  = state.calendar.calTemplates  || [];
@@ -367,6 +386,7 @@ function renderTimers() {
       stack.appendChild(card);
     });
   });
+  renderHome();
 }
 
 function setTimerLabel(id, value) {
@@ -770,6 +790,7 @@ function renderTodos() {
     customLists.forEach(l => custEl.appendChild(buildCard(l, pfx)));
   });
   bindAllDrags();
+  renderHome();
 }
 
 function setListTitle(id, value) {
@@ -968,6 +989,7 @@ function toggleTask(listId, taskId) {
   });
 
   saveToLocal();
+  homeUpdateProgressDom();
 }
 
 function moveList(fromListId, toListId, placeAfter, isDefault) {
@@ -1225,7 +1247,7 @@ function enterFormatMode() {
   renderTodos();
   calFmtMobileDay = 0;
   if (calDesktopOpen) calRenderDesktop();
-  if (currentTab === 3) calRenderMobile();
+  if (currentTab === 4) calRenderMobile();
 }
 
 function commitFormatMode() {
@@ -1252,7 +1274,7 @@ function commitFormatMode() {
   renderTimers();
   renderTodos();
   if (calDesktopOpen) calRenderDesktop();
-  if (currentTab === 3) calRenderMobile();
+  if (currentTab === 4) calRenderMobile();
   saveToLocal();
   showToast('Format saved ✓');
 }
@@ -1296,6 +1318,145 @@ function removeFormatDaily(id) {
   todoLists = todoLists.filter(l => l.id !== id);
   renderTodos();
   saveToLocal();
+}
+
+/* ───────────────────────── DAY-BY-DAY TASKS ─────────────────────────
+ * Flat, dated one-off tasks under the My Lists tab. Unchecked tasks with a
+ * past due date surface in an "Overdue" section; checked past tasks collapse
+ * into a dimmed "Completed" group. Groups re-flow automatically at midnight. */
+function dbdTodayKey() { return calDateKey(calToday()); }
+
+function dbdLabelFor(key) {
+  const today = calToday();
+  const [y, m, d] = key.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const diff = Math.round((date - today) / 86400000);
+  if (diff === 0)  return 'Today';
+  if (diff === 1)  return 'Tomorrow';
+  if (diff === -1) return 'Yesterday';
+  const opts = { weekday: 'short', month: 'short', day: 'numeric' };
+  if (date.getFullYear() !== today.getFullYear()) opts.year = 'numeric';
+  return date.toLocaleDateString(undefined, opts);
+}
+
+function dbdById(id) { return dbdTasks.find(t => t.id === id); }
+
+function addDbdTask(pfx) {
+  const textEl = $(`dbdText-${pfx}`);
+  const dateEl = $(`dbdDate-${pfx}`);
+  const text = (textEl?.value || '').trim();
+  if (!text) { textEl?.focus(); return; }
+  const due = (dateEl?.value) || dbdTodayKey();
+  dbdTasks.push({ id: dbdIdCounter++, text, due, done: false });
+  if (textEl) textEl.value = '';
+  renderDbd();
+  saveToLocal();
+  textEl?.focus();
+}
+
+function toggleDbdTask(id) {
+  const t = dbdById(id);
+  if (!t) return;
+  t.done = !t.done;
+  if (t.done) t.doneOn = dbdTodayKey();   // lets today's progress count overdue tasks cleared today
+  else delete t.doneOn;
+  renderDbd();
+  saveToLocal();
+}
+
+function removeDbdTask(id) {
+  dbdTasks = dbdTasks.filter(t => t.id !== id);
+  renderDbd();
+  saveToLocal();
+}
+
+function setDbdText(id, value) {
+  const t = dbdById(id);
+  if (t) { t.text = value; saveToLocal(); }
+}
+
+function setDbdDue(id, value) {
+  const t = dbdById(id);
+  if (!t || !value) return;
+  t.due = value;
+  renderDbd();
+  saveToLocal();
+}
+
+function dbdRowHtml(t, overdue) {
+  const dueAttr = escAttr(t.due || dbdTodayKey());
+  return `
+    <div class="task-row dbd-row ${overdue ? 'dbd-overdue-row' : ''}" data-dbd-id="${t.id}">
+      <div class="task-check dbd-check ${t.done ? 'done' : ''}" onclick="toggleDbdTask(${t.id})">
+        <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
+          <path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <input class="task-text ${t.done ? 'done' : ''}" value="${escAttr(t.text)}" placeholder="Task…"
+        oninput="setDbdText(${t.id}, this.value)">
+      <input type="date" class="dbd-date-input" value="${dueAttr}"
+        onchange="setDbdDue(${t.id}, this.value)" title="Due date">
+      <button class="task-del" onclick="removeDbdTask(${t.id})">×</button>
+    </div>`;
+}
+
+function renderDbd() {
+  const todayKey = dbdTodayKey();
+  const byDue = (a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : a.id - b.id);
+
+  const overdue   = dbdTasks.filter(t => !t.done && t.due < todayKey).sort(byDue);
+  const upcoming  = dbdTasks.filter(t => t.due >= todayKey).sort(byDue);
+  const donePast  = dbdTasks.filter(t => t.done && t.due < todayKey).sort(byDue);
+
+  // Group upcoming by due-date key, preserving ascending order.
+  const groups = [];
+  upcoming.forEach(t => {
+    const g = groups[groups.length - 1];
+    if (g && g.key === t.due) g.tasks.push(t);
+    else groups.push({ key: t.due, tasks: [t] });
+  });
+
+  let html = '';
+  if (overdue.length) {
+    html += `
+      <div class="dbd-group dbd-group-overdue">
+        <div class="dbd-group-header dbd-header-overdue">Overdue
+          <span class="dbd-count">${overdue.length}</span></div>
+        ${overdue.map(t => dbdRowHtml(t, true)).join('')}
+      </div>`;
+  }
+  groups.forEach(g => {
+    html += `
+      <div class="dbd-group">
+        <div class="dbd-group-header">${dbdLabelFor(g.key)}</div>
+        ${g.tasks.map(t => dbdRowHtml(t, false)).join('')}
+      </div>`;
+  });
+  if (donePast.length) {
+    html += `
+      <div class="dbd-group dbd-group-done">
+        <div class="dbd-group-header dbd-header-done">Completed</div>
+        ${donePast.map(t => dbdRowHtml(t, false)).join('')}
+      </div>`;
+  }
+  if (!html) html = '<div class="empty-state dbd-empty">No day-by-day tasks yet.<br>Add one above with a due date.</div>';
+
+  ['d','m'].forEach(pfx => {
+    const el = $(`dbdContainer-${pfx}`);
+    if (el) el.innerHTML = html;
+  });
+  renderHome();
+}
+
+/* Midnight rollover: re-flow groups (and default-date inputs) when the day changes. */
+let _dbdDayKey = null;
+function dbdCheckRollover() {
+  const k = dbdTodayKey();
+  if (k === _dbdDayKey) return;
+  _dbdDayKey = k;
+  ['d','m'].forEach(pfx => { const el = $(`dbdDate-${pfx}`); if (el) el.value = k; });
+  renderDbd();
+  renderTodos();   // Daily lists' "active today" can change at midnight too
 }
 
 /* ── Daily-list day-of-week schedule ── */
@@ -1439,6 +1600,255 @@ function confirmClearStorage() {
   }
 }
 
+/* ───────────────────────── HOME PAGE ─────────────────────────
+ * Read-mostly dashboard assembled from existing state. All interactions
+ * delegate to existing functions (toggleDbdTask / toggleTask), and existing
+ * live-update hooks keep it fresh: tickAll drives .tdisp-N timer text, and
+ * paintTaskState drives .task-checks-N / .task-text-N on starred lists. */
+let homeDesktopOpen = false;
+
+const HOME_CHECK_SVG = `<svg width="9" height="9" viewBox="0 0 9 9" fill="none">
+  <path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+function homeToggleDesktop(force) {
+  const want = (typeof force === 'boolean') ? force : !homeDesktopOpen;
+  if (want && calDesktopOpen) calToggleDesktop();   // close calendar overlay first
+  homeDesktopOpen = want;
+  const panel = $('homeDesktopPanel');
+  const tab   = $('homeDesktopNavTab');
+  const rp    = $('rightPanel');
+  if (panel) panel.classList.toggle('active', homeDesktopOpen);
+  if (tab)   tab.classList.toggle('active', homeDesktopOpen);
+  if (rp)    rp.style.display = homeDesktopOpen ? 'none' : '';
+  if (homeDesktopOpen) renderHome();
+}
+
+function renderHome() {
+  const dc = $('homeContainer-d');
+  const mc = $('homeContainer-m');
+  if (!dc && !mc) return;
+  const html =
+    homeHeroHtml() +
+    homeDbdHtml() +
+    homeStarredListsHtml(true) +   // starred Daily lists
+    homeTimersHtml() +
+    homeCalHtml() +
+    homeStarredListsHtml(false);   // starred custom Lists
+  if (dc) dc.innerHTML = html;
+  if (mc) mc.innerHTML = html;
+}
+
+/* ── daily progress: starred Daily tasks + dbd tasks due today / overdue.
+ *    A done dbd task counts only if it's due today OR was checked off today
+ *    (doneOn), so clearing an overdue task fills the bar instead of shrinking
+ *    the denominator. */
+function homeProgressData() {
+  const todayKey = dbdTodayKey();
+  let total = 0, done = 0;
+  todoLists.forEach(l => {
+    if (!l.isDefault || !l.starred) return;
+    l.tasks.forEach(t => { total++; if (t.done) done++; });
+  });
+  dbdTasks.forEach(t => {
+    const counted = t.done
+      ? (t.due === todayKey || t.doneOn === todayKey)
+      : (t.due <= todayKey);
+    if (counted) { total++; if (t.done) done++; }
+  });
+  return { total, done, pct: total ? Math.round(done / total * 100) : 0 };
+}
+
+function homeProgressHtml() {
+  const { total, done, pct } = homeProgressData();
+  if (!total) return '';
+  const complete = done === total;
+  const label = complete ? 'All done for today' : `${done} of ${total} tasks done`;
+  return `
+    <div class="home-progress ${complete ? 'complete' : ''}">
+      <div class="home-progress-meta">
+        <span class="home-progress-label">${label}</span>
+        <span class="home-progress-pct">${pct}%</span>
+      </div>
+      <div class="home-progress-track">
+        <div class="home-progress-fill" style="width:${pct}%"></div>
+      </div>
+    </div>`;
+}
+
+/* Patch the bar in place (no full re-render) — used by toggleTask, which
+ * paints task state via classes instead of re-rendering the Home page. */
+function homeUpdateProgressDom() {
+  const bars = document.querySelectorAll('.home-progress');
+  if (!bars.length) { renderHome(); return; }
+  const { total, done, pct } = homeProgressData();
+  const complete = total > 0 && done === total;
+  const label = complete ? 'All done for today' : `${done} of ${total} tasks done`;
+  bars.forEach(bar => {
+    bar.classList.toggle('complete', complete);
+    const fill = bar.querySelector('.home-progress-fill');
+    const lab  = bar.querySelector('.home-progress-label');
+    const pc   = bar.querySelector('.home-progress-pct');
+    if (fill) fill.style.width = pct + '%';
+    if (lab)  lab.textContent = label;
+    if (pc)   pc.textContent = pct + '%';
+  });
+}
+
+/* ── hero ── */
+function homeHeroHtml() {
+  const dateStr = new Date().toLocaleDateString(undefined,
+    { weekday: 'long', month: 'long', day: 'numeric' });
+  return `
+    <div class="home-hero">
+      <div class="home-welcome">Welcome</div>
+      <div class="home-date">${dateStr}</div>
+      ${homeProgressHtml()}
+    </div>`;
+}
+
+/* ── day-by-day: overdue (red) + today (white) + next 3 upcoming (grey) ── */
+function homeDbdRow(t, tone) {
+  const dateChip = tone === 'today' ? '' :
+    `<span class="home-dbd-date">${dbdLabelFor(t.due)}</span>`;
+  return `
+    <div class="task-row home-dbd-row home-tone-${tone}">
+      <div class="task-check home-dbd-check ${t.done ? 'done' : ''}" onclick="toggleDbdTask(${t.id})">
+        ${HOME_CHECK_SVG}
+      </div>
+      <span class="home-task-text ${t.done ? 'done' : ''}">${escAttr(t.text)}</span>
+      ${dateChip}
+    </div>`;
+}
+
+function homeDbdHtml() {
+  const todayKey = dbdTodayKey();
+  const byDue = (a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : a.id - b.id);
+  const overdue  = dbdTasks.filter(t => !t.done && t.due <  todayKey).sort(byDue);
+  const today    = dbdTasks.filter(t =>             t.due === todayKey).sort(byDue);
+  const upcoming = dbdTasks.filter(t => !t.done && t.due >  todayKey).sort(byDue).slice(0, 3);
+  if (!overdue.length && !today.length && !upcoming.length) return '';
+  const emptyToday = (!overdue.length && !today.length)
+    ? '<div class="home-muted-note">Nothing due today.</div>' : '';
+  return `
+    <section class="home-section">
+      <div class="home-section-title">Today\u2019s Tasks</div>
+      <div class="home-card">
+        ${overdue.map(t => homeDbdRow(t, 'overdue')).join('')}
+        ${today.map(t => homeDbdRow(t, 'today')).join('')}
+        ${emptyToday}
+        ${upcoming.map(t => homeDbdRow(t, 'future')).join('')}
+      </div>
+    </section>`;
+}
+
+/* ── starred lists (daily=true → Daily lists; false → custom Lists) ── */
+function homeListCard(list) {
+  const rows = list.tasks.map(task => {
+    const checkStyle = task.done ? `background:${list.color};border-color:${list.color}` : '';
+    return `
+      <div class="task-row home-list-row">
+        <div class="task-check task-checks-${task.id} ${task.done ? 'done' : ''}" style="${checkStyle}"
+          onclick="toggleTask(${list.id},${task.id})">
+          ${HOME_CHECK_SVG}
+        </div>
+        <span class="home-task-text task-text-${task.id} ${task.done ? 'done' : ''}">${escAttr(task.text)}</span>
+      </div>`;
+  }).join('');
+  return `
+    <div class="home-list-card">
+      <div class="home-list-strip" style="background:${list.color}"></div>
+      <div class="home-list-title">
+        <span class="home-list-star">${STAR_SVG}</span>
+        ${escAttr(list.title || 'Untitled')}
+      </div>
+      <div class="home-list-tasks">${rows || '<div class="home-muted-note">No tasks</div>'}</div>
+    </div>`;
+}
+
+function homeStarredListsHtml(daily) {
+  const lists = todoLists.filter(l => !!l.isDefault === daily && l.starred);
+  if (!lists.length) return '';
+  const title = daily ? 'Starred Daily' : 'Starred Lists';
+  return `
+    <section class="home-section">
+      <div class="home-section-title">${title}</div>
+      <div class="home-lists-grid">${lists.map(homeListCard).join('')}</div>
+    </section>`;
+}
+
+/* ── timers: compact remaining-time chips (tickAll keeps .tdisp-N live) ── */
+function homeTimersHtml() {
+  if (!timers.length) return '';
+  const chips = timers.map(t => `
+    <div class="home-timer-chip">
+      <span class="home-timer-dot" style="background:${t.color}"></span>
+      <span class="home-timer-label">${escAttr(t.label)}</span>
+      <span class="home-timer-time tdisp-${t.id}">${fmt(getRemaining(t))}</span>
+    </div>`).join('');
+  return `
+    <section class="home-section">
+      <div class="home-section-title">Timers</div>
+      <div class="home-timer-row">${chips}</div>
+    </section>`;
+}
+
+/* ── calendar: agenda of events overlapping [now, now + 4h] ── */
+function homeCalTime(mins) {
+  const wrapped = ((mins % 1440) + 1440) % 1440;
+  return calFmtTime(calMinsToStr(wrapped));
+}
+
+function homeCalHtml() {
+  const now = new Date();
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+  const winEnd  = nowMins + 240;
+  const todayKey = calDateKey(calToday());
+  const tmr = new Date(calToday()); tmr.setDate(tmr.getDate() + 1);
+  const tomorrowKey = calDateKey(tmr);
+
+  const collect = (dateKey, offset) => {
+    const local = (calEvents[dateKey] || []).filter(e => e.type !== 'divider');
+    const goog  = (gcalIsConnected() ? (gcalEvents[dateKey] || []) : []).filter(e => !e.allDay);
+    return [...local, ...goog].map(ev => {
+      const s = calTimeToMins(ev.start) + offset;
+      return { title: ev.title, color: ev.color || '#5dcaa5',
+               s, e: Math.max(s + 1, calTimeToMins(ev.end) + offset) };
+    });
+  };
+  let evs = collect(todayKey, 0);
+  if (winEnd > 1440) evs = evs.concat(collect(tomorrowKey, 1440));
+  evs = evs.filter(ev => ev.e > nowMins && ev.s < winEnd)
+           .sort((a, b) => a.s - b.s || a.e - b.e);
+
+  const items = evs.map(ev => {
+    const ongoing  = ev.s <= nowMins;
+    const startsIn = ev.s - nowMins;
+    const inStr = startsIn >= 60
+      ? `in ${Math.floor(startsIn / 60)}h${startsIn % 60 ? ' ' + (startsIn % 60) + 'm' : ''}`
+      : `in ${startsIn}m`;
+    const badge = ongoing
+      ? '<span class="home-cal-badge now">Now</span>'
+      : `<span class="home-cal-badge">${inStr}</span>`;
+    const tmrTag = ev.s >= 1440 ? '<span class="home-cal-tmr">tomorrow</span>' : '';
+    return `
+      <div class="home-cal-event ${ongoing ? 'ongoing' : ''}"
+        style="border-left-color:${ev.color};background:${ev.color}14">
+        <div class="home-cal-event-main">
+          <div class="home-cal-event-title" style="color:${ev.color}">${escAttr(ev.title || '(untitled)')}</div>
+          <div class="home-cal-event-time">${homeCalTime(ev.s)} \u2013 ${homeCalTime(ev.e)} ${tmrTag}</div>
+        </div>
+        ${badge}
+      </div>`;
+  }).join('');
+
+  const empty = `<div class="home-muted-note">Nothing on the calendar until ${homeCalTime(winEnd)}.</div>`;
+  return `
+    <section class="home-section">
+      <div class="home-section-title">Next 4 Hours</div>
+      <div class="home-card home-cal-card">${items || empty}</div>
+    </section>`;
+}
+
 /* ───────────────────────── MOBILE TABS ───────────────────────── */
 function setSwipePanelWidths() {
   const w = window.innerWidth;
@@ -1450,7 +1860,7 @@ function setSwipePanelWidths() {
     track.style.transition = 'none';
     track.style.transform = `translateX(${-currentTab * w}px)`;
   }
-  [0,1,2,3].forEach(i => {
+  [0,1,2,3,4].forEach(i => {
     const btn = $(`tab-${i}`);
     if (btn) btn.classList.toggle('active', i === currentTab);
   });
@@ -1464,11 +1874,12 @@ function goTab(idx, animate) {
     track.style.transition = animate === false ? 'none' : 'transform 0.32s cubic-bezier(0.3,0.7,0.4,1)';
     track.style.transform = `translateX(${-idx * w}px)`;
   }
-  [0,1,2,3].forEach(i => {
+  [0,1,2,3,4].forEach(i => {
     const btn = $(`tab-${i}`);
     if (btn) btn.classList.toggle('active', i === idx);
   });
-  if (idx === 3) calRenderMobile();
+  if (idx === 4) calRenderMobile();
+  if (idx === 0) renderHome();
 }
 
 function initSwipe() {
@@ -1499,7 +1910,7 @@ function initSwipe() {
     const dx = e.changedTouches[0].clientX - sx;
     const dy = e.changedTouches[0].clientY - sy;
     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
-      goTab(dx < 0 ? Math.min(currentTab + 1, 3) : Math.max(currentTab - 1, 0), true);
+      goTab(dx < 0 ? Math.min(currentTab + 1, 4) : Math.max(currentTab - 1, 0), true);
     }
     sx = 0; swiping = false;
   }, { passive: true });
@@ -1887,6 +2298,7 @@ function calNavDay(dir) {
 }
 
 function calToggleDesktop() {
+  if (!calDesktopOpen && homeDesktopOpen) homeToggleDesktop(false);
   calDesktopOpen = !calDesktopOpen;
   const panel   = $('calDesktopPanel');
   const tab     = $('calDesktopNavTab');
@@ -2595,18 +3007,21 @@ function bindStatic() {
 
   /* calendar nav */
   $('calDesktopNavTab')?.addEventListener('click', calToggleDesktop);
+  $('homeDesktopNavTab')?.addEventListener('click', () => homeToggleDesktop());
   $('calWeekModeBtn')?.addEventListener('click', e => { e.stopPropagation(); calToggleWeekMode(); });
   $('calNavPrev')?.addEventListener('click', () => calNavDay(-1));
   $('calNavNext')?.addEventListener('click', () => calNavDay(1));
 
   /* tabs */
-  [0,1,2,3].forEach(i => $(`tab-${i}`)?.addEventListener('click', () => goTab(i, true)));
+  [0,1,2,3,4].forEach(i => $(`tab-${i}`)?.addEventListener('click', () => goTab(i, true)));
 
   /* add buttons */
   $('addTimerBtn-d')?.addEventListener('click', addFormatTimer);
   $('addTimerBtn-m')?.addEventListener('click', addFormatTimer);
   $('addDailyBtn')?.addEventListener('click', addFormatDaily);
   $('addDailyBtn-m')?.addEventListener('click', addFormatDaily);
+  $('dbdAddBtn-d')?.addEventListener('click', () => addDbdTask('d'));
+  $('dbdAddBtn-m')?.addEventListener('click', () => addDbdTask('m'));
   $('addListBtn-d')?.addEventListener('click', addTodoList);
   $('addListBtn-m')?.addEventListener('click', addTodoList);
 
@@ -2689,6 +3104,10 @@ function bindStatic() {
 
   renderTimers();
   renderTodos();
+  homeToggleDesktop(true);   // desktop lands on Home; toggle back via nav
+  _dbdDayKey = dbdTodayKey();
+  ['d','m'].forEach(pfx => { const el = $(`dbdDate-${pfx}`); if (el && !el.value) el.value = _dbdDayKey; });
+  renderDbd();
   syncWakeupUI();
   setSwipePanelWidths();
   updateTimerSummary();
@@ -2698,6 +3117,13 @@ function bindStatic() {
 
   /* autosave */
   setInterval(saveToLocal, 2000);
+  /* day-by-day midnight rollover (also fires after device sleep) */
+  setInterval(dbdCheckRollover, 30 * 1000);
+  /* home page: keep the 4-hour calendar window and date current */
+  setInterval(renderHome, 60 * 1000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') dbdCheckRollover();
+  });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') saveToLocal();
   });
