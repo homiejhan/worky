@@ -386,6 +386,7 @@ function renderTimers() {
       stack.appendChild(card);
     });
   });
+  renderHome();
 }
 
 function setTimerLabel(id, value) {
@@ -789,6 +790,7 @@ function renderTodos() {
     customLists.forEach(l => custEl.appendChild(buildCard(l, pfx)));
   });
   bindAllDrags();
+  renderHome();
 }
 
 function setListTitle(id, value) {
@@ -1244,7 +1246,7 @@ function enterFormatMode() {
   renderTodos();
   calFmtMobileDay = 0;
   if (calDesktopOpen) calRenderDesktop();
-  if (currentTab === 3) calRenderMobile();
+  if (currentTab === 4) calRenderMobile();
 }
 
 function commitFormatMode() {
@@ -1271,7 +1273,7 @@ function commitFormatMode() {
   renderTimers();
   renderTodos();
   if (calDesktopOpen) calRenderDesktop();
-  if (currentTab === 3) calRenderMobile();
+  if (currentTab === 4) calRenderMobile();
   saveToLocal();
   showToast('Format saved ✓');
 }
@@ -1440,6 +1442,7 @@ function renderDbd() {
     const el = $(`dbdContainer-${pfx}`);
     if (el) el.innerHTML = html;
   });
+  renderHome();
 }
 
 /* Midnight rollover: re-flow groups (and default-date inputs) when the day changes. */
@@ -1594,6 +1597,198 @@ function confirmClearStorage() {
   }
 }
 
+/* ───────────────────────── HOME PAGE ─────────────────────────
+ * Read-mostly dashboard assembled from existing state. All interactions
+ * delegate to existing functions (toggleDbdTask / toggleTask), and existing
+ * live-update hooks keep it fresh: tickAll drives .tdisp-N timer text, and
+ * paintTaskState drives .task-checks-N / .task-text-N on starred lists. */
+let homeDesktopOpen = false;
+
+const HOME_CHECK_SVG = `<svg width="9" height="9" viewBox="0 0 9 9" fill="none">
+  <path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+function homeToggleDesktop(force) {
+  const want = (typeof force === 'boolean') ? force : !homeDesktopOpen;
+  if (want && calDesktopOpen) calToggleDesktop();   // close calendar overlay first
+  homeDesktopOpen = want;
+  const panel = $('homeDesktopPanel');
+  const tab   = $('homeDesktopNavTab');
+  const rp    = $('rightPanel');
+  if (panel) panel.classList.toggle('active', homeDesktopOpen);
+  if (tab)   tab.classList.toggle('active', homeDesktopOpen);
+  if (rp)    rp.style.display = homeDesktopOpen ? 'none' : '';
+  if (homeDesktopOpen) renderHome();
+}
+
+function renderHome() {
+  const dc = $('homeContainer-d');
+  const mc = $('homeContainer-m');
+  if (!dc && !mc) return;
+  const html =
+    homeHeroHtml() +
+    homeDbdHtml() +
+    homeStarredListsHtml(true) +   // starred Daily lists
+    homeTimersHtml() +
+    homeCalHtml() +
+    homeStarredListsHtml(false);   // starred custom Lists
+  if (dc) dc.innerHTML = html;
+  if (mc) mc.innerHTML = html;
+}
+
+/* ── hero ── */
+function homeHeroHtml() {
+  const dateStr = new Date().toLocaleDateString(undefined,
+    { weekday: 'long', month: 'long', day: 'numeric' });
+  return `
+    <div class="home-hero">
+      <div class="home-welcome">Welcome</div>
+      <div class="home-date">${dateStr}</div>
+    </div>`;
+}
+
+/* ── day-by-day: overdue (red) + today (white) + next 3 upcoming (grey) ── */
+function homeDbdRow(t, tone) {
+  const dateChip = tone === 'today' ? '' :
+    `<span class="home-dbd-date">${dbdLabelFor(t.due)}</span>`;
+  return `
+    <div class="task-row home-dbd-row home-tone-${tone}">
+      <div class="task-check home-dbd-check ${t.done ? 'done' : ''}" onclick="toggleDbdTask(${t.id})">
+        ${HOME_CHECK_SVG}
+      </div>
+      <span class="home-task-text ${t.done ? 'done' : ''}">${escAttr(t.text)}</span>
+      ${dateChip}
+    </div>`;
+}
+
+function homeDbdHtml() {
+  const todayKey = dbdTodayKey();
+  const byDue = (a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : a.id - b.id);
+  const overdue  = dbdTasks.filter(t => !t.done && t.due <  todayKey).sort(byDue);
+  const today    = dbdTasks.filter(t =>             t.due === todayKey).sort(byDue);
+  const upcoming = dbdTasks.filter(t => !t.done && t.due >  todayKey).sort(byDue).slice(0, 3);
+  if (!overdue.length && !today.length && !upcoming.length) return '';
+  const emptyToday = (!overdue.length && !today.length)
+    ? '<div class="home-muted-note">Nothing due today.</div>' : '';
+  return `
+    <section class="home-section">
+      <div class="home-section-title">Today\u2019s Tasks</div>
+      <div class="home-card">
+        ${overdue.map(t => homeDbdRow(t, 'overdue')).join('')}
+        ${today.map(t => homeDbdRow(t, 'today')).join('')}
+        ${emptyToday}
+        ${upcoming.map(t => homeDbdRow(t, 'future')).join('')}
+      </div>
+    </section>`;
+}
+
+/* ── starred lists (daily=true → Daily lists; false → custom Lists) ── */
+function homeListCard(list) {
+  const rows = list.tasks.map(task => {
+    const checkStyle = task.done ? `background:${list.color};border-color:${list.color}` : '';
+    return `
+      <div class="task-row home-list-row">
+        <div class="task-check task-checks-${task.id} ${task.done ? 'done' : ''}" style="${checkStyle}"
+          onclick="toggleTask(${list.id},${task.id})">
+          ${HOME_CHECK_SVG}
+        </div>
+        <span class="home-task-text task-text-${task.id} ${task.done ? 'done' : ''}">${escAttr(task.text)}</span>
+      </div>`;
+  }).join('');
+  return `
+    <div class="home-list-card">
+      <div class="home-list-strip" style="background:${list.color}"></div>
+      <div class="home-list-title">
+        <span class="home-list-star">${STAR_SVG}</span>
+        ${escAttr(list.title || 'Untitled')}
+      </div>
+      <div class="home-list-tasks">${rows || '<div class="home-muted-note">No tasks</div>'}</div>
+    </div>`;
+}
+
+function homeStarredListsHtml(daily) {
+  const lists = todoLists.filter(l => !!l.isDefault === daily && l.starred);
+  if (!lists.length) return '';
+  const title = daily ? 'Starred Daily' : 'Starred Lists';
+  return `
+    <section class="home-section">
+      <div class="home-section-title">${title}</div>
+      <div class="home-lists-grid">${lists.map(homeListCard).join('')}</div>
+    </section>`;
+}
+
+/* ── timers: compact remaining-time chips (tickAll keeps .tdisp-N live) ── */
+function homeTimersHtml() {
+  if (!timers.length) return '';
+  const chips = timers.map(t => `
+    <div class="home-timer-chip">
+      <span class="home-timer-dot" style="background:${t.color}"></span>
+      <span class="home-timer-label">${escAttr(t.label)}</span>
+      <span class="home-timer-time tdisp-${t.id}">${fmt(getRemaining(t))}</span>
+    </div>`).join('');
+  return `
+    <section class="home-section">
+      <div class="home-section-title">Timers</div>
+      <div class="home-timer-row">${chips}</div>
+    </section>`;
+}
+
+/* ── calendar: agenda of events overlapping [now, now + 4h] ── */
+function homeCalTime(mins) {
+  const wrapped = ((mins % 1440) + 1440) % 1440;
+  return calFmtTime(calMinsToStr(wrapped));
+}
+
+function homeCalHtml() {
+  const now = new Date();
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+  const winEnd  = nowMins + 240;
+  const todayKey = calDateKey(calToday());
+  const tmr = new Date(calToday()); tmr.setDate(tmr.getDate() + 1);
+  const tomorrowKey = calDateKey(tmr);
+
+  const collect = (dateKey, offset) => {
+    const local = (calEvents[dateKey] || []).filter(e => e.type !== 'divider');
+    const goog  = (gcalIsConnected() ? (gcalEvents[dateKey] || []) : []).filter(e => !e.allDay);
+    return [...local, ...goog].map(ev => {
+      const s = calTimeToMins(ev.start) + offset;
+      return { title: ev.title, color: ev.color || '#5dcaa5',
+               s, e: Math.max(s + 1, calTimeToMins(ev.end) + offset) };
+    });
+  };
+  let evs = collect(todayKey, 0);
+  if (winEnd > 1440) evs = evs.concat(collect(tomorrowKey, 1440));
+  evs = evs.filter(ev => ev.e > nowMins && ev.s < winEnd)
+           .sort((a, b) => a.s - b.s || a.e - b.e);
+
+  const items = evs.map(ev => {
+    const ongoing  = ev.s <= nowMins;
+    const startsIn = ev.s - nowMins;
+    const inStr = startsIn >= 60
+      ? `in ${Math.floor(startsIn / 60)}h${startsIn % 60 ? ' ' + (startsIn % 60) + 'm' : ''}`
+      : `in ${startsIn}m`;
+    const badge = ongoing
+      ? '<span class="home-cal-badge now">Now</span>'
+      : `<span class="home-cal-badge">${inStr}</span>`;
+    const tmrTag = ev.s >= 1440 ? '<span class="home-cal-tmr">tomorrow</span>' : '';
+    return `
+      <div class="home-cal-event ${ongoing ? 'ongoing' : ''}"
+        style="border-left-color:${ev.color};background:${ev.color}14">
+        <div class="home-cal-event-main">
+          <div class="home-cal-event-title" style="color:${ev.color}">${escAttr(ev.title || '(untitled)')}</div>
+          <div class="home-cal-event-time">${homeCalTime(ev.s)} \u2013 ${homeCalTime(ev.e)} ${tmrTag}</div>
+        </div>
+        ${badge}
+      </div>`;
+  }).join('');
+
+  const empty = `<div class="home-muted-note">Nothing on the calendar until ${homeCalTime(winEnd)}.</div>`;
+  return `
+    <section class="home-section">
+      <div class="home-section-title">Next 4 Hours</div>
+      <div class="home-card home-cal-card">${items || empty}</div>
+    </section>`;
+}
+
 /* ───────────────────────── MOBILE TABS ───────────────────────── */
 function setSwipePanelWidths() {
   const w = window.innerWidth;
@@ -1605,7 +1800,7 @@ function setSwipePanelWidths() {
     track.style.transition = 'none';
     track.style.transform = `translateX(${-currentTab * w}px)`;
   }
-  [0,1,2,3].forEach(i => {
+  [0,1,2,3,4].forEach(i => {
     const btn = $(`tab-${i}`);
     if (btn) btn.classList.toggle('active', i === currentTab);
   });
@@ -1619,11 +1814,12 @@ function goTab(idx, animate) {
     track.style.transition = animate === false ? 'none' : 'transform 0.32s cubic-bezier(0.3,0.7,0.4,1)';
     track.style.transform = `translateX(${-idx * w}px)`;
   }
-  [0,1,2,3].forEach(i => {
+  [0,1,2,3,4].forEach(i => {
     const btn = $(`tab-${i}`);
     if (btn) btn.classList.toggle('active', i === idx);
   });
-  if (idx === 3) calRenderMobile();
+  if (idx === 4) calRenderMobile();
+  if (idx === 0) renderHome();
 }
 
 function initSwipe() {
@@ -1654,7 +1850,7 @@ function initSwipe() {
     const dx = e.changedTouches[0].clientX - sx;
     const dy = e.changedTouches[0].clientY - sy;
     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
-      goTab(dx < 0 ? Math.min(currentTab + 1, 3) : Math.max(currentTab - 1, 0), true);
+      goTab(dx < 0 ? Math.min(currentTab + 1, 4) : Math.max(currentTab - 1, 0), true);
     }
     sx = 0; swiping = false;
   }, { passive: true });
@@ -2042,6 +2238,7 @@ function calNavDay(dir) {
 }
 
 function calToggleDesktop() {
+  if (!calDesktopOpen && homeDesktopOpen) homeToggleDesktop(false);
   calDesktopOpen = !calDesktopOpen;
   const panel   = $('calDesktopPanel');
   const tab     = $('calDesktopNavTab');
@@ -2750,12 +2947,13 @@ function bindStatic() {
 
   /* calendar nav */
   $('calDesktopNavTab')?.addEventListener('click', calToggleDesktop);
+  $('homeDesktopNavTab')?.addEventListener('click', () => homeToggleDesktop());
   $('calWeekModeBtn')?.addEventListener('click', e => { e.stopPropagation(); calToggleWeekMode(); });
   $('calNavPrev')?.addEventListener('click', () => calNavDay(-1));
   $('calNavNext')?.addEventListener('click', () => calNavDay(1));
 
   /* tabs */
-  [0,1,2,3].forEach(i => $(`tab-${i}`)?.addEventListener('click', () => goTab(i, true)));
+  [0,1,2,3,4].forEach(i => $(`tab-${i}`)?.addEventListener('click', () => goTab(i, true)));
 
   /* add buttons */
   $('addTimerBtn-d')?.addEventListener('click', addFormatTimer);
@@ -2846,6 +3044,7 @@ function bindStatic() {
 
   renderTimers();
   renderTodos();
+  homeToggleDesktop(true);   // desktop lands on Home; toggle back via nav
   _dbdDayKey = dbdTodayKey();
   ['d','m'].forEach(pfx => { const el = $(`dbdDate-${pfx}`); if (el && !el.value) el.value = _dbdDayKey; });
   renderDbd();
@@ -2860,6 +3059,8 @@ function bindStatic() {
   setInterval(saveToLocal, 2000);
   /* day-by-day midnight rollover (also fires after device sleep) */
   setInterval(dbdCheckRollover, 30 * 1000);
+  /* home page: keep the 4-hour calendar window and date current */
+  setInterval(renderHome, 60 * 1000);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') dbdCheckRollover();
   });

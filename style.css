@@ -461,6 +461,152 @@ body.format-mode .list-sched-row { display: flex; }
 
 .dbd-empty { padding: 14px 0; }
 
+/* ═══════════════════════════════════════════════════════
+   HOME PAGE
+   ═══════════════════════════════════════════════════════ */
+.home-desktop-panel {
+  display: none;
+  position: fixed;
+  top: 0; left: 320px; right: 0; bottom: 44px;
+  background: var(--bg-base);
+  z-index: 10;
+  overflow-y: auto;
+}
+.home-desktop-panel.active { display: block; }
+@media (max-width: 640px) { .home-desktop-panel { display: none !important; } }
+
+.home-col {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 40px 32px 64px;
+}
+
+/* hero */
+.home-hero { margin-bottom: 30px; }
+.home-welcome {
+  font-family: var(--font-serif);
+  font-size: 42px; font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+.home-date {
+  margin-top: 7px;
+  font-size: 14px; font-weight: 500;
+  color: var(--ink-2);
+}
+
+/* sections + cards */
+.home-section { margin-bottom: 26px; }
+.home-section-title {
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 9px;
+}
+.home-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px;
+}
+.home-muted-note { color: var(--ink-3); font-size: 12.5px; padding: 8px 6px; }
+.home-task-text { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
+.home-task-text.done { text-decoration: line-through; color: var(--ink-3); }
+
+/* day-by-day tones: overdue red / today white / upcoming grey */
+.home-dbd-check.done { background: var(--accent); border-color: var(--accent); }
+.home-dbd-date {
+  font-size: 10.5px; font-weight: 600;
+  color: var(--ink-3);
+  background: var(--bg-hover);
+  padding: 2px 8px; border-radius: 9px;
+  flex-shrink: 0;
+}
+.home-tone-overdue .home-task-text { color: var(--danger); }
+.home-tone-overdue .home-dbd-check { border-color: var(--danger); }
+.home-tone-overdue .home-dbd-date { color: var(--danger); background: var(--danger-dim); }
+.home-tone-today .home-task-text { color: var(--ink); }
+.home-tone-future { opacity: 0.55; }
+.home-tone-future .home-task-text { color: var(--ink-3); }
+
+/* starred list cards */
+.home-lists-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
+}
+.home-list-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.home-list-strip { height: 3px; width: 100%; }
+.home-list-title {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 13px; font-weight: 600;
+  padding: 10px 12px 7px;
+  border-bottom: 1px solid var(--border);
+}
+.home-list-star { display: flex; color: #E8B341; }
+.home-list-star .star-path { fill: #E8B341; }
+.home-list-tasks { padding: 5px 7px 7px; }
+
+/* timer chips */
+.home-timer-row { display: flex; flex-wrap: wrap; gap: 9px; }
+.home-timer-chip {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-mid);
+  border-radius: 22px;
+  padding: 7px 14px;
+}
+.home-timer-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.home-timer-label { font-size: 12px; font-weight: 500; color: var(--ink-2); }
+.home-timer-time {
+  font-family: var(--font-mono);
+  font-size: 15px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* calendar agenda */
+.home-cal-card { display: flex; flex-direction: column; gap: 7px; padding: 9px; }
+.home-cal-event {
+  display: flex; align-items: center; gap: 10px;
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 8px 11px;
+}
+.home-cal-event-main { flex: 1; min-width: 0; }
+.home-cal-event-title {
+  font-size: 13px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.home-cal-event-time { font-size: 11.5px; color: var(--ink-2); margin-top: 2px; }
+.home-cal-tmr { color: var(--ink-3); font-style: italic; }
+.home-cal-badge {
+  font-size: 10.5px; font-weight: 600;
+  color: var(--ink-2);
+  background: var(--bg-hover);
+  padding: 2px 9px; border-radius: 9px;
+  flex-shrink: 0; white-space: nowrap;
+}
+.home-cal-badge.now {
+  color: var(--accent);
+  background: var(--accent-dim);
+  animation: homePulse 2.4s ease-in-out infinite;
+}
+@keyframes homePulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+/* mobile sizing */
+@media (max-width: 640px) {
+  .home-welcome { font-size: 33px; }
+  .home-hero { margin: 6px 0 22px; }
+  .home-section { margin-bottom: 22px; }
+  .home-lists-grid { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 640px) {
   .dbd-new-date { max-width: 128px; }
 }

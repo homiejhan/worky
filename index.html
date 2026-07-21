@@ -34,6 +34,12 @@
       <span class="wakeup-label">Woke up</span>
     </div>
 
+    <button class="cal-nav-tab" id="homeDesktopNavTab">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+        <path d="M1.5 5.5L6 1.5L10.5 5.5V10.5H7.5V7.5H4.5V10.5H1.5V5.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+      </svg>
+      Home
+    </button>
     <button class="cal-nav-tab" id="calDesktopNavTab">
       <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
         <rect x="1" y="2" width="10" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2"/>
@@ -92,16 +98,22 @@
 <!-- ════════ MOBILE LAYOUT ════════ -->
 <div class="mobile-app" id="mobileApp">
   <nav class="tab-bar">
-    <button class="tab-btn active" id="tab-0">Timers</button>
-    <button class="tab-btn" id="tab-1">Daily</button>
-    <button class="tab-btn" id="tab-2">My Lists</button>
-    <button class="tab-btn" id="tab-3">Calendar</button>
+    <button class="tab-btn active" id="tab-0">Home</button>
+    <button class="tab-btn" id="tab-1">Timers</button>
+    <button class="tab-btn" id="tab-2">Daily</button>
+    <button class="tab-btn" id="tab-3">My Lists</button>
+    <button class="tab-btn" id="tab-4">Calendar</button>
   </nav>
 
   <div class="swipe-container" id="swipeContainer">
     <div class="swipe-track" id="swipeTrack">
 
-      <!-- Tab 0: Timers -->
+      <!-- Tab 0: Home -->
+      <section class="swipe-panel">
+        <div id="homeContainer-m"></div>
+      </section>
+
+      <!-- Tab 1: Timers -->
       <section class="swipe-panel" id="mobileTimerPanel">
         <div class="wakeup-row" id="wakeupRow-m">
           <div class="wakeup-box" id="wakeupBox-m">
@@ -120,7 +132,7 @@
         </button>
       </section>
 
-      <!-- Tab 1: Daily -->
+      <!-- Tab 2: Daily -->
       <section class="swipe-panel">
         <div class="panel-header">
           <span class="section-label">Daily</span>
@@ -129,7 +141,7 @@
         <div id="defaultContainer-m"></div>
       </section>
 
-      <!-- Tab 2: My Lists -->
+      <!-- Tab 3: My Lists -->
       <section class="swipe-panel">
         <div class="panel-header">
           <span class="section-label">My lists</span>
@@ -154,7 +166,7 @@
         </div>
       </section>
 
-      <!-- Tab 3: Calendar -->
+      <!-- Tab 4: Calendar -->
       <section class="swipe-panel cal-swipe-panel" id="mobileCalPanel">
         <div class="cal-mobile-header">
           <button class="cal-nav-btn" id="calNavPrev">&#8249;</button>
@@ -169,6 +181,10 @@
 </div>
 
 <!-- ════════ DESKTOP CALENDAR PANEL ════════ -->
+<div class="home-desktop-panel" id="homeDesktopPanel">
+  <div class="home-col" id="homeContainer-d"></div>
+</div>
+
 <div class="cal-desktop-panel" id="calDesktopPanel">
   <div class="cal-desktop-header">
     <div class="cal-desktop-title" id="calDesktopTitle"></div>
