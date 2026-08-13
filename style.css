@@ -1612,3 +1612,17 @@ body.format-mode .fmt-banner { display: inline; }
 
 /* left panel timers block keeps its own spacing when shown */
 .left-timers { display: flex; flex-direction: column; gap: 8px; }
+
+/* icon-only data-bar button (gear) */
+.data-btn.icon-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 28px;
+  padding: 0;
+  flex-shrink: 0;
+  color: var(--ink-2);
+}
+.data-btn.icon-btn:hover { color: var(--ink); }
+.data-btn.icon-btn svg { display: block; }
+@media (max-width: 640px) {
+  .data-btn.icon-btn { width: 28px; height: 26px; }
+}
