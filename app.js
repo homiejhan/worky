@@ -73,8 +73,24 @@ let gcalCalendars = [];
 let gcalEvents    = {};
 let gcalSyncing   = false;
 
+/* budget state
+ *   initial        — balance allocated at the start of today
+ *   daily          — amount added to the balance each new day
+ *   todayAllowance — null = use `daily`; set when the user edits Today's balance
+ *   purchases      — today's purchases only; cleared on rollover / reset all
+ *   lastDate       — date key of the last rollover, drives new-day detection */
+let budget = {
+  initial: 0,
+  daily: 0,
+  todayAllowance: null,
+  purchases: [],
+  lastDate: null,
+};
+let purchaseIdCounter = 1;
+
 /* misc */
 let currentTab = 0;
+const TAB_COUNT = 6;
 let preFormatTimerState = [];
 
 /* ───────────────────────── UTIL ───────────────────────── */
@@ -167,6 +183,15 @@ function compressState(st) {
   };
   const cDef  = t => ({ lb:t.label, c:t.color, s:t.seconds });
   const cTask = t => { const o = { i:t.id, tx:t.text }; if (t.done) o.dn=1; return o; };
+  const cBudget = b => {
+    const o = { ib: b.initial || 0, dy: b.daily || 0 };
+    if (b.todayAllowance !== null && b.todayAllowance !== undefined) o.ta = b.todayAllowance;
+    if (b.lastDate) o.ld = b.lastDate;
+    if (b.purchases && b.purchases.length) {
+      o.p = b.purchases.map(p => ({ i: p.id, t: p.title, a: p.amount }));
+    }
+    return o;
+  };
   const cList = l => {
     const o = { i:l.id, ti:l.title, c:l.color, d:l.isDefault?1:0, tk:l.tasks.map(cTask) };
     if (Array.isArray(l.activeDays)) o.ad = l.activeDays;   // [] (hidden) must survive
@@ -196,6 +221,8 @@ function compressState(st) {
     tl: st.todoLists.map(cList),
     db: (st.dbdTasks||[]).map(cDbd),
     dbc: st.dbdIdCounter || 1,
+    bg: cBudget(st.budget),
+    bgc: st.purchaseIdCounter || 1,
     cal: { ce: cEvents, ct: (st.calendar.calTemplates||[]).map(cCalEv), cec: st.calendar.calEventIdCtr },
   };
 }
@@ -215,6 +242,14 @@ function decompressState(c) {
     gcalId:e.gi ?? null, gcalCalId:e.gc ?? null,
   });
   const dDbd = t => ({ id:t.i, text:t.tx, due:t.du, done:!!t.dn, doneOn:t.dw });
+  // Missing bg (data saved before the Budget feature) loads as a clean zero budget.
+  const dBudget = b => ({
+    initial: b?.ib || 0,
+    daily:   b?.dy || 0,
+    todayAllowance: (b && b.ta !== undefined) ? b.ta : null,
+    purchases: (b?.p || []).map(p => ({ id: p.i, title: p.t, amount: p.a })),
+    lastDate: b?.ld || null,
+  });
   const dEvents = {};
   Object.entries(c.cal.ce || {}).forEach(([k, evs]) => { dEvents[k] = evs.map(dCalEv); });
   return {
@@ -227,6 +262,8 @@ function decompressState(c) {
     todoLists: (c.tl||[]).map(dList),
     dbdTasks: (c.db||[]).map(dDbd),
     dbdIdCounter: c.dbc || 1,
+    budget: dBudget(c.bg),
+    purchaseIdCounter: c.bgc || 1,
     calendar: { calEvents: dEvents, calTemplates: (c.cal.ct||[]).map(dCalEv), calEventIdCtr: c.cal.cec || 1 },
   };
 }
@@ -253,6 +290,14 @@ function gatherState() {
     })),
     dbdTasks: dbdTasks.map(t => ({ id: t.id, text: t.text, due: t.due, done: t.done, doneOn: t.doneOn })),
     dbdIdCounter,
+    budget: {
+      initial: budget.initial,
+      daily: budget.daily,
+      todayAllowance: budget.todayAllowance,
+      lastDate: budget.lastDate,
+      purchases: budget.purchases.map(p => ({ id: p.id, title: p.title, amount: p.amount })),
+    },
+    purchaseIdCounter,
     calendar: { calEvents, calTemplates, calEventIdCtr },
   };
 }
@@ -277,6 +322,9 @@ function applyState(state) {
   }));
   dbdTasks = (st.dbdTasks || []).map(t => ({ id: t.id, text: t.text, due: t.due, done: !!t.done, doneOn: t.doneOn }));
   dbdIdCounter = st.dbdIdCounter ?? dbdIdCounter;
+  budget = normalizeBudget(st.budget);
+  purchaseIdCounter = st.purchaseIdCounter ?? purchaseIdCounter;
+  budgetRollover();
   if (st.calendar) {
     calEvents     = st.calendar.calEvents     || {};
     calTemplates  = st.calendar.calTemplates  || [];
@@ -288,6 +336,7 @@ function applyState(state) {
   renderTimers();
   renderTodos();
   renderDbd();
+  renderBudget();
   calRefresh();
   saveToLocal();
   showToast('State restored ✓');
@@ -319,6 +368,8 @@ function loadFromLocal() {
     }));
     dbdTasks = (state.dbdTasks || []).map(t => ({ id: t.id, text: t.text, due: t.due, done: !!t.done, doneOn: t.doneOn }));
     dbdIdCounter = state.dbdIdCounter ?? dbdIdCounter;
+    budget = normalizeBudget(state.budget);
+    purchaseIdCounter = state.purchaseIdCounter ?? purchaseIdCounter;
     if (state.calendar) {
       calEvents     = state.calendar.calEvents     || {};
       calTemplates  = state.calendar.calTemplates  || [];
@@ -1585,8 +1636,11 @@ function resetAll() {
   wokenUp = false;
   syncWakeupUI();
   todoLists.filter(l => l.isDefault).forEach(l => l.tasks.forEach(t => t.done = false));
+  budgetResetDay();
   renderTimers();
   renderTodos();
+  renderBudget();
+  renderHome();
   updateTimerSummary();
   saveToLocal();
   showToast('Reset ✓');
@@ -1613,6 +1667,7 @@ const HOME_CHECK_SVG = `<svg width="9" height="9" viewBox="0 0 9 9" fill="none">
 function homeToggleDesktop(force) {
   const want = (typeof force === 'boolean') ? force : !homeDesktopOpen;
   if (want && calDesktopOpen) calToggleDesktop();   // close calendar overlay first
+  if (want && budgetDesktopOpen) budgetToggleDesktop(false);
   homeDesktopOpen = want;
   const panel = $('homeDesktopPanel');
   const tab   = $('homeDesktopNavTab');
@@ -1700,8 +1755,16 @@ function homeHeroHtml() {
     { weekday: 'long', month: 'long', day: 'numeric' });
   return `
     <div class="home-hero">
-      <div class="home-welcome">Welcome</div>
-      <div class="home-date">${dateStr}</div>
+      <div class="home-hero-top">
+        <div class="home-hero-text">
+          <div class="home-welcome">Welcome</div>
+          <div class="home-date">${dateStr}</div>
+        </div>
+        <div class="home-balance" onclick="openBudgetTab()" title="Open Budget">
+          <div class="home-balance-label">Total balance</div>
+          <div class="home-balance-value ${totalBalance() < 0 ? 'neg' : ''}">${money(totalBalance())}</div>
+        </div>
+      </div>
       ${homeProgressHtml()}
     </div>`;
 }
@@ -1860,10 +1923,10 @@ function setSwipePanelWidths() {
     track.style.transition = 'none';
     track.style.transform = `translateX(${-currentTab * w}px)`;
   }
-  [0,1,2,3,4].forEach(i => {
+  for (let i = 0; i < TAB_COUNT; i++) {
     const btn = $(`tab-${i}`);
     if (btn) btn.classList.toggle('active', i === currentTab);
-  });
+  }
 }
 
 function goTab(idx, animate) {
@@ -1874,12 +1937,20 @@ function goTab(idx, animate) {
     track.style.transition = animate === false ? 'none' : 'transform 0.32s cubic-bezier(0.3,0.7,0.4,1)';
     track.style.transform = `translateX(${-idx * w}px)`;
   }
-  [0,1,2,3,4].forEach(i => {
+  for (let i = 0; i < TAB_COUNT; i++) {
     const btn = $(`tab-${i}`);
     if (btn) btn.classList.toggle('active', i === idx);
-  });
+  }
   if (idx === 4) calRenderMobile();
   if (idx === 0) renderHome();
+  if (idx === 5) renderBudget();
+}
+
+/* Total-balance chip on Home opens Budget on whichever layout is active. */
+function openBudgetTab() {
+  const mobile = $('mobileApp') && getComputedStyle($('mobileApp')).display !== 'none';
+  if (mobile) goTab(5, true);
+  else budgetToggleDesktop(true);
 }
 
 function initSwipe() {
@@ -1910,7 +1981,7 @@ function initSwipe() {
     const dx = e.changedTouches[0].clientX - sx;
     const dy = e.changedTouches[0].clientY - sy;
     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
-      goTab(dx < 0 ? Math.min(currentTab + 1, 4) : Math.max(currentTab - 1, 0), true);
+      goTab(dx < 0 ? Math.min(currentTab + 1, TAB_COUNT - 1) : Math.max(currentTab - 1, 0), true);
     }
     sx = 0; swiping = false;
   }, { passive: true });
@@ -2299,6 +2370,7 @@ function calNavDay(dir) {
 
 function calToggleDesktop() {
   if (!calDesktopOpen && homeDesktopOpen) homeToggleDesktop(false);
+  if (!calDesktopOpen && budgetDesktopOpen) budgetToggleDesktop(false);
   calDesktopOpen = !calDesktopOpen;
   const panel   = $('calDesktopPanel');
   const tab     = $('calDesktopNavTab');
@@ -2999,6 +3071,324 @@ function gcalUpdateSyncBtn() {
   btn.disabled = gcalSyncing;
 }
 
+/* ───────────────────────── BUDGET ─────────────────────────
+ * Minimal daily-envelope budgeting.
+ *   Today's balance = (today's allowance) − today's purchases
+ *   Total balance   = initial balance     − today's purchases
+ * The two are deliberately independent: Today's balance tracks the daily
+ * envelope, Total balance tracks real money. On each new day the total is
+ * banked into the initial balance, the daily budget is added, and purchases
+ * and the allowance reset. */
+let budgetDesktopOpen = false;
+
+function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
+
+function parseMoney(v) {
+  const n = parseFloat(String(v ?? '').replace(/[^0-9.\-]/g, ''));
+  return isFinite(n) ? round2(n) : 0;
+}
+
+function money(n) {
+  const v = round2(n);
+  return (v < 0 ? '-$' : '$') + Math.abs(v).toFixed(2);
+}
+
+function normalizeBudget(b) {
+  return {
+    initial: round2(b?.initial),
+    daily:   round2(b?.daily),
+    todayAllowance: (b && b.todayAllowance !== null && b.todayAllowance !== undefined)
+      ? round2(b.todayAllowance) : null,
+    purchases: Array.isArray(b?.purchases)
+      ? b.purchases.map(p => ({ id: p.id, title: p.title || '', amount: round2(p.amount) }))
+      : [],
+    lastDate: b?.lastDate || null,
+  };
+}
+
+function purchasesTotal() {
+  return round2(budget.purchases.reduce((s, p) => s + (Number(p.amount) || 0), 0));
+}
+function todayAllowance() {
+  return budget.todayAllowance === null ? round2(budget.daily) : round2(budget.todayAllowance);
+}
+function todayBalance() { return round2(todayAllowance() - purchasesTotal()); }
+/* Total balance = money on hand (initial) PLUS what's left of today's envelope.
+ * With $20 initial and a $20 daily budget untouched, that's $40. */
+function totalBalance() { return round2(budget.initial + todayBalance()); }
+
+function daysBetweenKeys(fromKey, toKey) {
+  const [y1, m1, d1] = fromKey.split('-').map(Number);
+  const [y2, m2, d2] = toKey.split('-').map(Number);
+  const a = new Date(y1, m1 - 1, d1);
+  const b = new Date(y2, m2 - 1, d2);
+  const diff = Math.round((b - a) / 86400000);
+  return Math.max(1, Math.min(diff, 366));   // clamp: never negative, never absurd
+}
+
+/* New-day rollover. The finished day's leftover envelope is banked into the
+ * initial balance (that IS the total balance), plus a full envelope for each
+ * additional day that passed unopened. Today then starts a fresh envelope. */
+function budgetRollover() {
+  const today = dbdTodayKey();
+  if (!budget.lastDate) { budget.lastDate = today; return false; }
+  if (budget.lastDate === today) return false;
+  const days = daysBetweenKeys(budget.lastDate, today);
+  // totalBalance() already includes the day just ended; extra days add one envelope each.
+  budget.initial = round2(totalBalance() + budget.daily * (days - 1));
+  budget.purchases = [];
+  budget.todayAllowance = null;
+  budget.lastDate = today;
+  return true;
+}
+
+/* Called by Reset all: bank only what was spent, so the total balance is
+ * unchanged by the reset. No new envelope is granted — that's a new-day event. */
+function budgetResetDay() {
+  budget.initial = round2(budget.initial - purchasesTotal());
+  budget.purchases = [];
+  budget.todayAllowance = null;
+  budget.lastDate = dbdTodayKey();
+}
+
+function budgetToggleDesktop(force) {
+  const want = (typeof force === 'boolean') ? force : !budgetDesktopOpen;
+  if (want) {
+    if (calDesktopOpen)  calToggleDesktop();
+    if (homeDesktopOpen) homeToggleDesktop(false);
+  }
+  budgetDesktopOpen = want;
+  const panel = $('budgetDesktopPanel');
+  const tab   = $('budgetDesktopNavTab');
+  const rp    = $('rightPanel');
+  if (panel) panel.classList.toggle('active', budgetDesktopOpen);
+  if (tab)   tab.classList.toggle('active', budgetDesktopOpen);
+  if (rp)    rp.style.display = budgetDesktopOpen ? 'none' : '';
+  if (budgetDesktopOpen) renderBudget();
+}
+
+/* ── UI ──
+ * Both the desktop panel and the mobile tab render the same markup, so this
+ * module never uses element IDs (they'd collide across the two copies and
+ * getElementById would always resolve to the mobile one). Everything is
+ * scoped to its container and wired with delegated listeners. */
+
+function budgetFieldHtml(key, label, value, hint) {
+  return `
+    <div class="budget-field">
+      <div class="budget-field-label">${label}</div>
+      <div class="budget-input-wrap">
+        <span class="budget-currency">$</span>
+        <input class="budget-input" type="text" inputmode="decimal"
+          data-bfield="${key}" value="${value.toFixed(2)}">
+      </div>
+      <div class="budget-field-hint">${hint}</div>
+    </div>`;
+}
+
+function budgetHtml() {
+  const spent = purchasesTotal();
+  const tb = todayBalance();
+  const total = totalBalance();
+  const rows = budget.purchases.map(p => `
+    <div class="budget-purchase-row" data-purchase-id="${p.id}">
+      <input class="budget-purchase-title" data-pact="title"
+        value="${escAttr(p.title)}" placeholder="Purchase…">
+      <input class="budget-purchase-amount" data-pact="amount" type="text" inputmode="decimal"
+        value="${Number(p.amount).toFixed(2)}">
+      <button class="budget-purchase-del" data-pact="del" title="Remove">×</button>
+    </div>`).join('');
+
+  return `
+    <div class="budget-wrap">
+      <div class="budget-header">
+        <div class="budget-title">Budget</div>
+        <div class="budget-total">
+          <span class="budget-total-label">Total balance</span>
+          <span class="budget-total-value ${total < 0 ? 'neg' : ''}">${money(total)}</span>
+        </div>
+      </div>
+
+      <div class="budget-figure ${tb < 0 ? 'over' : ''}">
+        <div class="budget-figure-label">Today's balance</div>
+        <div class="budget-figure-value">${money(tb)}</div>
+        <div class="budget-figure-sub">${money(todayAllowance())} allowance − ${money(spent)} spent</div>
+      </div>
+
+      <div class="budget-fields">
+        ${budgetFieldHtml('today', "Today's balance", tb, 'Resets to the daily budget each day')}
+        ${budgetFieldHtml('daily', 'Daily budget', round2(budget.daily), 'Added to your balance each new day')}
+        ${budgetFieldHtml('initial', 'Initial balance', round2(budget.initial), 'Money on hand, not counting today\'s budget')}
+      </div>
+
+      <div class="budget-section-header">
+        <span class="section-sublabel">Purchases today</span>
+        <span class="budget-spent">${money(spent)}</span>
+      </div>
+
+      <div class="budget-add-row">
+        <input class="budget-new-title" placeholder="What did you buy?">
+        <input class="budget-new-amount" type="text" inputmode="decimal" placeholder="0.00">
+        <button class="add-btn budget-add-btn" data-pact="add">+ Add</button>
+      </div>
+
+      <div class="budget-purchase-list">
+        ${rows || '<div class="budget-empty">No purchases yet today.</div>'}
+      </div>
+    </div>`;
+}
+
+/* Delegated listeners are attached once per container; innerHTML swaps the
+ * children but never the container, so the bindings survive re-renders. */
+function bindBudgetContainer(root) {
+  if (!root || root._budgetBound) return;
+  root._budgetBound = true;
+
+  root.addEventListener('focusin', e => {
+    if (e.target.matches('.budget-input, .budget-purchase-amount')) e.target.select();
+  });
+
+  root.addEventListener('change', e => {
+    const el = e.target;
+    if (el.dataset.bfield) { setBudgetField(el.dataset.bfield, el.value); return; }
+    const row = el.closest('.budget-purchase-row');
+    if (!row) return;
+    const id = parseInt(row.dataset.purchaseId);
+    if (el.dataset.pact === 'title')  setPurchaseTitle(id, el.value);
+    if (el.dataset.pact === 'amount') setPurchaseAmount(id, el.value);
+  });
+
+  root.addEventListener('click', e => {
+    const btn = e.target.closest('[data-pact]');
+    if (!btn || btn.tagName !== 'BUTTON') return;
+    if (btn.dataset.pact === 'add') { addPurchase(root); return; }
+    if (btn.dataset.pact === 'del') {
+      const row = btn.closest('.budget-purchase-row');
+      if (row) removePurchase(parseInt(row.dataset.purchaseId));
+    }
+  });
+
+  root.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    const el = e.target;
+    if (el.matches('.budget-new-title, .budget-new-amount')) {
+      e.preventDefault();
+      addPurchase(root);
+    } else if (el.matches('.budget-input, .budget-purchase-title, .budget-purchase-amount')) {
+      e.preventDefault();
+      el.blur();          // commits via the change handler
+    }
+  });
+}
+
+function renderBudget() {
+  [$('budgetContainer-d'), $('budgetContainer-m')].forEach(el => {
+    if (!el) return;
+    el.innerHTML = budgetHtml();
+    bindBudgetContainer(el);
+  });
+}
+
+/* Re-render everything except the container holding focus, so committing one
+ * field never yanks the cursor out of another. */
+function budgetChanged(skipRoot) {
+  saveToLocal();
+  [$('budgetContainer-d'), $('budgetContainer-m')].forEach(el => {
+    if (!el) return;
+    if (el === skipRoot) return;
+    el.innerHTML = budgetHtml();
+    bindBudgetContainer(el);
+  });
+  if (skipRoot) budgetPatchFigures(skipRoot);
+  renderHome();
+}
+
+/* Update the derived read-outs in place for the container being edited. */
+function budgetPatchFigures(root) {
+  const tb = todayBalance();
+  const total = totalBalance();
+  const spent = purchasesTotal();
+  const fig = root.querySelector('.budget-figure');
+  if (fig) {
+    fig.classList.toggle('over', tb < 0);
+    const v = fig.querySelector('.budget-figure-value');
+    const s = fig.querySelector('.budget-figure-sub');
+    if (v) v.textContent = money(tb);
+    if (s) s.textContent = `${money(todayAllowance())} allowance − ${money(spent)} spent`;
+  }
+  const tot = root.querySelector('.budget-total-value');
+  if (tot) { tot.textContent = money(total); tot.classList.toggle('neg', total < 0); }
+  const sp = root.querySelector('.budget-spent');
+  if (sp) sp.textContent = money(spent);
+  root.querySelectorAll('[data-bfield]').forEach(inp => {
+    if (inp === document.activeElement) return;
+    const k = inp.dataset.bfield;
+    const val = k === 'today' ? tb : k === 'daily' ? round2(budget.daily) : round2(budget.initial);
+    inp.value = val.toFixed(2);
+  });
+}
+
+function setBudgetField(key, raw) {
+  const val = parseMoney(raw);
+  if (key === 'initial') {
+    budget.initial = val;
+  } else if (key === 'daily') {
+    budget.daily = val;
+    // If the user hasn't overridden today's balance, it follows the daily budget.
+    if (budget.todayAllowance !== null) budget.todayAllowance = null;
+  } else if (key === 'today') {
+    // Store as an allowance so later purchases still subtract from it.
+    budget.todayAllowance = round2(val + purchasesTotal());
+  }
+  budgetChanged();
+}
+
+function addPurchase(root) {
+  const scope = root || $('budgetContainer-d') || $('budgetContainer-m');
+  if (!scope) return;
+  const titleEl = scope.querySelector('.budget-new-title');
+  const amtEl   = scope.querySelector('.budget-new-amount');
+  const title = (titleEl?.value || '').trim();
+  const amount = parseMoney(amtEl?.value);
+  if (!title && !amount) { titleEl?.focus(); return; }
+  budget.purchases.push({ id: purchaseIdCounter++, title: title || 'Purchase', amount });
+  budgetChanged();
+  const nt = scope.querySelector('.budget-new-title');
+  if (nt) nt.focus();
+}
+
+function purchaseById(id) { return budget.purchases.find(p => p.id === id); }
+
+function setPurchaseTitle(id, value) {
+  const p = purchaseById(id);
+  if (!p) return;
+  p.title = value;
+  saveToLocal();
+}
+
+function setPurchaseAmount(id, value) {
+  const p = purchaseById(id);
+  if (!p) return;
+  p.amount = parseMoney(value);
+  budgetChanged();
+}
+
+function removePurchase(id) {
+  budget.purchases = budget.purchases.filter(p => p.id !== id);
+  budgetChanged();
+}
+
+/* Midnight watcher: roll over without needing a reload. */
+function budgetTickDay() {
+  if (budgetRollover()) {
+    saveToLocal();
+    renderBudget();
+    renderHome();
+    showToast('New day — budget rolled over ✓');
+  }
+  setTimeout(budgetTickDay, 60000);
+}
+
 /* ───────────────────────── STATIC BINDINGS ───────────────────────── */
 function bindStatic() {
   /* wakeup */
@@ -3008,12 +3398,13 @@ function bindStatic() {
   /* calendar nav */
   $('calDesktopNavTab')?.addEventListener('click', calToggleDesktop);
   $('homeDesktopNavTab')?.addEventListener('click', () => homeToggleDesktop());
+  $('budgetDesktopNavTab')?.addEventListener('click', () => budgetToggleDesktop());
   $('calWeekModeBtn')?.addEventListener('click', e => { e.stopPropagation(); calToggleWeekMode(); });
   $('calNavPrev')?.addEventListener('click', () => calNavDay(-1));
   $('calNavNext')?.addEventListener('click', () => calNavDay(1));
 
   /* tabs */
-  [0,1,2,3,4].forEach(i => $(`tab-${i}`)?.addEventListener('click', () => goTab(i, true)));
+  for (let i = 0; i < TAB_COUNT; i++) $(`tab-${i}`)?.addEventListener('click', () => goTab(i, true));
 
   /* add buttons */
   $('addTimerBtn-d')?.addEventListener('click', addFormatTimer);
@@ -3108,12 +3499,16 @@ function bindStatic() {
   _dbdDayKey = dbdTodayKey();
   ['d','m'].forEach(pfx => { const el = $(`dbdDate-${pfx}`); if (el && !el.value) el.value = _dbdDayKey; });
   renderDbd();
+  budgetRollover();          // catch up any days missed while closed
+  renderBudget();
+  renderHome();
   syncWakeupUI();
   setSwipePanelWidths();
   updateTimerSummary();
   tickAll();
   calRenderMobile();
   calTickNow();
+  budgetTickDay();
 
   /* autosave */
   setInterval(saveToLocal, 2000);

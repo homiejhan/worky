@@ -48,6 +48,14 @@
       </svg>
       Calendar
     </button>
+    <button class="cal-nav-tab" id="budgetDesktopNavTab">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+        <rect x="1" y="2.5" width="10" height="7.5" rx="1.5" stroke="currentColor" stroke-width="1.2"/>
+        <path d="M1 5h10" stroke="currentColor" stroke-width="1.2"/>
+        <circle cx="8.5" cy="7.5" r="0.9" fill="currentColor"/>
+      </svg>
+      Budget
+    </button>
     <button class="cal-week-mode-btn" id="calWeekModeBtn">Sun – Sat</button>
 
     <div class="section-label">Timers</div>
@@ -103,6 +111,7 @@
     <button class="tab-btn" id="tab-2">Daily</button>
     <button class="tab-btn" id="tab-3">My Lists</button>
     <button class="tab-btn" id="tab-4">Calendar</button>
+    <button class="tab-btn" id="tab-5">Budget</button>
   </nav>
 
   <div class="swipe-container" id="swipeContainer">
@@ -176,6 +185,11 @@
         <div class="cal-grid-wrap" id="calMobileGrid"></div>
       </section>
 
+      <!-- Tab 5: Budget -->
+      <section class="swipe-panel">
+        <div id="budgetContainer-m"></div>
+      </section>
+
     </div>
   </div>
 </div>
@@ -183,6 +197,11 @@
 <!-- ════════ DESKTOP CALENDAR PANEL ════════ -->
 <div class="home-desktop-panel" id="homeDesktopPanel">
   <div class="home-col" id="homeContainer-d"></div>
+</div>
+
+<!-- ════════ DESKTOP BUDGET PANEL ════════ -->
+<div class="home-desktop-panel" id="budgetDesktopPanel">
+  <div class="home-col" id="budgetContainer-d"></div>
 </div>
 
 <div class="cal-desktop-panel" id="calDesktopPanel">
