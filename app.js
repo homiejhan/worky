@@ -3226,9 +3226,10 @@ function todayAllowance() {
   return budget.todayAllowance === null ? round2(budget.daily) : round2(budget.todayAllowance);
 }
 function todayBalance() { return round2(todayAllowance() - purchasesTotal()); }
-/* Total balance = money on hand (initial) PLUS what's left of today's envelope.
- * With $20 initial and a $20 daily budget untouched, that's $40. */
-function totalBalance() { return round2(budget.initial + todayBalance()); }
+/* Total balance is real money: what you started the day with, less what you've
+ * spent. It deliberately ignores today's balance, so editing that envelope
+ * never moves it. The daily budget feeds in once per day, at rollover. */
+function totalBalance() { return round2(budget.initial - purchasesTotal()); }
 
 function daysBetweenKeys(fromKey, toKey) {
   const [y1, m1, d1] = fromKey.split('-').map(Number);
@@ -3239,26 +3240,25 @@ function daysBetweenKeys(fromKey, toKey) {
   return Math.max(1, Math.min(diff, 366));   // clamp: never negative, never absurd
 }
 
-/* New-day rollover. The finished day's leftover envelope is banked into the
- * initial balance (that IS the total balance), plus a full envelope for each
- * additional day that passed unopened. Today then starts a fresh envelope. */
+/* New-day rollover. The new initial balance is what you actually had left
+ * (total balance) plus a fresh daily budget; purchases then clear, so the
+ * total equals the initial again and today's balance is a full envelope. */
 function budgetRollover() {
   const today = dbdTodayKey();
   if (!budget.lastDate) { budget.lastDate = today; return false; }
   if (budget.lastDate === today) return false;
   const days = daysBetweenKeys(budget.lastDate, today);
-  // totalBalance() already includes the day just ended; extra days add one envelope each.
-  budget.initial = round2(totalBalance() + budget.daily * (days - 1));
+  budget.initial = round2(totalBalance() + budget.daily * days);
   budget.purchases = [];
   budget.todayAllowance = null;
   budget.lastDate = today;
   return true;
 }
 
-/* Called by Reset all: bank only what was spent, so the total balance is
- * unchanged by the reset. No new envelope is granted — that's a new-day event. */
+/* Called by Reset: bank what was spent so the total balance is unchanged,
+ * then clear the day. No new envelope — that only happens on a new day. */
 function budgetResetDay() {
-  budget.initial = round2(budget.initial - purchasesTotal());
+  budget.initial = totalBalance();
   budget.purchases = [];
   budget.todayAllowance = null;
   budget.lastDate = dbdTodayKey();
@@ -3321,13 +3321,13 @@ function budgetHtml() {
       <div class="budget-figure ${total < 0 ? 'over' : ''}">
         <div class="budget-figure-label">Total balance</div>
         <div class="budget-figure-value">${money(total)}</div>
-        <div class="budget-figure-sub">${money(round2(budget.initial))} on hand + ${money(tb)} left today</div>
+        <div class="budget-figure-sub">${money(round2(budget.initial))} initial − ${money(spent)} spent today</div>
       </div>
 
       <div class="budget-fields">
-        ${budgetFieldHtml('today', "Today's balance", tb, 'Resets to the daily budget each day')}
+        ${budgetFieldHtml('today', "Today's balance", tb, 'Spending envelope — editing it won\'t change your total')}
         ${budgetFieldHtml('daily', 'Daily budget', round2(budget.daily), 'Added to your balance each new day')}
-        ${budgetFieldHtml('initial', 'Initial balance', round2(budget.initial), 'Money on hand, not counting today\'s budget')}
+        ${budgetFieldHtml('initial', 'Initial balance', round2(budget.initial), 'Grows by the daily budget each morning')}
       </div>
 
       <div class="budget-section-header">
@@ -3423,7 +3423,7 @@ function budgetPatchFigures(root) {
     const v = fig.querySelector('.budget-figure-value');
     const s = fig.querySelector('.budget-figure-sub');
     if (v) v.textContent = money(total);
-    if (s) s.textContent = `${money(round2(budget.initial))} on hand + ${money(tb)} left today`;
+    if (s) s.textContent = `${money(round2(budget.initial))} initial − ${money(spent)} spent today`;
   }
   const sp = root.querySelector('.budget-spent');
   if (sp) sp.textContent = money(spent);
