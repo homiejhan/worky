@@ -1779,8 +1779,9 @@ function homeHeroHtml() {
           <div class="home-date">${dateStr}</div>
         </div>
         <div class="home-balance" onclick="openBudgetTab()" title="Open Budget">
-          <div class="home-balance-label">Total balance</div>
-          <div class="home-balance-value ${totalBalance() < 0 ? 'neg' : ''}">${money(totalBalance())}</div>
+          <div class="home-balance-label">Daily balance</div>
+          <div class="home-balance-value ${todayBalance() < 0 ? 'neg' : ''}">${money(todayBalance())}</div>
+          <div class="home-balance-total">${money(totalBalance())}</div>
         </div>
       </div>
       ${homeProgressHtml()}
@@ -3315,16 +3316,12 @@ function budgetHtml() {
     <div class="budget-wrap">
       <div class="budget-header">
         <div class="budget-title">Budget</div>
-        <div class="budget-total">
-          <span class="budget-total-label">Total balance</span>
-          <span class="budget-total-value ${total < 0 ? 'neg' : ''}">${money(total)}</span>
-        </div>
       </div>
 
-      <div class="budget-figure ${tb < 0 ? 'over' : ''}">
-        <div class="budget-figure-label">Today's balance</div>
-        <div class="budget-figure-value">${money(tb)}</div>
-        <div class="budget-figure-sub">${money(todayAllowance())} allowance − ${money(spent)} spent</div>
+      <div class="budget-figure ${total < 0 ? 'over' : ''}">
+        <div class="budget-figure-label">Total balance</div>
+        <div class="budget-figure-value">${money(total)}</div>
+        <div class="budget-figure-sub">${money(round2(budget.initial))} on hand + ${money(tb)} left today</div>
       </div>
 
       <div class="budget-fields">
@@ -3422,14 +3419,12 @@ function budgetPatchFigures(root) {
   const spent = purchasesTotal();
   const fig = root.querySelector('.budget-figure');
   if (fig) {
-    fig.classList.toggle('over', tb < 0);
+    fig.classList.toggle('over', total < 0);
     const v = fig.querySelector('.budget-figure-value');
     const s = fig.querySelector('.budget-figure-sub');
-    if (v) v.textContent = money(tb);
-    if (s) s.textContent = `${money(todayAllowance())} allowance − ${money(spent)} spent`;
+    if (v) v.textContent = money(total);
+    if (s) s.textContent = `${money(round2(budget.initial))} on hand + ${money(tb)} left today`;
   }
-  const tot = root.querySelector('.budget-total-value');
-  if (tot) { tot.textContent = money(total); tot.classList.toggle('neg', total < 0); }
   const sp = root.querySelector('.budget-spent');
   if (sp) sp.textContent = money(spent);
   root.querySelectorAll('[data-bfield]').forEach(inp => {

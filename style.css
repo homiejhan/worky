@@ -1626,3 +1626,12 @@ body.format-mode .fmt-banner { display: inline; }
 @media (max-width: 640px) {
   .data-btn.icon-btn { width: 28px; height: 26px; }
 }
+
+/* home hero: secondary total under the daily balance */
+.home-balance-total {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-top: 1px;
+  white-space: nowrap;
+}
