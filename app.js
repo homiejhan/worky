@@ -88,9 +88,21 @@ let budget = {
 };
 let purchaseIdCounter = 1;
 
+/* view visibility — which sections appear in the UI.
+ * 'home' is always on and is not stored. */
+const VIEW_DEFS = [
+  { key: 'home',     label: 'Home' },
+  { key: 'timers',   label: 'Timers' },
+  { key: 'daily',    label: 'Daily' },
+  { key: 'lists',    label: 'My Lists' },
+  { key: 'calendar', label: 'Calendar' },
+  { key: 'budget',   label: 'Budget' },
+];
+let views = { timers: true, daily: true, lists: true, calendar: true, budget: true };
+let currentView = 'home';
+
 /* misc */
-let currentTab = 0;
-const TAB_COUNT = 6;
+let currentTab = 0;   // index within the currently visible tabs
 let preFormatTimerState = [];
 
 /* ───────────────────────── UTIL ───────────────────────── */
@@ -223,6 +235,7 @@ function compressState(st) {
     dbc: st.dbdIdCounter || 1,
     bg: cBudget(st.budget),
     bgc: st.purchaseIdCounter || 1,
+    vw: viewsOffList(st.views),
     cal: { ce: cEvents, ct: (st.calendar.calTemplates||[]).map(cCalEv), cec: st.calendar.calEventIdCtr },
   };
 }
@@ -264,6 +277,7 @@ function decompressState(c) {
     dbdIdCounter: c.dbc || 1,
     budget: dBudget(c.bg),
     purchaseIdCounter: c.bgc || 1,
+    views: normalizeViews(c.vw),
     calendar: { calEvents: dEvents, calTemplates: (c.cal.ct||[]).map(dCalEv), calEventIdCtr: c.cal.cec || 1 },
   };
 }
@@ -298,6 +312,7 @@ function gatherState() {
       purchases: budget.purchases.map(p => ({ id: p.id, title: p.title, amount: p.amount })),
     },
     purchaseIdCounter,
+    views: { ...views },
     calendar: { calEvents, calTemplates, calEventIdCtr },
   };
 }
@@ -324,6 +339,7 @@ function applyState(state) {
   dbdIdCounter = st.dbdIdCounter ?? dbdIdCounter;
   budget = normalizeBudget(st.budget);
   purchaseIdCounter = st.purchaseIdCounter ?? purchaseIdCounter;
+  views = normalizeViews(st.views);
   budgetRollover();
   if (st.calendar) {
     calEvents     = st.calendar.calEvents     || {};
@@ -337,6 +353,7 @@ function applyState(state) {
   renderTodos();
   renderDbd();
   renderBudget();
+  applyViewVisibility();
   calRefresh();
   saveToLocal();
   showToast('State restored ✓');
@@ -370,6 +387,7 @@ function loadFromLocal() {
     dbdIdCounter = state.dbdIdCounter ?? dbdIdCounter;
     budget = normalizeBudget(state.budget);
     purchaseIdCounter = state.purchaseIdCounter ?? purchaseIdCounter;
+    views = normalizeViews(state.views);
     if (state.calendar) {
       calEvents     = state.calendar.calEvents     || {};
       calTemplates  = state.calendar.calTemplates  || [];
@@ -1298,7 +1316,7 @@ function enterFormatMode() {
   renderTodos();
   calFmtMobileDay = 0;
   if (calDesktopOpen) calRenderDesktop();
-  if (currentTab === 4) calRenderMobile();
+  if (currentView === 'calendar') calRenderMobile();
 }
 
 function commitFormatMode() {
@@ -1325,7 +1343,7 @@ function commitFormatMode() {
   renderTimers();
   renderTodos();
   if (calDesktopOpen) calRenderDesktop();
-  if (currentTab === 4) calRenderMobile();
+  if (currentView === 'calendar') calRenderMobile();
   saveToLocal();
   showToast('Format saved ✓');
 }
@@ -1841,6 +1859,7 @@ function homeStarredListsHtml(daily) {
 
 /* ── timers: compact remaining-time chips (tickAll keeps .tdisp-N live) ── */
 function homeTimersHtml() {
+  if (!viewEnabled('timers')) return '';   // the one Home section that follows its toggle
   if (!timers.length) return '';
   const chips = timers.map(t => `
     <div class="home-timer-chip">
@@ -1912,24 +1931,75 @@ function homeCalHtml() {
     </section>`;
 }
 
-/* ───────────────────────── MOBILE TABS ───────────────────────── */
-function setSwipePanelWidths() {
-  const w = window.innerWidth;
-  const track  = $('swipeTrack');
-  const panels = document.querySelectorAll('.swipe-panel');
-  if (track) track.style.width = (w * panels.length) + 'px';
-  panels.forEach(p => p.style.width = w + 'px');
-  if (track) {
-    track.style.transition = 'none';
-    track.style.transform = `translateX(${-currentTab * w}px)`;
+/* ───────────────────────── VIEWS + MOBILE TABS ─────────────────────────
+ * A disabled view disappears from the tab bar (mobile) and the left nav /
+ * right panel (desktop). Nothing about its data or behaviour changes — the
+ * Home page keeps showing day-by-day tasks, the balance, starred lists and
+ * the agenda regardless. Timers is the one section Home drops when off. */
+function normalizeViews(v) {
+  const out = { timers: true, daily: true, lists: true, calendar: true, budget: true };
+  if (Array.isArray(v)) {                       // compressed form: list of disabled keys
+    v.forEach(k => { if (k in out) out[k] = false; });
+  } else if (v && typeof v === 'object') {
+    Object.keys(out).forEach(k => { if (v[k] === false) out[k] = false; });
   }
-  for (let i = 0; i < TAB_COUNT; i++) {
-    const btn = $(`tab-${i}`);
-    if (btn) btn.classList.toggle('active', i === currentTab);
-  }
+  return out;
+}
+function viewsOffList(v) {
+  const n = normalizeViews(v);
+  return Object.keys(n).filter(k => !n[k]);
+}
+function viewEnabled(key) {
+  if (!key) return true;
+  if (key === 'home') return true;              // Home can never be turned off
+  return views[key] !== false;
+}
+function visibleViews() { return VIEW_DEFS.filter(v => viewEnabled(v.key)); }
+
+/* Show/hide every element tagged with data-view, close any desktop overlay
+ * whose view was just disabled, and rebuild the mobile tab strip. */
+function applyViewVisibility() {
+  document.querySelectorAll('[data-view]').forEach(el => {
+    if (el.classList.contains('swipe-panel') || el.classList.contains('tab-btn')) return;
+    el.style.display = viewEnabled(el.dataset.view) ? '' : 'none';
+  });
+  if (!viewEnabled('calendar') && calDesktopOpen)   calToggleDesktop();
+  if (!viewEnabled('budget')   && budgetDesktopOpen) budgetToggleDesktop(false);
+  if (!viewEnabled(currentView)) currentView = 'home';
+  setSwipePanelWidths();
+  renderHome();
 }
 
-function goTab(idx, animate) {
+function setSwipePanelWidths() {
+  const w = window.innerWidth;
+  const track = $('swipeTrack');
+  document.querySelectorAll('.swipe-panel').forEach(p => {
+    const on = viewEnabled(p.dataset.view);
+    p.style.display = on ? '' : 'none';
+    if (on) p.style.width = w + 'px';
+  });
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    const on = viewEnabled(b.dataset.view);
+    b.style.display = on ? '' : 'none';
+    b.classList.toggle('active', b.dataset.view === currentView);
+  });
+  const vis = visibleViews();
+  const idx = Math.max(0, vis.findIndex(v => v.key === currentView));
+  if (track) {
+    track.style.width = (w * vis.length) + 'px';
+    track.style.transition = 'none';
+    track.style.transform = `translateX(${-idx * w}px)`;
+  }
+  currentTab = idx;
+}
+
+/* Accepts a view key ('budget') or a legacy numeric index. */
+function goTab(target, animate) {
+  let key = (typeof target === 'number') ? (VIEW_DEFS[target] || {}).key : target;
+  if (!key || !viewEnabled(key)) key = 'home';
+  currentView = key;
+  const vis = visibleViews();
+  const idx = Math.max(0, vis.findIndex(v => v.key === key));
   currentTab = idx;
   const w = window.innerWidth;
   const track = $('swipeTrack');
@@ -1937,20 +2007,59 @@ function goTab(idx, animate) {
     track.style.transition = animate === false ? 'none' : 'transform 0.32s cubic-bezier(0.3,0.7,0.4,1)';
     track.style.transform = `translateX(${-idx * w}px)`;
   }
-  for (let i = 0; i < TAB_COUNT; i++) {
-    const btn = $(`tab-${i}`);
-    if (btn) btn.classList.toggle('active', i === idx);
-  }
-  if (idx === 4) calRenderMobile();
-  if (idx === 0) renderHome();
-  if (idx === 5) renderBudget();
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.view === key);
+  });
+  if (key === 'calendar') calRenderMobile();
+  if (key === 'home')     renderHome();
+  if (key === 'budget')   renderBudget();
 }
 
 /* Total-balance chip on Home opens Budget on whichever layout is active. */
 function openBudgetTab() {
+  if (!viewEnabled('budget')) return;
   const mobile = $('mobileApp') && getComputedStyle($('mobileApp')).display !== 'none';
-  if (mobile) goTab(5, true);
+  if (mobile) goTab('budget', true);
   else budgetToggleDesktop(true);
+}
+
+/* ── Settings ── */
+function renderSettings() {
+  const list = $('settingsViewList');
+  if (list) {
+    list.innerHTML = VIEW_DEFS.map(v => {
+      const locked = v.key === 'home';
+      return `
+        <div class="settings-view-row">
+          <span class="settings-view-name">${v.label}${locked ? '<span class="settings-locked">always on</span>' : ''}</span>
+          <label class="gcal-toggle">
+            <input type="checkbox" data-viewtoggle="${v.key}"
+              ${viewEnabled(v.key) ? 'checked' : ''} ${locked ? 'disabled' : ''}>
+            <span class="gcal-toggle-track"></span>
+          </label>
+        </div>`;
+    }).join('');
+  }
+  const status = $('gcalStatusLine');
+  if (status) {
+    status.textContent = gcalIsConnected()
+      ? 'Connected — tap below to pick calendars or disconnect.'
+      : 'Not connected.';
+  }
+  gcalUpdateBtn();
+}
+
+function setViewEnabled(key, on) {
+  if (key === 'home') return;
+  views[key] = !!on;
+  saveToLocal();
+  applyViewVisibility();
+  renderSettings();
+}
+
+function openSettings() {
+  renderSettings();
+  $('settingsModal').classList.add('show');
 }
 
 function initSwipe() {
@@ -1981,7 +2090,10 @@ function initSwipe() {
     const dx = e.changedTouches[0].clientX - sx;
     const dy = e.changedTouches[0].clientY - sy;
     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
-      goTab(dx < 0 ? Math.min(currentTab + 1, TAB_COUNT - 1) : Math.max(currentTab - 1, 0), true);
+      const vis = visibleViews();
+      const at = Math.max(0, vis.findIndex(v => v.key === currentView));
+      const next = dx < 0 ? Math.min(at + 1, vis.length - 1) : Math.max(at - 1, 0);
+      goTab(vis[next].key, true);
     }
     sx = 0; swiping = false;
   }, { passive: true });
@@ -3398,13 +3510,20 @@ function bindStatic() {
   /* calendar nav */
   $('calDesktopNavTab')?.addEventListener('click', calToggleDesktop);
   $('homeDesktopNavTab')?.addEventListener('click', () => homeToggleDesktop());
+  $('settingsBtn')?.addEventListener('click', openSettings);
+  $('settingsViewList')?.addEventListener('change', e => {
+    const key = e.target?.dataset?.viewtoggle;
+    if (key) setViewEnabled(key, e.target.checked);
+  });
   $('budgetDesktopNavTab')?.addEventListener('click', () => budgetToggleDesktop());
   $('calWeekModeBtn')?.addEventListener('click', e => { e.stopPropagation(); calToggleWeekMode(); });
   $('calNavPrev')?.addEventListener('click', () => calNavDay(-1));
   $('calNavNext')?.addEventListener('click', () => calNavDay(1));
 
   /* tabs */
-  for (let i = 0; i < TAB_COUNT; i++) $(`tab-${i}`)?.addEventListener('click', () => goTab(i, true));
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => goTab(btn.dataset.view, true));
+  });
 
   /* add buttons */
   $('addTimerBtn-d')?.addEventListener('click', addFormatTimer);
@@ -3502,6 +3621,7 @@ function bindStatic() {
   budgetRollover();          // catch up any days missed while closed
   renderBudget();
   renderHome();
+  applyViewVisibility();
   syncWakeupUI();
   setSwipePanelWidths();
   updateTimerSummary();
