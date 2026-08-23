@@ -853,6 +853,37 @@ body.format-mode .list-sched-row { display: flex; }
   display: grid;
   margin-left: 52px;
 }
+
+/* ── calendar color-group filter chips ── */
+.cal-color-filter {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 0 12px;
+}
+.cal-color-filter-mobile {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.cal-color-filter-chip {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--chip-color);
+  background: var(--chip-color);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: opacity 0.15s, transform 0.1s, background 0.15s;
+  touch-action: manipulation;
+}
+.cal-color-filter-chip.off {
+  background: transparent;
+  opacity: 0.4;
+}
+.cal-color-filter-chip:active { transform: scale(0.88); }
 .cal-day-header {
   text-align: center;
   padding: 6px 0 10px;

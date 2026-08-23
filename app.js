@@ -67,6 +67,22 @@ let calEditDow  = null;
 let calEditType = 'event';
 let calSelectedColor = CAL_COLORS[0];
 
+/* calendar color-group visibility (events only — never dividers) */
+const CAL_HIDDEN_LS_KEY = 'focus-cal-hidden-colors';
+let calHiddenColors = new Set();
+function calLoadHiddenColors() {
+  try {
+    const raw = localStorage.getItem(CAL_HIDDEN_LS_KEY);
+    if (raw) calHiddenColors = new Set(JSON.parse(raw).map(c => String(c).toLowerCase()));
+  } catch(e) {}
+}
+function calSaveHiddenColors() {
+  try { localStorage.setItem(CAL_HIDDEN_LS_KEY, JSON.stringify([...calHiddenColors])); } catch(e) {}
+}
+function calColorHidden(c) {
+  return !!c && calHiddenColors.has(String(c).toLowerCase());
+}
+
 /* gcal state */
 let gcalToken     = null;
 let gcalCalendars = [];
@@ -2301,7 +2317,9 @@ function reseedTemplate(tmpl) {
 function calRenderDayCol(col, dateKey) {
   col.querySelectorAll('.cal-event,.cal-divider,.cal-now-line').forEach(e => e.remove());
   calEnsureDay(dateKey);
-  (calEvents[dateKey] || []).forEach(ev => col.appendChild(calMakeEventEl(ev, dateKey, false)));
+  (calEvents[dateKey] || [])
+    .filter(ev => ev.type === 'divider' || !calColorHidden(ev.color))
+    .forEach(ev => col.appendChild(calMakeEventEl(ev, dateKey, false)));
   gcalInjectEvents(col, dateKey);
   if (dateKey === calDateKey(calToday())) calBuildNowLine(col);
   col.onclick = e => {
@@ -2323,6 +2341,50 @@ function calRenderFmtCol(col, dow) {
   };
 }
 
+/* ── color-group filter bar (events only — dividers are exempt) ── */
+function calVisibleColorSet() {
+  const colors = new Set();
+  calDisplayDays().forEach(day => {
+    const key = calDateKey(day);
+    calEnsureDay(key);
+    (calEvents[key] || []).forEach(ev => {
+      if (ev.type !== 'divider' && ev.color) colors.add(String(ev.color).toLowerCase());
+    });
+    if (gcalIsConnected()) {
+      (gcalEvents[key] || []).forEach(ev => {
+        if (!ev.allDay && ev.color) colors.add(String(ev.color).toLowerCase());
+      });
+    }
+  });
+  return colors;
+}
+
+function calRenderColorFilter(el) {
+  if (!el) return;
+  el.innerHTML = '';
+  if (formatMode) { el.style.display = 'none'; return; }
+  const colors = [...calVisibleColorSet()];
+  if (colors.length === 0) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  colors.forEach(c => {
+    const hidden = calHiddenColors.has(c);
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'cal-color-filter-chip' + (hidden ? ' off' : '');
+    chip.style.setProperty('--chip-color', c);
+    chip.title = hidden ? 'Show these events' : 'Hide these events';
+    chip.addEventListener('click', e => {
+      e.stopPropagation();
+      if (calHiddenColors.has(c)) calHiddenColors.delete(c);
+      else calHiddenColors.add(c);
+      calSaveHiddenColors();
+      if (calDesktopOpen) calRenderDesktop();
+      calRenderMobile();
+    });
+    el.appendChild(chip);
+  });
+}
+
 /* ── desktop render ── */
 function calRenderDesktop() {
   if (formatMode) { calRenderDesktopFmt(); return; }
@@ -2331,6 +2393,7 @@ function calRenderDesktop() {
 
   const titleEl = $('calDesktopTitle');
   if (titleEl) titleEl.textContent = calFmtFull(calToday());
+  calRenderColorFilter($('calColorFilter-d'));
 
   const daysEl = $('calDesktopDays');
   const gridEl = $('calDesktopGrid');
@@ -2374,6 +2437,8 @@ function calRenderDesktop() {
 function calRenderDesktopFmt() {
   const titleEl = $('calDesktopTitle');
   if (titleEl) titleEl.textContent = 'Template week — Sun through Sat';
+  const filtD = $('calColorFilter-d');
+  if (filtD) filtD.style.display = 'none';
 
   const daysEl = $('calDesktopDays');
   const gridEl = $('calDesktopGrid');
@@ -2417,6 +2482,7 @@ function calRenderMobile() {
 
   const titleEl = $('calDayTitle');
   if (titleEl) titleEl.textContent = calFmtFull(day);
+  calRenderColorFilter($('calColorFilter-m'));
 
   const gridEl = $('calMobileGrid');
   if (!gridEl) return;
@@ -2446,6 +2512,8 @@ function calRenderMobileFmt() {
   const dow = calFmtMobileDay;
   const titleEl = $('calDayTitle');
   if (titleEl) titleEl.textContent = `Template: ${CAL_DOW[dow]}`;
+  const filtM = $('calColorFilter-m');
+  if (filtM) filtM.style.display = 'none';
 
   const gridEl = $('calMobileGrid');
   if (!gridEl) return;
@@ -3032,7 +3100,7 @@ function gcalInjectEvents(col, dateKey) {
   col.querySelectorAll('.gcal-event').forEach(e => e.remove());
   if (!gcalIsConnected()) return;
   (gcalEvents[dateKey] || []).forEach(ev => {
-    if (!ev.allDay) col.appendChild(gcalMakeEventEl(ev));
+    if (!ev.allDay && !calColorHidden(ev.color)) col.appendChild(gcalMakeEventEl(ev));
   });
 }
 
@@ -3602,6 +3670,7 @@ function bindStatic() {
 (function init() {
   loadFromLocal();
   calLoad();
+  calLoadHiddenColors();
   calPruneDays();
 
   bindStatic();
