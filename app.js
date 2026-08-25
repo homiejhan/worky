@@ -151,6 +151,15 @@ const SYNC_SVG  = '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><
 const CHILD_SVG = '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><rect x="1" y="1.5" width="12" height="3.5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="9" width="12" height="3.5" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M7 5v4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
 const STAR_SVG  = '<svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 1.3l1.75 3.55 3.92.57-2.84 2.77.67 3.9L7 10.25l-3.5 1.84.67-3.9L1.33 5.42l3.92-.57L7 1.3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none" class="star-path"/></svg>';
 
+/* Plain-object task copy that keeps the optional due/doneOn fields
+ * (custom-list tasks with a date surface in Day by Day). */
+function cloneTask(t) {
+  const o = { id: t.id, text: t.text, done: t.done };
+  if (t.due) o.due = t.due;
+  if (t.doneOn) o.doneOn = t.doneOn;
+  return o;
+}
+
 function escAttr(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -198,7 +207,7 @@ function calPxToMins(px) { return Math.round((px/CAL_HOUR_PX)*60/15)*15; }
  *   calendar→cal calEvents→ce calTemplates→ct calEventIdCtr→cec
  *   timer: id→i label→lb color→c seconds→s running→r startedAt→sa secondsAtStart→ss
  *   list:  id→i title→ti color→c isDefault→d starred→sr tasks→tk
- *   task:  id→i text→tx done→dn
+ *   task:  id→i text→tx done→dn due→du doneOn→dw
  *   dbdTask: id→i text→tx due→du done→dn doneOn→dw
  *   calEvent: id→i title→ti start→s end→e color→c type→tp
  *     fromTemplate→ft templateId→tid repeatDays→rd gcalId→gi gcalCalId→gc
@@ -210,7 +219,7 @@ function compressState(st) {
     return o;
   };
   const cDef  = t => ({ lb:t.label, c:t.color, s:t.seconds });
-  const cTask = t => { const o = { i:t.id, tx:t.text }; if (t.done) o.dn=1; return o; };
+  const cTask = t => { const o = { i:t.id, tx:t.text }; if (t.done) o.dn=1; if (t.due) o.du=t.due; if (t.doneOn) o.dw=t.doneOn; return o; };
   const cBudget = b => {
     const o = { ib: b.initial || 0, dy: b.daily || 0 };
     if (b.todayAllowance !== null && b.todayAllowance !== undefined) o.ta = b.todayAllowance;
@@ -262,7 +271,7 @@ function decompressState(c) {
   const dTimer = t => ({ id:t.i, label:t.lb, color:t.c, seconds:t.s,
     running:!!t.r, startedAt:t.sa ?? null, secondsAtStart:t.ss ?? null });
   const dDef  = t => ({ label:t.lb, color:t.c, seconds:t.s });
-  const dTask = t => ({ id:t.i, text:t.tx, done:!!t.dn });
+  const dTask = t => { const o = { id:t.i, text:t.tx, done:!!t.dn }; if (t.du) o.due = t.du; if (t.dw) o.doneOn = t.dw; return o; };
   const dList = l => ({ id:l.i, title:l.ti, color:l.c, isDefault:!!l.d, starred:!!l.sr, activeDays: Array.isArray(l.ad) ? l.ad : null, tasks:(l.tk||[]).map(dTask) });
   const dCalEv = e => ({
     id:e.i, title:e.ti, start:e.s, end:e.e, color:e.c,
@@ -316,7 +325,7 @@ function gatherState() {
       id: l.id, title: l.title, color: l.color, isDefault: !!l.isDefault,
       starred: !!l.starred,
       activeDays: Array.isArray(l.activeDays) ? l.activeDays : null,
-      tasks: l.tasks.map(t => ({ id: t.id, text: t.text, done: t.done }))
+      tasks: l.tasks.map(cloneTask)
     })),
     dbdTasks: dbdTasks.map(t => ({ id: t.id, text: t.text, due: t.due, done: t.done, doneOn: t.doneOn })),
     dbdIdCounter,
@@ -349,7 +358,7 @@ function applyState(state) {
     id: l.id, title: l.title, color: l.color, isDefault: !!l.isDefault,
     starred: !!l.starred,
     activeDays: Array.isArray(l.activeDays) ? l.activeDays : null,
-    tasks: l.tasks.map(t => ({ id: t.id, text: t.text, done: t.done }))
+    tasks: l.tasks.map(cloneTask)
   }));
   dbdTasks = (st.dbdTasks || []).map(t => ({ id: t.id, text: t.text, due: t.due, done: !!t.done, doneOn: t.doneOn }));
   dbdIdCounter = st.dbdIdCounter ?? dbdIdCounter;
@@ -397,7 +406,7 @@ function loadFromLocal() {
       id: l.id, title: l.title, color: l.color, isDefault: !!l.isDefault,
       starred: !!l.starred,
       activeDays: Array.isArray(l.activeDays) ? l.activeDays : null,
-      tasks: l.tasks.map(t => ({ id: t.id, text: t.text, done: t.done }))
+      tasks: l.tasks.map(cloneTask)
     }));
     dbdTasks = (state.dbdTasks || []).map(t => ({ id: t.id, text: t.text, due: t.due, done: !!t.done, doneOn: t.doneOn }));
     dbdIdCounter = state.dbdIdCounter ?? dbdIdCounter;
@@ -682,6 +691,7 @@ function buildCard(list, pfx) {
     const parentBadge = (list.isDefault && childListsForTask(task).length)
       ? `<span class="task-sync-badge task-parent-badge" title="Linked to the &quot;${escAttr(task.text)}&quot; list — all subtasks complete = this task checks off">${CHILD_SVG}</span>`
       : '';
+    const dateCtl = !list.isDefault ? taskDateCtlHtml(list, task) : '';
     return `
       <div class="task-row" data-task-id="${task.id}" data-list-id="${list.id}">
         ${rowHandle}
@@ -696,6 +706,7 @@ function buildCard(list, pfx) {
           oninput="setTaskText(${list.id},${task.id},this.value)"
           onblur="refreshSyncBadges()"
           onkeydown="if(event.key==='Enter'){event.preventDefault();addTask(${list.id});}">
+        ${dateCtl}
         ${syncBadge}
         ${parentBadge}
         <button class="task-del" onclick="removeTask(${list.id},${task.id})">×</button>
@@ -728,6 +739,31 @@ function buildCard(list, pfx) {
       </button>
     </div>`;
   return card;
+}
+
+/* ── Task date control (custom lists only): a chip that opens the native
+ *    date picker through an invisible <input type=date> overlay. Setting a
+ *    date surfaces the task in the Day by Day section; the × clears it. ── */
+const CALICON_SVG = '<svg width="11" height="11" viewBox="0 0 12 12" fill="none"><rect x="1" y="2" width="10" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M1 4.8h10" stroke="currentColor" stroke-width="1.2"/><path d="M3.5 1v2M8.5 1v2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+
+function taskDateChipLabel(due) {
+  const today = calToday();
+  const [y, m, d] = due.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const diff = Math.round((date - today) / 86400000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Tmrw';
+  const opts = { month: 'short', day: 'numeric' };
+  if (date.getFullYear() !== today.getFullYear()) opts.year = '2-digit';
+  return date.toLocaleDateString(undefined, opts);
+}
+
+function taskDateCtlHtml(list, task) {
+  if (task.due) {
+    const overdue = !task.done && task.due < dbdTodayKey();
+    return `<label class="task-date-chip has-date ${overdue ? 'overdue' : ''}"${overdue ? '' : ` style="color:${list.color}"`} title="In Day by Day — tap to change date">${CALICON_SVG}<span>${taskDateChipLabel(task.due)}</span><input type="date" value="${escAttr(task.due)}" onchange="setListTaskDue(${list.id},${task.id},this.value)"></label><button class="task-date-clear" onclick="setListTaskDue(${list.id},${task.id},'')" title="Remove from Day by Day">×</button>`;
+  }
+  return `<label class="task-date-chip" title="Add to Day by Day">${CALICON_SVG}<input type="date" onchange="setListTaskDue(${list.id},${task.id},this.value)"></label>`;
 }
 
 function isListActiveToday(list) {
@@ -905,6 +941,7 @@ function addTodoList() {
 function removeTodoList(id) {
   todoLists = todoLists.filter(l => l.id !== id);
   renderTodos();
+  renderDbd();   // any dated tasks the list held leave Day by Day too
   saveToLocal();
 }
 
@@ -920,6 +957,8 @@ function changeTodoColor(id, color) {
       c.style.background = color; c.style.borderColor = color;
     });
   });
+  // Tagged rows in Day by Day carry the list color (accent bar, select tint).
+  if (!list.isDefault && list.tasks.some(t => t.due)) renderDbd();
   saveToLocal();
 }
 
@@ -943,13 +982,21 @@ function removeTask(listId, taskId) {
   if (list.isDefault && !formatMode) return;
   list.tasks = list.tasks.filter(t => t.id !== taskId);
   renderTodos();
+  renderDbd();
   saveToLocal();
 }
 
 function setTaskText(listId, taskId, value) {
   const list = listById(listId);
   const task = list && list.tasks.find(t => t.id === taskId);
-  if (task) { task.text = value; saveToLocal(); }
+  if (!task) return;
+  task.text = value;
+  // A dated task renders both in its list card and in Day by Day — keep the
+  // copy the user is NOT typing in up to date without a focus-stealing render.
+  document.querySelectorAll(`input.task-text-${taskId}`).forEach(el => {
+    if (el !== document.activeElement) el.value = value;
+  });
+  saveToLocal();
 }
 
 // Add/remove the link badge in place after a rename, without rebuilding inputs
@@ -1053,11 +1100,19 @@ function toggleTask(listId, taskId) {
   const affectedLists = new Set([list]);
 
   // Apply to this task and every synced twin across Daily lists (Approach 1).
+  let touchedDated = false;
   const targets = syncedTaskTargets(list, task);
   targets.forEach(({ list: l, task: tk }) => {
     tk.done = newDone;
     paintTaskState(l, tk);
     affectedLists.add(l);
+
+    // Dated tasks mirror dbd semantics: doneOn lets today's progress count an
+    // overdue task cleared today, and the Day by Day groups must re-flow.
+    if (tk.due) {
+      touchedDated = true;
+      if (newDone) tk.doneOn = dbdTodayKey(); else delete tk.doneOn;
+    }
 
     // ── Approach 2 ──────────────────────────────────────────────────────────
     // DOWN: checking OR unchecking a task pushes that same state onto every
@@ -1073,6 +1128,7 @@ function toggleTask(listId, taskId) {
     if (l && l.isDefault) propagateUpFromList(l);
   });
 
+  if (touchedDated) renderDbd();   // re-group (overdue/today/completed) + repaint tags
   saveToLocal();
   homeUpdateProgressDom();
 }
@@ -1108,6 +1164,7 @@ function moveTask(taskId, fromListId, toListId, beforeTaskId, placeAfter) {
     toList.tasks.push(task);
   }
   renderTodos();
+  renderDbd();
   saveToLocal();
 }
 
@@ -1468,7 +1525,106 @@ function setDbdDue(id, value) {
   saveToLocal();
 }
 
-function dbdRowHtml(t, overdue) {
+/* ── Tags: every custom list in the Lists section doubles as a tag.
+ *    • Tagging a dbd task MOVES it into that list (it stays visible here,
+ *      color-coded, because dated list tasks render in Day by Day).
+ *    • "No tag" moves it back to a plain dbd task.
+ *    One task object, one source of truth — no mirroring/sync needed. ── */
+function dbdAllEntries() {
+  const out = dbdTasks.map(t => ({ kind: 'dbd', task: t, list: null }));
+  todoLists.forEach(l => {
+    if (l.isDefault) return;
+    l.tasks.forEach(t => { if (t.due) out.push({ kind: 'list', task: t, list: l }); });
+  });
+  return out;
+}
+
+function dbdTagSelectHtml(entry) {
+  const cur = entry.kind === 'list' ? String(entry.list.id) : '';
+  const opts = [`<option value="">${cur ? 'No tag' : 'Tag'}</option>`]
+    .concat(todoLists.filter(l => !l.isDefault).map(l =>
+      `<option value="${l.id}"${String(l.id) === cur ? ' selected' : ''}>${escAttr(l.title || 'Untitled')}</option>`));
+  const onchange = entry.kind === 'list'
+    ? `retagListTask(${entry.list.id},${entry.task.id},this.value)`
+    : `tagDbdTask(${entry.task.id},this.value)`;
+  return `<select class="dbd-tag-select" onchange="${onchange}" title="Tag with a list">${opts.join('')}</select>`;
+}
+
+// dbd task → list task (keeps text/done/due/doneOn, gets a task-space id).
+function tagDbdTask(dbdId, val) {
+  const t = dbdById(dbdId);
+  const list = listById(parseInt(val, 10));
+  if (!t || !val || !list || list.isDefault) { renderDbd(); return; }
+  dbdTasks = dbdTasks.filter(x => x.id !== dbdId);
+  const nt = { id: taskIdCounter++, text: t.text, done: t.done, due: t.due || dbdTodayKey() };
+  if (t.doneOn) nt.doneOn = t.doneOn;
+  list.tasks.push(nt);
+  renderTodos();
+  renderDbd();
+  saveToLocal();
+}
+
+// Tagged task → another list, or back to a plain dbd task ('' = No tag).
+function retagListTask(listId, taskId, val) {
+  const list = listById(listId);
+  if (!list) return;
+  const idx = list.tasks.findIndex(t => t.id === taskId);
+  if (idx === -1) return;
+  if (!val) {
+    const [t] = list.tasks.splice(idx, 1);
+    dbdTasks.push({ id: dbdIdCounter++, text: t.text, due: t.due || dbdTodayKey(),
+      done: t.done, ...(t.doneOn ? { doneOn: t.doneOn } : {}) });
+  } else {
+    const dest = listById(parseInt(val, 10));
+    if (!dest || dest.isDefault || dest === list) { renderDbd(); return; }
+    const [t] = list.tasks.splice(idx, 1);
+    dest.tasks.push(t);
+  }
+  renderTodos();
+  renderDbd();
+  saveToLocal();
+}
+
+// Set / clear a date on a list task (from either the list card or a dbd row).
+// A date puts the task in Day by Day; clearing pulls it out (it stays listed).
+function setListTaskDue(listId, taskId, value) {
+  const list = listById(listId);
+  const task = list && list.tasks.find(t => t.id === taskId);
+  if (!task) return;
+  if (value) {
+    task.due = value;
+  } else {
+    delete task.due;
+    delete task.doneOn;
+  }
+  renderTodos();
+  renderDbd();
+  saveToLocal();
+}
+
+function dbdRowHtml(entry, overdue) {
+  const t = entry.task;
+  const tagSel = dbdTagSelectHtml(entry);
+  if (entry.kind === 'list') {
+    const list = entry.list;
+    const checkStyle = t.done ? `background:${list.color};border-color:${list.color}` : '';
+    return `
+    <div class="task-row dbd-row dbd-tagged ${overdue ? 'dbd-overdue-row' : ''}" style="--tagc:${list.color}"
+         data-list-id="${list.id}" data-task-id="${t.id}">
+      <div class="task-check dbd-check task-checks-${t.id} ${t.done ? 'done' : ''}" style="${checkStyle}"
+        onclick="toggleTask(${list.id},${t.id})">
+        <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
+          <path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <input class="task-text task-text-${t.id} ${t.done ? 'done' : ''}" value="${escAttr(t.text)}" placeholder="Task…"
+        oninput="setTaskText(${list.id},${t.id},this.value)">
+      ${tagSel}
+      <input type="date" class="dbd-date-input" value="${escAttr(t.due)}"
+        onchange="setListTaskDue(${list.id},${t.id},this.value)" title="Due date">
+      <button class="task-del" onclick="removeTask(${list.id},${t.id})">×</button>
+    </div>`;
+  }
   const dueAttr = escAttr(t.due || dbdTodayKey());
   return `
     <div class="task-row dbd-row ${overdue ? 'dbd-overdue-row' : ''}" data-dbd-id="${t.id}">
@@ -1479,6 +1635,7 @@ function dbdRowHtml(t, overdue) {
       </div>
       <input class="task-text ${t.done ? 'done' : ''}" value="${escAttr(t.text)}" placeholder="Task…"
         oninput="setDbdText(${t.id}, this.value)">
+      ${tagSel}
       <input type="date" class="dbd-date-input" value="${dueAttr}"
         onchange="setDbdDue(${t.id}, this.value)" title="Due date">
       <button class="task-del" onclick="removeDbdTask(${t.id})">×</button>
@@ -1487,18 +1644,20 @@ function dbdRowHtml(t, overdue) {
 
 function renderDbd() {
   const todayKey = dbdTodayKey();
-  const byDue = (a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : a.id - b.id);
+  const all = dbdAllEntries();
+  const byDue = (a, b) => (a.task.due < b.task.due ? -1 : a.task.due > b.task.due ? 1
+    : a.kind === b.kind ? a.task.id - b.task.id : (a.kind === 'dbd' ? -1 : 1));
 
-  const overdue   = dbdTasks.filter(t => !t.done && t.due < todayKey).sort(byDue);
-  const upcoming  = dbdTasks.filter(t => t.due >= todayKey).sort(byDue);
-  const donePast  = dbdTasks.filter(t => t.done && t.due < todayKey).sort(byDue);
+  const overdue   = all.filter(e => !e.task.done && e.task.due < todayKey).sort(byDue);
+  const upcoming  = all.filter(e => e.task.due >= todayKey).sort(byDue);
+  const donePast  = all.filter(e => e.task.done && e.task.due < todayKey).sort(byDue);
 
   // Group upcoming by due-date key, preserving ascending order.
   const groups = [];
-  upcoming.forEach(t => {
+  upcoming.forEach(e => {
     const g = groups[groups.length - 1];
-    if (g && g.key === t.due) g.tasks.push(t);
-    else groups.push({ key: t.due, tasks: [t] });
+    if (g && g.key === e.task.due) g.entries.push(e);
+    else groups.push({ key: e.task.due, entries: [e] });
   });
 
   let html = '';
@@ -1507,21 +1666,21 @@ function renderDbd() {
       <div class="dbd-group dbd-group-overdue">
         <div class="dbd-group-header dbd-header-overdue">Overdue
           <span class="dbd-count">${overdue.length}</span></div>
-        ${overdue.map(t => dbdRowHtml(t, true)).join('')}
+        ${overdue.map(e => dbdRowHtml(e, true)).join('')}
       </div>`;
   }
   groups.forEach(g => {
     html += `
       <div class="dbd-group">
         <div class="dbd-group-header">${dbdLabelFor(g.key)}</div>
-        ${g.tasks.map(t => dbdRowHtml(t, false)).join('')}
+        ${g.entries.map(e => dbdRowHtml(e, false)).join('')}
       </div>`;
   });
   if (donePast.length) {
     html += `
       <div class="dbd-group dbd-group-done">
         <div class="dbd-group-header dbd-header-done">Completed</div>
-        ${donePast.map(t => dbdRowHtml(t, false)).join('')}
+        ${donePast.map(e => dbdRowHtml(e, false)).join('')}
       </div>`;
   }
   if (!html) html = '<div class="empty-state dbd-empty">No day-by-day tasks yet.<br>Add one above with a due date.</div>';
@@ -1738,11 +1897,16 @@ function homeProgressData() {
     if (!l.isDefault || !l.starred) return;
     l.tasks.forEach(t => { total++; if (t.done) done++; });
   });
-  dbdTasks.forEach(t => {
+  const countDated = t => {
     const counted = t.done
       ? (t.due === todayKey || t.doneOn === todayKey)
       : (t.due <= todayKey);
     if (counted) { total++; if (t.done) done++; }
+  };
+  dbdTasks.forEach(countDated);
+  todoLists.forEach(l => {
+    if (l.isDefault) return;
+    l.tasks.forEach(t => { if (t.due) countDated(t); });
   });
   return { total, done, pct: total ? Math.round(done / total * 100) : 0 };
 }
@@ -1805,25 +1969,35 @@ function homeHeroHtml() {
 }
 
 /* ── day-by-day: overdue (red) + today (white) + next 3 upcoming (grey) ── */
-function homeDbdRow(t, tone) {
+function homeDbdRow(entry, tone) {
+  const t = entry.task;
+  const tagged = entry.kind === 'list';
   const dateChip = tone === 'today' ? '' :
     `<span class="home-dbd-date">${dbdLabelFor(t.due)}</span>`;
+  const tagDot = tagged
+    ? `<span class="home-dbd-tag" style="background:${entry.list.color}" title="${escAttr(entry.list.title || 'Untitled')}"></span>`
+    : '';
+  const toggle = tagged ? `toggleTask(${entry.list.id},${t.id})` : `toggleDbdTask(${t.id})`;
+  const checkStyle = tagged && t.done ? ` style="background:${entry.list.color};border-color:${entry.list.color}"` : '';
   return `
     <div class="task-row home-dbd-row home-tone-${tone}">
-      <div class="task-check home-dbd-check ${t.done ? 'done' : ''}" onclick="toggleDbdTask(${t.id})">
+      <div class="task-check home-dbd-check ${tagged ? `task-checks-${t.id} ` : ''}${t.done ? 'done' : ''}"${checkStyle} onclick="${toggle}">
         ${HOME_CHECK_SVG}
       </div>
-      <span class="home-task-text ${t.done ? 'done' : ''}">${escAttr(t.text)}</span>
+      ${tagDot}
+      <span class="home-task-text ${tagged ? `task-text-${t.id} ` : ''}${t.done ? 'done' : ''}">${escAttr(t.text)}</span>
       ${dateChip}
     </div>`;
 }
 
 function homeDbdHtml() {
   const todayKey = dbdTodayKey();
-  const byDue = (a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : a.id - b.id);
-  const overdue  = dbdTasks.filter(t => !t.done && t.due <  todayKey).sort(byDue);
-  const today    = dbdTasks.filter(t =>             t.due === todayKey).sort(byDue);
-  const upcoming = dbdTasks.filter(t => !t.done && t.due >  todayKey).sort(byDue).slice(0, 3);
+  const all = dbdAllEntries();
+  const byDue = (a, b) => (a.task.due < b.task.due ? -1 : a.task.due > b.task.due ? 1
+    : a.kind === b.kind ? a.task.id - b.task.id : (a.kind === 'dbd' ? -1 : 1));
+  const overdue  = all.filter(e => !e.task.done && e.task.due <  todayKey).sort(byDue);
+  const today    = all.filter(e =>                 e.task.due === todayKey).sort(byDue);
+  const upcoming = all.filter(e => !e.task.done && e.task.due >  todayKey).sort(byDue).slice(0, 3);
   if (!overdue.length && !today.length && !upcoming.length) return '';
   const emptyToday = (!overdue.length && !today.length)
     ? '<div class="home-muted-note">Nothing due today.</div>' : '';
@@ -1831,10 +2005,10 @@ function homeDbdHtml() {
     <section class="home-section">
       <div class="home-section-title">Today\u2019s Tasks</div>
       <div class="home-card">
-        ${overdue.map(t => homeDbdRow(t, 'overdue')).join('')}
-        ${today.map(t => homeDbdRow(t, 'today')).join('')}
+        ${overdue.map(e => homeDbdRow(e, 'overdue')).join('')}
+        ${today.map(e => homeDbdRow(e, 'today')).join('')}
         ${emptyToday}
-        ${upcoming.map(t => homeDbdRow(t, 'future')).join('')}
+        ${upcoming.map(e => homeDbdRow(e, 'future')).join('')}
       </div>
     </section>`;
 }
