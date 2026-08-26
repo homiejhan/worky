@@ -40,7 +40,7 @@ const SYNC_CLIENT_ID   = GCAL_CLIENT_ID;
 const SYNC_REDIRECT    = GCAL_REDIRECT;
 const SYNC_STATE_TAG   = 'worky-sync';
 const SYNC_META_LS_KEY = 'focus-sync-meta';
-
+ 
 /* ───────────────────────── STATE ───────────────────────── */
 let TIMER_DEFAULTS = [
   { label: 'Productivity Timer',   seconds: 5*3600, color: '#378ADD' },
@@ -48,16 +48,16 @@ let TIMER_DEFAULTS = [
   { label: 'Time with God',        seconds: 2*3600, color: '#8B5CF6' },
   { label: 'Skill Development',    seconds: 1*3600, color: '#F97316' },
 ];
-
+ 
 let formatMode = false;
 let formatTimerIdCounter = 900;
 let wokenUp = false;
-
+ 
 let timers = TIMER_DEFAULTS.map((t, i) => ({
   id: i, label: t.label, seconds: t.seconds, color: t.color,
   running: false, startedAt: null, secondsAtStart: null
 }));
-
+ 
 let todoIdCounter = 0;
 let taskIdCounter = 0;
 function makeTasks(texts) {
@@ -69,11 +69,11 @@ let todoLists = [
   { id: todoIdCounter++, title: 'Social Interactions', color: '#EAB308', isDefault: true,
     tasks: makeTasks(['1','2','3','4','5']) },
 ];
-
+ 
 /* day-by-day tasks (dated one-off tasks under My Lists) */
 let dbdTasks = [];        // { id, text, due:'YYYY-MM-DD', done }
 let dbdIdCounter = 1;
-
+ 
 /* calendar state */
 let calEvents       = {};   // { 'YYYY-MM-DD': [ev,...] }
 let calTemplates    = [];
@@ -87,7 +87,7 @@ let calEditDate = null;
 let calEditDow  = null;
 let calEditType = 'event';
 let calSelectedColor = CAL_COLORS[0];
-
+ 
 /* calendar color-group visibility (events only — never dividers) */
 const CAL_HIDDEN_LS_KEY = 'focus-cal-hidden-colors';
 let calHiddenColors = new Set();
@@ -103,13 +103,13 @@ function calSaveHiddenColors() {
 function calColorHidden(c) {
   return !!c && calHiddenColors.has(String(c).toLowerCase());
 }
-
+ 
 /* gcal state */
 let gcalToken     = null;
 let gcalCalendars = [];
 let gcalEvents    = {};
 let gcalSyncing   = false;
-
+ 
 /* budget state
  *   initial        — balance allocated at the start of today
  *   daily          — amount added to the balance each new day
@@ -124,7 +124,7 @@ let budget = {
   lastDate: null,
 };
 let purchaseIdCounter = 1;
-
+ 
 /* view visibility — which sections appear in the UI.
  * 'home' is always on and is not stored. */
 const VIEW_DEFS = [
@@ -137,14 +137,14 @@ const VIEW_DEFS = [
 ];
 let views = { timers: true, daily: true, lists: true, calendar: true, budget: true };
 let currentView = 'home';
-
+ 
 /* misc */
 let currentTab = 0;   // index within the currently visible tabs
 let preFormatTimerState = [];
-
+ 
 /* ───────────────────────── UTIL ───────────────────────── */
 function $(id) { return document.getElementById(id); }
-
+ 
 function fmt(s) {
   s = Math.max(0, Math.round(s));
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sc = s % 60;
@@ -171,7 +171,7 @@ const SYNC_SVG  = '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><
 // Badge shown on a task that has a linked child list, and on the child list header.
 const CHILD_SVG = '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><rect x="1" y="1.5" width="12" height="3.5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="9" width="12" height="3.5" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M7 5v4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
 const STAR_SVG  = '<svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 1.3l1.75 3.55 3.92.57-2.84 2.77.67 3.9L7 10.25l-3.5 1.84.67-3.9L1.33 5.42l3.92-.57L7 1.3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none" class="star-path"/></svg>';
-
+ 
 /* Plain-object task copy that keeps the optional due/doneOn fields
  * (custom-list tasks with a date surface in Day by Day). */
 function cloneTask(t) {
@@ -180,11 +180,11 @@ function cloneTask(t) {
   if (t.doneOn) o.doneOn = t.doneOn;
   return o;
 }
-
+ 
 function escAttr(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
-
+ 
 let _toastTimer = null;
 function showToast(msg) {
   const t = $('toast');
@@ -193,7 +193,7 @@ function showToast(msg) {
   clearTimeout(_toastTimer);
   _toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
 }
-
+ 
 /* time helpers (calendar) */
 function calToday() { const d = new Date(); d.setHours(0,0,0,0); return d; }
 function calDateKey(d) {
@@ -219,7 +219,7 @@ function calFmtTime(s) {
 }
 function calMinsToPx(n)  { return (n/60)*CAL_HOUR_PX; }
 function calPxToMins(px) { return Math.round((px/CAL_HOUR_PX)*60/15)*15; }
-
+ 
 /* ───────────────────────── PERSISTENCE ───────────────────────── */
 /*
  * v2 export uses short key aliases (≈70% smaller than v1).
@@ -285,7 +285,7 @@ function compressState(st) {
     cal: { ce: cEvents, ct: (st.calendar.calTemplates||[]).map(cCalEv), cec: st.calendar.calEventIdCtr },
   };
 }
-
+ 
 function decompressState(c) {
   if (c.version === 1) return c;          // v1 passthrough
   if (c.v !== 2) return null;
@@ -327,7 +327,7 @@ function decompressState(c) {
     calendar: { calEvents: dEvents, calTemplates: (c.cal.ct||[]).map(dCalEv), calEventIdCtr: c.cal.cec || 1 },
   };
 }
-
+ 
 function gatherState() {
   return {
     version: 1,
@@ -362,7 +362,7 @@ function gatherState() {
     calendar: { calEvents, calTemplates, calEventIdCtr },
   };
 }
-
+ 
 function applyState(state) {
   const st = decompressState(state);
   if (!st || st.version !== 1) { showToast('Invalid or unsupported file.'); return; }
@@ -404,7 +404,7 @@ function applyState(state) {
   saveToLocal();
   showToast('State restored ✓');
 }
-
+ 
 function saveToLocal() {
   try {
     const state = gatherState();
@@ -449,7 +449,7 @@ function loadFromLocal() {
     return false;
   }
 }
-
+ 
 function calSave() {
   try { localStorage.setItem(CAL_LS_KEY, JSON.stringify({ calEvents, calTemplates, calEventIdCtr })); } catch(e) {}
 }
@@ -463,10 +463,10 @@ function calLoad() {
     if (s.calEventIdCtr) calEventIdCtr = s.calEventIdCtr;
   } catch(e) {}
 }
-
+ 
 /* ───────────────────────── TIMERS ───────────────────────── */
 function timerById(id) { return timers.find(x => x.id === id); }
-
+ 
 function timerCardHTML(t, pfx) {
   return `
     <div class="timer-header">
@@ -492,7 +492,7 @@ function timerCardHTML(t, pfx) {
     </div>
     <div class="timer-sub tsub-${t.id}">${t.running ? 'running' : 'paused'} · click time to edit</div>`;
 }
-
+ 
 function renderTimers() {
   [['timerStack-d','d'],['timerStack-m','m']].forEach(([stackId, pfx]) => {
     const stack = $(stackId);
@@ -507,7 +507,7 @@ function renderTimers() {
   });
   renderHome();
 }
-
+ 
 function setTimerLabel(id, value) {
   const t = timerById(id);
   if (!t) return;
@@ -518,7 +518,7 @@ function setTimerLabel(id, value) {
   }
   saveToLocal();
 }
-
+ 
 function changeTimerColor(id, color) {
   const t = timerById(id);
   if (!t) return;
@@ -530,7 +530,7 @@ function changeTimerColor(id, color) {
   document.querySelectorAll(`.tbar-${id}`).forEach(el => el.style.background = color);
   saveToLocal();
 }
-
+ 
 function toggleTimer(id) {
   const t = timerById(id);
   if (!t) return;
@@ -546,7 +546,7 @@ function toggleTimer(id) {
   updateTimerUI(id);
   saveToLocal();
 }
-
+ 
 function updateTimerUI(id) {
   const t = timerById(id);
   if (!t) return;
@@ -558,7 +558,7 @@ function updateTimerUI(id) {
     el.textContent = (t.running ? 'running' : 'paused') + ' · click time to edit';
   });
 }
-
+ 
 function startEditTimer(id, pfx) {
   const t = timerById(id);
   if (!t || t.running) return;
@@ -570,7 +570,7 @@ function startEditTimer(id, pfx) {
     edit.focus(); edit.select();
   }
 }
-
+ 
 function commitEditTimer(id, pfx) {
   const t = timerById(id);
   if (!t) return;
@@ -593,7 +593,7 @@ function commitEditTimer(id, pfx) {
   });
   saveToLocal();
 }
-
+ 
 function resetTimer(id) {
   const t = timerById(id);
   if (!t) return;
@@ -611,7 +611,7 @@ function resetTimer(id) {
   updateTimerUI(id);
   saveToLocal();
 }
-
+ 
 function tickAll() {
   timers.forEach(t => {
     if (!t.running) return;
@@ -622,7 +622,7 @@ function tickAll() {
   if (wokenUp) updateTimerSummary();
   requestAnimationFrame(tickAll);
 }
-
+ 
 /* ───────────────────────── WAKEUP + SUMMARY ───────────────────────── */
 function syncWakeupUI() {
   ['d','m'].forEach(p => {
@@ -632,14 +632,14 @@ function syncWakeupUI() {
     if (box) box.classList.toggle('checked', wokenUp);
   });
 }
-
+ 
 function toggleWakeup() {
   wokenUp = !wokenUp;
   syncWakeupUI();
   updateTimerSummary();
   saveToLocal();
 }
-
+ 
 function updateTimerSummary() {
   const totalSecs = timers.reduce((sum, t) => sum + Math.round(getRemaining(t)), 0);
   const finishTime = new Date(Date.now() + totalSecs * 1000);
@@ -647,7 +647,7 @@ function updateTimerSummary() {
   const mm = String(finishTime.getMinutes()).padStart(2, '0');
   const ampm = hh >= 12 ? 'pm' : 'am';
   const h12 = hh % 12 || 12;
-
+ 
   const html = wokenUp ? `
     <div class="timer-summary-row">
       <span class="timer-summary-label">Time remaining</span>
@@ -657,7 +657,7 @@ function updateTimerSummary() {
       <span class="timer-summary-label">Est. finish</span>
       <span class="timer-summary-value">${h12}:${mm} ${ampm}</span>
     </div>` : '';
-
+ 
   ['d','m'].forEach(p => {
     const el = $(`timerSummary-${p}`);
     if (!el) return;
@@ -665,17 +665,17 @@ function updateTimerSummary() {
     el.classList.toggle('visible', wokenUp);
   });
 }
-
+ 
 /* ───────────────────────── TODO LISTS ───────────────────────── */
 function listById(id) { return todoLists.find(l => l.id === id); }
-
+ 
 function buildCard(list, pfx) {
   const listDraggable = !list.isDefault || formatMode;
   const card = document.createElement('div');
   card.className = 'todo-card' + (listDraggable ? ' list-reorderable' : '') + (list.starred ? ' starred' : '');
   card.dataset.listId = list.id;
   card.dataset.isDefault = list.isDefault ? '1' : '0';
-
+ 
   const handleHtml = listDraggable
     ? '<div class="list-drag-handle" title="Drag to reorder">' + GRIP_SVG + '</div>'
     : '';
@@ -704,7 +704,7 @@ function buildCard(list, pfx) {
             : `<span class="list-sched-pill muted">Every day</span>`
       }</div>`
     : '';
-
+ 
   const taskRows = list.tasks.map(task => {
     const rowHandle = !list.isDefault
       ? '<div class="drag-handle" title="Drag to reorder">' + GRIP_SVG + '</div>'
@@ -737,7 +737,7 @@ function buildCard(list, pfx) {
         <button class="task-del" onclick="removeTask(${list.id},${task.id})">×</button>
       </div>`;
   }).join('');
-
+ 
   card.innerHTML = `
     <div class="todo-accent-strip todo-strip-${list.id}" style="background:${list.color}"></div>
     <div class="todo-card-header">
@@ -765,12 +765,12 @@ function buildCard(list, pfx) {
     </div>`;
   return card;
 }
-
+ 
 /* ── Task date control (custom lists only): a chip that opens the native
  *    date picker through an invisible <input type=date> overlay. Setting a
  *    date surfaces the task in the Day by Day section; the × clears it. ── */
 const CALICON_SVG = '<svg width="11" height="11" viewBox="0 0 12 12" fill="none"><rect x="1" y="2" width="10" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M1 4.8h10" stroke="currentColor" stroke-width="1.2"/><path d="M3.5 1v2M8.5 1v2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
-
+ 
 function taskDateChipLabel(due) {
   const today = calToday();
   const [y, m, d] = due.split('-').map(Number);
@@ -782,7 +782,7 @@ function taskDateChipLabel(due) {
   if (date.getFullYear() !== today.getFullYear()) opts.year = '2-digit';
   return date.toLocaleDateString(undefined, opts);
 }
-
+ 
 function taskDateCtlHtml(list, task) {
   if (task.due) {
     const overdue = !task.done && task.due < dbdTodayKey();
@@ -790,23 +790,23 @@ function taskDateCtlHtml(list, task) {
   }
   return `<label class="task-date-chip" title="Add to Day by Day">${CALICON_SVG}<input type="date" onchange="setListTaskDue(${list.id},${task.id},this.value)"></label>`;
 }
-
+ 
 function isListActiveToday(list) {
   if (!list.activeDays) return true;                  // null → shows every day
   if (list.activeDays.length === 0) return false;     // [] → no days selected → hidden
   return list.activeDays.includes(new Date().getDay());
 }
-
+ 
 function fmtDays(days) {
   if (!days || !days.length || days.length === 7) return '';
   return days.slice().sort((a,b) => a-b).map(d => CAL_DOW[d]).join(', ');
 }
-
+ 
 /* ── Daily task auto-sync (Approach 1): tasks with the same name across Daily
  *    lists stay in lockstep. Match is trimmed + case-insensitive; blank names
  *    never sync. Derived purely from names, so nothing extra is persisted.    */
 function normTaskName(s) { return (s || '').trim().toLowerCase(); }
-
+ 
 // Recomputed each render: name-keys that appear on 2+ Daily tasks (→ show link badge).
 let _syncedNameKeys = new Set();
 function computeSyncedKeys() {
@@ -823,7 +823,7 @@ function computeSyncedKeys() {
 function isTaskSynced(list, task) {
   return !!(list.isDefault && _syncedNameKeys.has(normTaskName(task.text)));
 }
-
+ 
 // All Daily tasks (incl. the source) that share the source task's name.
 function syncedTaskTargets(srcList, srcTask) {
   const out = [{ list: srcList, task: srcTask }];
@@ -839,21 +839,21 @@ function syncedTaskTargets(srcList, srcTask) {
   });
   return out;
 }
-
+ 
 /* ── List↔Task linking (Approach 2): a Daily list whose title matches a Daily
  *    task name acts as a "child" of that task.
  *    • Checking all tasks in the child list → auto-checks the parent task(s)
  *      (and all their cross-list synced twins via the existing Approach 1 logic).
  *    • Unchecking the parent task → unchecks every task in the child list.
  *    Match is trimmed + case-insensitive; blank titles never link.             */
-
+ 
 // Find all Daily lists whose title matches the given task name key.
 function childListsForTask(task) {
   const key = normTaskName(task.text);
   if (!key) return [];
   return todoLists.filter(l => l.isDefault && normTaskName(l.title) === key);
 }
-
+ 
 // Find all {list, task} pairs (across all Daily lists) whose task text matches
 // the given list's title — i.e. the "parent" tasks of a child list.
 function parentTasksForList(list) {
@@ -869,12 +869,12 @@ function parentTasksForList(list) {
   });
   return out;
 }
-
+ 
 // Returns true when every task in the list is done (or the list has no tasks).
 function isListComplete(list) {
   return list.tasks.length > 0 && list.tasks.every(t => t.done);
 }
-
+ 
 // After any task state change: walk up the parent chain and keep parent tasks
 // in sync with their child-list completion state.
 // `visitedListIds` guards against hypothetical circular references.
@@ -899,7 +899,7 @@ function propagateUpFromList(list, visitedListIds = new Set()) {
     twinLists.forEach(l => propagateUpFromList(l, visitedListIds));
   });
 }
-
+ 
 function paintTaskState(list, task) {
   document.querySelectorAll(`.task-checks-${task.id}`).forEach(el => {
     el.classList.toggle('done', task.done);
@@ -908,7 +908,7 @@ function paintTaskState(list, task) {
   });
   document.querySelectorAll(`.task-text-${task.id}`).forEach(el => el.classList.toggle('done', task.done));
 }
-
+ 
 function renderTodos() {
   computeSyncedKeys();
   ['d','m'].forEach(pfx => {
@@ -918,15 +918,15 @@ function renderTodos() {
     if (!defEl || !custEl) return;
     defEl.querySelectorAll('.todo-card, .daily-empty').forEach(c => c.remove());
     custEl.querySelectorAll('.todo-card').forEach(c => c.remove());
-
+ 
     const dailyLists  = todoLists.filter(l => l.isDefault);
     const customLists = todoLists.filter(l => !l.isDefault);
     // Format mode shows every daily list (for editing); user mode only today's.
     const visibleDaily = formatMode ? dailyLists : dailyLists.filter(isListActiveToday);
-
+ 
     if (emptyEl) emptyEl.style.display = customLists.length === 0 ? 'block' : 'none';
     visibleDaily.forEach(l => defEl.appendChild(buildCard(l, pfx)));
-
+ 
     if (!formatMode && visibleDaily.length === 0 && dailyLists.length > 0) {
       const hint = document.createElement('div');
       hint.className = 'empty-state daily-empty';
@@ -938,12 +938,12 @@ function renderTodos() {
   bindAllDrags();
   renderHome();
 }
-
+ 
 function setListTitle(id, value) {
   const l = listById(id);
   if (l) { l.title = value; saveToLocal(); }
 }
-
+ 
 function toggleStarList(id) {
   const l = listById(id);
   if (!l) return;
@@ -951,7 +951,7 @@ function toggleStarList(id) {
   renderTodos();
   saveToLocal();
 }
-
+ 
 function addTodoList() {
   const id = todoIdCounter++;
   todoLists.push({ id, title: '', color: '#5DCAA5', tasks: [], isDefault: false });
@@ -962,14 +962,14 @@ function addTodoList() {
     if (inp) inp.focus();
   }, 10);
 }
-
+ 
 function removeTodoList(id) {
   todoLists = todoLists.filter(l => l.id !== id);
   renderTodos();
   renderDbd();   // any dated tasks the list held leave Day by Day too
   saveToLocal();
 }
-
+ 
 function changeTodoColor(id, color) {
   const list = listById(id);
   if (!list) return;
@@ -986,7 +986,7 @@ function changeTodoColor(id, color) {
   if (!list.isDefault && list.tasks.some(t => t.due)) renderDbd();
   saveToLocal();
 }
-
+ 
 function addTask(listId) {
   const list = listById(listId);
   if (!list) return;
@@ -1000,7 +1000,7 @@ function addTask(listId) {
     if (inp) inp.focus();
   }, 10);
 }
-
+ 
 function removeTask(listId, taskId) {
   const list = listById(listId);
   if (!list) return;
@@ -1010,7 +1010,7 @@ function removeTask(listId, taskId) {
   renderDbd();
   saveToLocal();
 }
-
+ 
 function setTaskText(listId, taskId, value) {
   const list = listById(listId);
   const task = list && list.tasks.find(t => t.id === taskId);
@@ -1023,12 +1023,12 @@ function setTaskText(listId, taskId, value) {
   });
   saveToLocal();
 }
-
+ 
 // Add/remove the link badge in place after a rename, without rebuilding inputs
 // (a full re-render would steal focus mid-edit).
 function refreshSyncBadges() {
   computeSyncedKeys();
-
+ 
   // ── Task-row badges (Approach 1 sync + Approach 2 parent badge) ──────────
   document.querySelectorAll('.task-row').forEach(row => {
     const listId = parseInt(row.dataset.listId);
@@ -1037,7 +1037,7 @@ function refreshSyncBadges() {
     const task = list && list.tasks.find(t => t.id === taskId);
     if (!list || !task) return;
     const delBtn = row.querySelector('.task-del');
-
+ 
     // Approach 1: cross-list sync badge
     const existingSync = row.querySelector('.task-sync-badge:not(.task-parent-badge)');
     const shouldSync = isTaskSynced(list, task);
@@ -1050,7 +1050,7 @@ function refreshSyncBadges() {
     } else if (!shouldSync && existingSync) {
       existingSync.remove();
     }
-
+ 
     // Approach 2: parent-task badge (task has a linked child list)
     const existingParent = row.querySelector('.task-parent-badge');
     const shouldParent = list.isDefault && childListsForTask(task).length > 0;
@@ -1064,7 +1064,7 @@ function refreshSyncBadges() {
       existingParent.remove();
     }
   });
-
+ 
   // ── List-header child badge (Approach 2: this list is a child of a parent task) ──
   document.querySelectorAll('.todo-card').forEach(card => {
     const listId = parseInt(card.dataset.listId);
@@ -1088,7 +1088,7 @@ function refreshSyncBadges() {
     }
   });
 }
-
+ 
 // After a parent task's done-state changes: push that state onto every task
 // in its linked child list(s) — both directions (check AND uncheck).
 // Recurses in case a child-list task is itself a parent of another list.
@@ -1112,18 +1112,18 @@ function propagateDownFromTask(task, done, visitedListIds = new Set(), affectedL
     });
   });
 }
-
+ 
 function toggleTask(listId, taskId) {
   const list = listById(listId);
   if (!list) return;
   const task = list.tasks.find(t => t.id === taskId);
   if (!task) return;
   const newDone = !task.done;
-
+ 
   // Track every list whose task state changes during this toggle, so the
   // UP pass can re-evaluate ALL of them (not just the list that was clicked).
   const affectedLists = new Set([list]);
-
+ 
   // Apply to this task and every synced twin across Daily lists (Approach 1).
   let touchedDated = false;
   const targets = syncedTaskTargets(list, task);
@@ -1131,20 +1131,20 @@ function toggleTask(listId, taskId) {
     tk.done = newDone;
     paintTaskState(l, tk);
     affectedLists.add(l);
-
+ 
     // Dated tasks mirror dbd semantics: doneOn lets today's progress count an
     // overdue task cleared today, and the Day by Day groups must re-flow.
     if (tk.due) {
       touchedDated = true;
       if (newDone) tk.doneOn = dbdTodayKey(); else delete tk.doneOn;
     }
-
+ 
     // ── Approach 2 ──────────────────────────────────────────────────────────
     // DOWN: checking OR unchecking a task pushes that same state onto every
     // task in its linked child list(s).
     propagateDownFromTask(tk, newDone, new Set(), affectedLists);
   });
-
+ 
   // UP: re-evaluate completion for every list that changed. Previously this
   // only ran on the clicked list, so checking a synced twin from another list
   // (e.g. "Subtask 1" via "Morning") completed the "Task 1" list but never
@@ -1152,12 +1152,12 @@ function toggleTask(listId, taskId) {
   affectedLists.forEach(l => {
     if (l && l.isDefault) propagateUpFromList(l);
   });
-
+ 
   if (touchedDated) renderDbd();   // re-group (overdue/today/completed) + repaint tags
   saveToLocal();
   homeUpdateProgressDom();
 }
-
+ 
 function moveList(fromListId, toListId, placeAfter, isDefault) {
   const group = todoLists.filter(l => l.isDefault === isDefault);
   const fromIdx = group.findIndex(l => l.id === fromListId);
@@ -1172,7 +1172,7 @@ function moveList(fromListId, toListId, placeAfter, isDefault) {
   renderTodos();
   saveToLocal();
 }
-
+ 
 function moveTask(taskId, fromListId, toListId, beforeTaskId, placeAfter) {
   const fromList = listById(fromListId);
   const toList   = listById(toListId);
@@ -1192,7 +1192,7 @@ function moveTask(taskId, fromListId, toListId, beforeTaskId, placeAfter) {
   renderDbd();
   saveToLocal();
 }
-
+ 
 /* ───────────────────────── UNIFIED DRAG ENGINE ─────────────────────────
  * One pointer-events implementation for mouse, touch, and pen.
  * Used by list cards, task rows, and calendar events.
@@ -1204,20 +1204,20 @@ document.addEventListener('click', e => {
     e.preventDefault();
   }
 }, true);
-
+ 
 function clearDropIndicators() {
   document.querySelectorAll('.drop-before').forEach(el => el.classList.remove('drop-before'));
   document.querySelectorAll('.drop-after').forEach(el => el.classList.remove('drop-after'));
   document.querySelectorAll('.drop-into').forEach(el => el.classList.remove('drop-into'));
 }
-
+ 
 function hitTestAt(x, y, ghost) {
   if (ghost) ghost.style.display = 'none';
   const el = document.elementFromPoint(x, y);
   if (ghost) ghost.style.display = '';
   return el;
 }
-
+ 
 /**
  * makeDrag(handle, opts)
  * opts.source()       → element being dragged (cloned for the ghost)
@@ -1233,7 +1233,7 @@ function makeDrag(handle, opts) {
     let ghost = null, active = false, offX = 0, offY = 0;
     const src = opts.source();
     if (!src) return;
-
+ 
     const onMove = ev => {
       if (!active) {
         if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 5) return;
@@ -1255,7 +1255,7 @@ function makeDrag(handle, opts) {
       opts.onMove(ev.clientX, ev.clientY, ghost);
       ev.preventDefault();
     };
-
+ 
     // Listeners live on window (not the handle) so cleanup still fires even
     // when onDrop rebuilds the DOM and removes the handle mid-gesture.
     const cleanup = () => {
@@ -1263,7 +1263,7 @@ function makeDrag(handle, opts) {
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onCancel);
     };
-
+ 
     const finish = () => {
       cleanup();
       if (active) {
@@ -1274,7 +1274,7 @@ function makeDrag(handle, opts) {
       if (ghost) { ghost.remove(); ghost = null; }
       if (opts.onEnd) opts.onEnd();
     };
-
+ 
     const onUp = ev => {
       if (active) {
         const g = ghost;
@@ -1284,20 +1284,20 @@ function makeDrag(handle, opts) {
       finish();
     };
     const onCancel = () => finish();
-
+ 
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onCancel);
   });
 }
-
+ 
 /* ── list-card reordering ── */
 function bindListDrag(card) {
   const handle = card.querySelector('.list-drag-handle');
   if (!handle || handle._dragBound) return;
   handle._dragBound = true;
   const isDefault = card.dataset.isDefault === '1';
-
+ 
   makeDrag(handle, {
     source: () => card,
     onMove: (x, y, ghost) => {
@@ -1321,13 +1321,13 @@ function bindListDrag(card) {
     },
   });
 }
-
+ 
 /* ── task-row reordering / cross-list moves ── */
 function bindTaskDrag(row) {
   const handle = row.querySelector('.drag-handle');
   if (!handle || handle._dragBound) return;
   handle._dragBound = true;
-
+ 
   makeDrag(handle, {
     source: () => row,
     onMove: (x, y, ghost) => {
@@ -1368,18 +1368,18 @@ function bindTaskDrag(row) {
     },
   });
 }
-
+ 
 function bindAllDrags() {
   document.querySelectorAll('.todo-card.list-reorderable').forEach(bindListDrag);
   document.querySelectorAll('.task-row').forEach(bindTaskDrag);
 }
-
+ 
 /* ───────────────────────── FORMAT MODE ───────────────────────── */
 function toggleFormatMode() {
   if (formatMode) commitFormatMode();
   else enterFormatMode();
 }
-
+ 
 function enterFormatMode() {
   // snapshot live remaining times
   preFormatTimerState = timers.map(t => ({
@@ -1389,7 +1389,7 @@ function enterFormatMode() {
     startedAt: t.startedAt,
     secondsAtStart: t.secondsAtStart,
   }));
-
+ 
   // pause everything
   timers.forEach(t => {
     if (t.running) {
@@ -1398,34 +1398,34 @@ function enterFormatMode() {
       updateTimerUI(t.id);
     }
   });
-
+ 
   // show defaults in displays + set t.seconds to defaults for editing
   timers.forEach((t, i) => {
     const def = TIMER_DEFAULTS[i];
     if (def) t.seconds = def.seconds;
   });
-
+ 
   formatMode = true;
   document.body.classList.add('format-mode');
   const btn = $('fmtBtn');
   if (btn) { btn.textContent = '✓ Done'; btn.classList.add('active'); }
-
+ 
   renderTimers();
   renderTodos();
   calFmtMobileDay = 0;
   if (calDesktopOpen) calRenderDesktop();
   if (currentView === 'calendar') calRenderMobile();
 }
-
+ 
 function commitFormatMode() {
   // adopt format-mode values as the new defaults
   TIMER_DEFAULTS = timers.map(t => ({ label: t.label, seconds: t.seconds, color: t.color }));
-
+ 
   formatMode = false;
   document.body.classList.remove('format-mode');
   const btn = $('fmtBtn');
   if (btn) { btn.textContent = 'Formats'; btn.classList.remove('active'); }
-
+ 
   // restore live progress
   timers.forEach(t => {
     const pre = preFormatTimerState.find(p => p.id === t.id);
@@ -1437,7 +1437,7 @@ function commitFormatMode() {
     }
   });
   preFormatTimerState = [];
-
+ 
   renderTimers();
   renderTodos();
   if (calDesktopOpen) calRenderDesktop();
@@ -1445,7 +1445,7 @@ function commitFormatMode() {
   saveToLocal();
   showToast('Format saved ✓');
 }
-
+ 
 function addFormatTimer() {
   if (!formatMode) return;
   const id = formatTimerIdCounter++;
@@ -1455,7 +1455,7 @@ function addFormatTimer() {
   renderTimers();
   saveToLocal();
 }
-
+ 
 function removeFormatTimer(id) {
   if (!formatMode) return;
   if (timers.length <= 1) { showToast('Need at least one timer.'); return; }
@@ -1467,7 +1467,7 @@ function removeFormatTimer(id) {
   renderTimers();
   saveToLocal();
 }
-
+ 
 function addFormatDaily() {
   if (!formatMode) return;
   const id = todoIdCounter++;
@@ -1479,20 +1479,20 @@ function addFormatDaily() {
     if (inp) inp.focus();
   }, 10);
 }
-
+ 
 function removeFormatDaily(id) {
   if (!formatMode) return;
   todoLists = todoLists.filter(l => l.id !== id);
   renderTodos();
   saveToLocal();
 }
-
+ 
 /* ───────────────────────── DAY-BY-DAY TASKS ─────────────────────────
  * Flat, dated one-off tasks under the My Lists tab. Unchecked tasks with a
  * past due date surface in an "Overdue" section; checked past tasks collapse
  * into a dimmed "Completed" group. Groups re-flow automatically at midnight. */
 function dbdTodayKey() { return calDateKey(calToday()); }
-
+ 
 function dbdLabelFor(key) {
   const today = calToday();
   const [y, m, d] = key.split('-').map(Number);
@@ -1505,9 +1505,9 @@ function dbdLabelFor(key) {
   if (date.getFullYear() !== today.getFullYear()) opts.year = 'numeric';
   return date.toLocaleDateString(undefined, opts);
 }
-
+ 
 function dbdById(id) { return dbdTasks.find(t => t.id === id); }
-
+ 
 function addDbdTask(pfx) {
   const textEl = $(`dbdText-${pfx}`);
   const dateEl = $(`dbdDate-${pfx}`);
@@ -1520,7 +1520,7 @@ function addDbdTask(pfx) {
   saveToLocal();
   textEl?.focus();
 }
-
+ 
 function toggleDbdTask(id) {
   const t = dbdById(id);
   if (!t) return;
@@ -1530,18 +1530,18 @@ function toggleDbdTask(id) {
   renderDbd();
   saveToLocal();
 }
-
+ 
 function removeDbdTask(id) {
   dbdTasks = dbdTasks.filter(t => t.id !== id);
   renderDbd();
   saveToLocal();
 }
-
+ 
 function setDbdText(id, value) {
   const t = dbdById(id);
   if (t) { t.text = value; saveToLocal(); }
 }
-
+ 
 function setDbdDue(id, value) {
   const t = dbdById(id);
   if (!t || !value) return;
@@ -1549,7 +1549,7 @@ function setDbdDue(id, value) {
   renderDbd();
   saveToLocal();
 }
-
+ 
 /* ── Tags: every custom list in the Lists section doubles as a tag.
  *    • Tagging a dbd task MOVES it into that list (it stays visible here,
  *      color-coded, because dated list tasks render in Day by Day).
@@ -1563,7 +1563,7 @@ function dbdAllEntries() {
   });
   return out;
 }
-
+ 
 function dbdTagSelectHtml(entry) {
   const cur = entry.kind === 'list' ? String(entry.list.id) : '';
   const opts = [`<option value="">${cur ? 'No tag' : 'Tag'}</option>`]
@@ -1574,7 +1574,7 @@ function dbdTagSelectHtml(entry) {
     : `tagDbdTask(${entry.task.id},this.value)`;
   return `<select class="dbd-tag-select" onchange="${onchange}" title="Tag with a list">${opts.join('')}</select>`;
 }
-
+ 
 // dbd task → list task (keeps text/done/due/doneOn, gets a task-space id).
 function tagDbdTask(dbdId, val) {
   const t = dbdById(dbdId);
@@ -1588,7 +1588,7 @@ function tagDbdTask(dbdId, val) {
   renderDbd();
   saveToLocal();
 }
-
+ 
 // Tagged task → another list, or back to a plain dbd task ('' = No tag).
 function retagListTask(listId, taskId, val) {
   const list = listById(listId);
@@ -1609,7 +1609,7 @@ function retagListTask(listId, taskId, val) {
   renderDbd();
   saveToLocal();
 }
-
+ 
 // Set / clear a date on a list task (from either the list card or a dbd row).
 // A date puts the task in Day by Day; clearing pulls it out (it stays listed).
 function setListTaskDue(listId, taskId, value) {
@@ -1626,7 +1626,7 @@ function setListTaskDue(listId, taskId, value) {
   renderDbd();
   saveToLocal();
 }
-
+ 
 function dbdRowHtml(entry, overdue) {
   const t = entry.task;
   const tagSel = dbdTagSelectHtml(entry);
@@ -1666,17 +1666,17 @@ function dbdRowHtml(entry, overdue) {
       <button class="task-del" onclick="removeDbdTask(${t.id})">×</button>
     </div>`;
 }
-
+ 
 function renderDbd() {
   const todayKey = dbdTodayKey();
   const all = dbdAllEntries();
   const byDue = (a, b) => (a.task.due < b.task.due ? -1 : a.task.due > b.task.due ? 1
     : a.kind === b.kind ? a.task.id - b.task.id : (a.kind === 'dbd' ? -1 : 1));
-
+ 
   const overdue   = all.filter(e => !e.task.done && e.task.due < todayKey).sort(byDue);
   const upcoming  = all.filter(e => e.task.due >= todayKey).sort(byDue);
   const donePast  = all.filter(e => e.task.done && e.task.due < todayKey).sort(byDue);
-
+ 
   // Group upcoming by due-date key, preserving ascending order.
   const groups = [];
   upcoming.forEach(e => {
@@ -1684,7 +1684,7 @@ function renderDbd() {
     if (g && g.key === e.task.due) g.entries.push(e);
     else groups.push({ key: e.task.due, entries: [e] });
   });
-
+ 
   let html = '';
   if (overdue.length) {
     html += `
@@ -1709,14 +1709,14 @@ function renderDbd() {
       </div>`;
   }
   if (!html) html = '<div class="empty-state dbd-empty">No day-by-day tasks yet.<br>Add one above with a due date.</div>';
-
+ 
   ['d','m'].forEach(pfx => {
     const el = $(`dbdContainer-${pfx}`);
     if (el) el.innerHTML = html;
   });
   renderHome();
 }
-
+ 
 /* Midnight rollover: re-flow groups (and default-date inputs) when the day changes. */
 let _dbdDayKey = null;
 function dbdCheckRollover() {
@@ -1727,10 +1727,10 @@ function dbdCheckRollover() {
   renderDbd();
   renderTodos();   // Daily lists' "active today" can change at midnight too
 }
-
+ 
 /* ── Daily-list day-of-week schedule ── */
 let scheduleEditListId = null;
-
+ 
 function openScheduleModal(listId) {
   const list = listById(listId);
   if (!list) return;
@@ -1756,12 +1756,12 @@ function openScheduleModal(listId) {
   updateScheduleHint();
   $('scheduleModal').classList.add('show');
 }
-
+ 
 function scheduleSelectedDays() {
   return Array.from(document.querySelectorAll('#scheduleDowRow .cal-dow-btn.active'))
     .map(b => parseInt(b.dataset.dow));
 }
-
+ 
 function updateScheduleHint() {
   const active = scheduleSelectedDays();
   const hint = $('scheduleHint');
@@ -1769,14 +1769,14 @@ function updateScheduleHint() {
   else if (active.length === 7) hint.textContent = 'Shows every day.';
   else hint.textContent = 'Shows on: ' + active.sort((a,b)=>a-b).map(d => CAL_DOW[d]).join(', ');
 }
-
+ 
 function scheduleEveryDay() {
   // Under the new semantics, zero selected = hidden — so "every day" must
   // SELECT all seven buttons (saveSchedule normalizes 7/7 back to null).
   document.querySelectorAll('#scheduleDowRow .cal-dow-btn').forEach(b => b.classList.add('active'));
   updateScheduleHint();
 }
-
+ 
 function saveSchedule() {
   const list = listById(scheduleEditListId);
   if (!list) { closeModal('scheduleModal'); return; }
@@ -1792,7 +1792,7 @@ function saveSchedule() {
   saveToLocal();
   showToast('Schedule saved ✓');
 }
-
+ 
 /* ───────────────────────── EXPORT / IMPORT / RESET ───────────────────────── */
 function openExportModal() {
   $('exportTextarea').value = JSON.stringify(compressState(gatherState()));
@@ -1803,7 +1803,7 @@ function openImportModal() {
   $('importModal').classList.add('show');
 }
 function closeModal(id) { $(id).classList.remove('show'); }
-
+ 
 function exportCopy() {
   navigator.clipboard.writeText($('exportTextarea').value)
     .then(() => { showToast('Copied to clipboard ✓'); closeModal('exportModal'); })
@@ -1841,7 +1841,7 @@ function loadStateFile(input) {
   reader.readAsText(file);
   input.value = '';
 }
-
+ 
 function resetAll() {
   closeModal('confirmOverlay');
   timers.forEach((t, i) => {
@@ -1863,7 +1863,7 @@ function resetAll() {
   saveToLocal();
   showToast('Reset ✓');
 }
-
+ 
 function confirmClearStorage() {
   if (confirm('Clear all saved data and reset to defaults? This cannot be undone.')) {
     localStorage.clear();
@@ -1871,17 +1871,17 @@ function confirmClearStorage() {
     setTimeout(() => location.reload(), 600);
   }
 }
-
+ 
 /* ───────────────────────── HOME PAGE ─────────────────────────
  * Read-mostly dashboard assembled from existing state. All interactions
  * delegate to existing functions (toggleDbdTask / toggleTask), and existing
  * live-update hooks keep it fresh: tickAll drives .tdisp-N timer text, and
  * paintTaskState drives .task-checks-N / .task-text-N on starred lists. */
 let homeDesktopOpen = false;
-
+ 
 const HOME_CHECK_SVG = `<svg width="9" height="9" viewBox="0 0 9 9" fill="none">
   <path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-
+ 
 function homeToggleDesktop(force) {
   const want = (typeof force === 'boolean') ? force : !homeDesktopOpen;
   if (want && calDesktopOpen) calToggleDesktop();   // close calendar overlay first
@@ -1895,7 +1895,7 @@ function homeToggleDesktop(force) {
   if (rp)    rp.style.display = homeDesktopOpen ? 'none' : '';
   if (homeDesktopOpen) renderHome();
 }
-
+ 
 function renderHome() {
   const dc = $('homeContainer-d');
   const mc = $('homeContainer-m');
@@ -1910,7 +1910,7 @@ function renderHome() {
   if (dc) dc.innerHTML = html;
   if (mc) mc.innerHTML = html;
 }
-
+ 
 /* ── daily progress: starred Daily tasks + dbd tasks due today / overdue.
  *    A done dbd task counts only if it's due today OR was checked off today
  *    (doneOn), so clearing an overdue task fills the bar instead of shrinking
@@ -1935,7 +1935,7 @@ function homeProgressData() {
   });
   return { total, done, pct: total ? Math.round(done / total * 100) : 0 };
 }
-
+ 
 function homeProgressHtml() {
   const { total, done, pct } = homeProgressData();
   if (!total) return '';
@@ -1952,7 +1952,7 @@ function homeProgressHtml() {
       </div>
     </div>`;
 }
-
+ 
 /* Patch the bar in place (no full re-render) — used by toggleTask, which
  * paints task state via classes instead of re-rendering the Home page. */
 function homeUpdateProgressDom() {
@@ -1971,7 +1971,7 @@ function homeUpdateProgressDom() {
     if (pc)   pc.textContent = pct + '%';
   });
 }
-
+ 
 /* ── hero ── */
 function homeHeroHtml() {
   const dateStr = new Date().toLocaleDateString(undefined,
@@ -1992,7 +1992,7 @@ function homeHeroHtml() {
       ${homeProgressHtml()}
     </div>`;
 }
-
+ 
 /* ── day-by-day: overdue (red) + today (white) + next 3 upcoming (grey) ── */
 function homeDbdRow(entry, tone) {
   const t = entry.task;
@@ -2014,7 +2014,7 @@ function homeDbdRow(entry, tone) {
       ${dateChip}
     </div>`;
 }
-
+ 
 function homeDbdHtml() {
   const todayKey = dbdTodayKey();
   const all = dbdAllEntries();
@@ -2037,7 +2037,7 @@ function homeDbdHtml() {
       </div>
     </section>`;
 }
-
+ 
 /* ── starred lists (daily=true → Daily lists; false → custom Lists) ── */
 function homeListCard(list) {
   const rows = list.tasks.map(task => {
@@ -2061,7 +2061,7 @@ function homeListCard(list) {
       <div class="home-list-tasks">${rows || '<div class="home-muted-note">No tasks</div>'}</div>
     </div>`;
 }
-
+ 
 function homeStarredListsHtml(daily) {
   const lists = todoLists.filter(l => !!l.isDefault === daily && l.starred);
   if (!lists.length) return '';
@@ -2072,7 +2072,7 @@ function homeStarredListsHtml(daily) {
       <div class="home-lists-grid">${lists.map(homeListCard).join('')}</div>
     </section>`;
 }
-
+ 
 /* ── timers: compact remaining-time chips (tickAll keeps .tdisp-N live) ── */
 function homeTimersHtml() {
   if (!viewEnabled('timers')) return '';   // the one Home section that follows its toggle
@@ -2089,13 +2089,13 @@ function homeTimersHtml() {
       <div class="home-timer-row">${chips}</div>
     </section>`;
 }
-
+ 
 /* ── calendar: agenda of events overlapping [now, now + 4h] ── */
 function homeCalTime(mins) {
   const wrapped = ((mins % 1440) + 1440) % 1440;
   return calFmtTime(calMinsToStr(wrapped));
 }
-
+ 
 function homeCalHtml() {
   const now = new Date();
   const nowMins = now.getHours() * 60 + now.getMinutes();
@@ -2103,7 +2103,7 @@ function homeCalHtml() {
   const todayKey = calDateKey(calToday());
   const tmr = new Date(calToday()); tmr.setDate(tmr.getDate() + 1);
   const tomorrowKey = calDateKey(tmr);
-
+ 
   const collect = (dateKey, offset) => {
     const local = (calEvents[dateKey] || []).filter(e => e.type !== 'divider');
     const goog  = (gcalIsConnected() ? (gcalEvents[dateKey] || []) : []).filter(e => !e.allDay);
@@ -2117,7 +2117,7 @@ function homeCalHtml() {
   if (winEnd > 1440) evs = evs.concat(collect(tomorrowKey, 1440));
   evs = evs.filter(ev => ev.e > nowMins && ev.s < winEnd)
            .sort((a, b) => a.s - b.s || a.e - b.e);
-
+ 
   const items = evs.map(ev => {
     const ongoing  = ev.s <= nowMins;
     const startsIn = ev.s - nowMins;
@@ -2138,7 +2138,7 @@ function homeCalHtml() {
         ${badge}
       </div>`;
   }).join('');
-
+ 
   const empty = `<div class="home-muted-note">Nothing on the calendar until ${homeCalTime(winEnd)}.</div>`;
   return `
     <section class="home-section">
@@ -2146,7 +2146,7 @@ function homeCalHtml() {
       <div class="home-card home-cal-card">${items || empty}</div>
     </section>`;
 }
-
+ 
 /* ───────────────────────── VIEWS + MOBILE TABS ─────────────────────────
  * A disabled view disappears from the tab bar (mobile) and the left nav /
  * right panel (desktop). Nothing about its data or behaviour changes — the
@@ -2171,7 +2171,7 @@ function viewEnabled(key) {
   return views[key] !== false;
 }
 function visibleViews() { return VIEW_DEFS.filter(v => viewEnabled(v.key)); }
-
+ 
 /* Show/hide every element tagged with data-view, close any desktop overlay
  * whose view was just disabled, and rebuild the mobile tab strip. */
 function applyViewVisibility() {
@@ -2185,7 +2185,7 @@ function applyViewVisibility() {
   setSwipePanelWidths();
   renderHome();
 }
-
+ 
 function setSwipePanelWidths() {
   const w = window.innerWidth;
   const track = $('swipeTrack');
@@ -2208,7 +2208,7 @@ function setSwipePanelWidths() {
   }
   currentTab = idx;
 }
-
+ 
 /* Accepts a view key ('budget') or a legacy numeric index. */
 function goTab(target, animate) {
   let key = (typeof target === 'number') ? (VIEW_DEFS[target] || {}).key : target;
@@ -2230,7 +2230,7 @@ function goTab(target, animate) {
   if (key === 'home')     renderHome();
   if (key === 'budget')   renderBudget();
 }
-
+ 
 /* Total-balance chip on Home opens Budget on whichever layout is active. */
 function openBudgetTab() {
   if (!viewEnabled('budget')) return;
@@ -2238,7 +2238,7 @@ function openBudgetTab() {
   if (mobile) goTab('budget', true);
   else budgetToggleDesktop(true);
 }
-
+ 
 /* ── Settings ── */
 function renderSettings() {
   const list = $('settingsViewList');
@@ -2264,7 +2264,7 @@ function renderSettings() {
   }
   gcalUpdateBtn();
 }
-
+ 
 function setViewEnabled(key, on) {
   if (key === 'home') return;
   views[key] = !!on;
@@ -2272,17 +2272,17 @@ function setViewEnabled(key, on) {
   applyViewVisibility();
   renderSettings();
 }
-
+ 
 function openSettings() {
   renderSettings();
   $('settingsModal').classList.add('show');
 }
-
+ 
 function initSwipe() {
   const swipeEl = $('swipeContainer');
   if (!swipeEl) return;
   let sx = 0, sy = 0, swiping = false;
-
+ 
   swipeEl.addEventListener('touchstart', e => {
     const t = e.target;
     if (t.tagName === 'INPUT' || t.tagName === 'BUTTON' || t.tagName === 'SELECT'
@@ -2293,14 +2293,14 @@ function initSwipe() {
     sy = e.touches[0].clientY;
     swiping = false;
   }, { passive: true });
-
+ 
   swipeEl.addEventListener('touchmove', e => {
     if (!sx) return;
     const dx = e.touches[0].clientX - sx;
     const dy = e.touches[0].clientY - sy;
     if (!swiping && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) swiping = true;
   }, { passive: true });
-
+ 
   swipeEl.addEventListener('touchend', e => {
     if (!swiping) { sx = 0; return; }
     const dx = e.changedTouches[0].clientX - sx;
@@ -2314,7 +2314,7 @@ function initSwipe() {
     sx = 0; swiping = false;
   }, { passive: true });
 }
-
+ 
 /* ───────────────────────── CALENDAR ───────────────────────── */
 function calEnsureDay(key) {
   if (!calEvents[key]) {
@@ -2324,12 +2324,12 @@ function calEnsureDay(key) {
       .map(t => ({ ...t, id: calEventIdCtr++, fromTemplate: true, templateId: t.id }));
   }
 }
-
+ 
 function calPruneDays() {
   const keys = new Set(calDisplayDays().map(calDateKey));
   Object.keys(calEvents).forEach(k => { if (!keys.has(k)) delete calEvents[k]; });
 }
-
+ 
 function calBuildTimeCol(el) {
   el.style.height = CAL_TOTAL_PX + 'px';
   el.innerHTML = '';
@@ -2342,7 +2342,7 @@ function calBuildTimeCol(el) {
     el.appendChild(lbl);
   }
 }
-
+ 
 function calBuildLines(col) {
   col.style.height = CAL_TOTAL_PX + 'px';
   for (let h = 0; h < 24; h++) {
@@ -2362,7 +2362,7 @@ function calBuildLines(col) {
     });
   }
 }
-
+ 
 function calBuildNowLine(col) {
   col.querySelector('.cal-now-line')?.remove();
   const now = new Date();
@@ -2375,7 +2375,7 @@ function calBuildNowLine(col) {
   wrap.appendChild(dot);
   col.appendChild(wrap);
 }
-
+ 
 /* ── event element ── */
 function calMakeEventEl(ev, dateKeyOrDow, isFmtMode) {
   const el = document.createElement('div');
@@ -2419,14 +2419,14 @@ function calMakeEventEl(ev, dateKeyOrDow, isFmtMode) {
   bindCalEventDrag(el, ev, dateKeyOrDow, isFmtMode);
   return el;
 }
-
+ 
 /* ── calendar event drag (unified engine) ── */
 function calScrollContainer() {
   const desk = $('calScrollArea');
   if (desk && calDesktopOpen) return desk;
   return $('calMobileGrid');
 }
-
+ 
 function bindCalEventDrag(el, ev, dateKeyOrDow, isFmtMode) {
   makeDrag(el, {
     source: () => el,
@@ -2444,7 +2444,7 @@ function bindCalEventDrag(el, ev, dateKeyOrDow, isFmtMode) {
       if (!hit) return;
       const col = hit.closest('.cal-day-col, .cal-mobile-day-col');
       if (!col) return;
-
+ 
       // grab offset within the event so the drop lands where it visually sits
       const ghostTop = ghost ? parseFloat(ghost.style.top) : y;
       const colRect  = col.getBoundingClientRect();
@@ -2452,7 +2452,7 @@ function bindCalEventDrag(el, ev, dateKeyOrDow, isFmtMode) {
       const sc = col.closest('.cal-scroll-area, .cal-grid-wrap');
       const scrollAdj = 0; // colRect already reflects scroll position
       const mins = calPxToMins(localY + scrollAdj);
-
+ 
       if (isFmtMode || formatMode) {
         const toDow = parseInt(col.dataset.dow);
         if (isNaN(toDow)) return;
@@ -2465,7 +2465,7 @@ function bindCalEventDrag(el, ev, dateKeyOrDow, isFmtMode) {
     },
   });
 }
-
+ 
 function calMoveEvent(evId, fromKey, toKey, newStartMins) {
   const list = calEvents[fromKey] || [];
   const ev = list.find(e => e.id === evId);
@@ -2483,7 +2483,7 @@ function calMoveEvent(evId, fromKey, toKey, newStartMins) {
   calRefresh();
   calSave();
 }
-
+ 
 function calMoveTemplate(tmplId, fromDow, toDow, newStartMins) {
   const tmpl = calTemplates.find(t => t.id === tmplId);
   if (!tmpl) return;
@@ -2499,7 +2499,7 @@ function calMoveTemplate(tmplId, fromDow, toDow, newStartMins) {
   calRefresh();
   calSave();
 }
-
+ 
 function reseedTemplate(tmpl) {
   calDisplayDays().forEach(day => {
     const key = calDateKey(day);
@@ -2511,7 +2511,7 @@ function reseedTemplate(tmpl) {
     }
   });
 }
-
+ 
 /* ── day column renders ── */
 function calRenderDayCol(col, dateKey) {
   col.querySelectorAll('.cal-event,.cal-divider,.cal-now-line').forEach(e => e.remove());
@@ -2527,7 +2527,7 @@ function calRenderDayCol(col, dateKey) {
     openCalModal(dateKey, null, calMinsToStr(calPxToMins(e.clientY - rect.top)));
   };
 }
-
+ 
 function calRenderFmtCol(col, dow) {
   col.querySelectorAll('.cal-event,.cal-divider').forEach(e => e.remove());
   calTemplates
@@ -2539,7 +2539,7 @@ function calRenderFmtCol(col, dow) {
     openCalModalFmt(dow, null, calMinsToStr(calPxToMins(e.clientY - rect.top)));
   };
 }
-
+ 
 /* ── color-group filter bar (events only — dividers are exempt) ── */
 function calVisibleColorSet() {
   const colors = new Set();
@@ -2557,7 +2557,7 @@ function calVisibleColorSet() {
   });
   return colors;
 }
-
+ 
 function calRenderColorFilter(el) {
   if (!el) return;
   el.innerHTML = '';
@@ -2583,32 +2583,32 @@ function calRenderColorFilter(el) {
     el.appendChild(chip);
   });
 }
-
+ 
 /* ── desktop render ── */
 function calRenderDesktop() {
   if (formatMode) { calRenderDesktopFmt(); return; }
   const days = calDisplayDays();
   calPruneDays();
-
+ 
   const titleEl = $('calDesktopTitle');
   if (titleEl) titleEl.textContent = calFmtFull(calToday());
   calRenderColorFilter($('calColorFilter-d'));
-
+ 
   const daysEl = $('calDesktopDays');
   const gridEl = $('calDesktopGrid');
   const timeEl = $('calTimeCol');
   if (!daysEl || !gridEl || !timeEl) return;
-
+ 
   daysEl.style.gridTemplateColumns = 'repeat(7,1fr)';
   daysEl.innerHTML = '';
   gridEl.style.gridTemplateColumns = 'repeat(7,1fr)';
   gridEl.innerHTML = '';
   calBuildTimeCol(timeEl);
-
+ 
   days.forEach(day => {
     const key = calDateKey(day);
     const isToday = key === calDateKey(calToday());
-
+ 
     const hdr = document.createElement('div');
     hdr.className = 'cal-day-header' + (isToday ? ' today' : '');
     const hName = document.createElement('div');
@@ -2619,7 +2619,7 @@ function calRenderDesktop() {
     hdr.appendChild(hName);
     hdr.appendChild(hDate);
     daysEl.appendChild(hdr);
-
+ 
     const col = document.createElement('div');
     col.className = 'cal-day-col' + (isToday ? ' today-col' : '');
     col.dataset.dateKey = key;
@@ -2627,29 +2627,29 @@ function calRenderDesktop() {
     calRenderDayCol(col, key);
     gridEl.appendChild(col);
   });
-
+ 
   gridEl.style.height = CAL_TOTAL_PX + 'px';
   const sc = $('calScrollArea');
   setTimeout(() => { if (sc) sc.scrollTop = 7 * CAL_HOUR_PX; }, 50);
 }
-
+ 
 function calRenderDesktopFmt() {
   const titleEl = $('calDesktopTitle');
   if (titleEl) titleEl.textContent = 'Template week — Sun through Sat';
   const filtD = $('calColorFilter-d');
   if (filtD) filtD.style.display = 'none';
-
+ 
   const daysEl = $('calDesktopDays');
   const gridEl = $('calDesktopGrid');
   const timeEl = $('calTimeCol');
   if (!daysEl || !gridEl || !timeEl) return;
-
+ 
   daysEl.style.gridTemplateColumns = 'repeat(7,1fr)';
   daysEl.innerHTML = '';
   gridEl.style.gridTemplateColumns = 'repeat(7,1fr)';
   gridEl.innerHTML = '';
   calBuildTimeCol(timeEl);
-
+ 
   CAL_DOW.forEach((name, dow) => {
     const hdr = document.createElement('div');
     hdr.className = 'cal-day-header';
@@ -2657,7 +2657,7 @@ function calRenderDesktopFmt() {
     hName.textContent = name;
     hdr.appendChild(hName);
     daysEl.appendChild(hdr);
-
+ 
     const col = document.createElement('div');
     col.className = 'cal-day-col cal-fmt-col';
     col.dataset.dow = dow;
@@ -2665,12 +2665,12 @@ function calRenderDesktopFmt() {
     calRenderFmtCol(col, dow);
     gridEl.appendChild(col);
   });
-
+ 
   gridEl.style.height = CAL_TOTAL_PX + 'px';
   const sc = $('calScrollArea');
   setTimeout(() => { if (sc) sc.scrollTop = 7 * CAL_HOUR_PX; }, 50);
 }
-
+ 
 /* ── mobile render ── */
 function calRenderMobile() {
   if (formatMode) { calRenderMobileFmt(); return; }
@@ -2678,66 +2678,66 @@ function calRenderMobile() {
   const days = calDisplayDays();
   const day = days[Math.min(calMobileDay, days.length - 1)];
   const key = calDateKey(day);
-
+ 
   const titleEl = $('calDayTitle');
   if (titleEl) titleEl.textContent = calFmtFull(day);
   calRenderColorFilter($('calColorFilter-m'));
-
+ 
   const gridEl = $('calMobileGrid');
   if (!gridEl) return;
   gridEl.innerHTML = '';
-
+ 
   const body = document.createElement('div');
   body.className = 'cal-mobile-body';
   body.style.width = '100%';
-
+ 
   const timeCol = document.createElement('div');
   timeCol.className = 'cal-mobile-time-col';
   calBuildTimeCol(timeCol);
-
+ 
   const dayCol = document.createElement('div');
   dayCol.className = 'cal-mobile-day-col';
   dayCol.dataset.dateKey = key;
   calBuildLines(dayCol);
   calRenderDayCol(dayCol, key);
-
+ 
   body.appendChild(timeCol);
   body.appendChild(dayCol);
   gridEl.appendChild(body);
   setTimeout(() => { gridEl.scrollTop = 7 * CAL_HOUR_PX; }, 50);
 }
-
+ 
 function calRenderMobileFmt() {
   const dow = calFmtMobileDay;
   const titleEl = $('calDayTitle');
   if (titleEl) titleEl.textContent = `Template: ${CAL_DOW[dow]}`;
   const filtM = $('calColorFilter-m');
   if (filtM) filtM.style.display = 'none';
-
+ 
   const gridEl = $('calMobileGrid');
   if (!gridEl) return;
   gridEl.innerHTML = '';
-
+ 
   const body = document.createElement('div');
   body.className = 'cal-mobile-body';
   body.style.width = '100%';
-
+ 
   const timeCol = document.createElement('div');
   timeCol.className = 'cal-mobile-time-col';
   calBuildTimeCol(timeCol);
-
+ 
   const dayCol = document.createElement('div');
   dayCol.className = 'cal-mobile-day-col cal-fmt-col';
   dayCol.dataset.dow = dow;
   calBuildLines(dayCol);
   calRenderFmtCol(dayCol, dow);
-
+ 
   body.appendChild(timeCol);
   body.appendChild(dayCol);
   gridEl.appendChild(body);
   setTimeout(() => { gridEl.scrollTop = 7 * CAL_HOUR_PX; }, 50);
 }
-
+ 
 function calNavDay(dir) {
   if (formatMode) {
     calFmtMobileDay = Math.max(0, Math.min(6, calFmtMobileDay + dir));
@@ -2747,7 +2747,7 @@ function calNavDay(dir) {
     calRenderMobile();
   }
 }
-
+ 
 function calToggleDesktop() {
   if (!calDesktopOpen && homeDesktopOpen) homeToggleDesktop(false);
   if (!calDesktopOpen && budgetDesktopOpen) budgetToggleDesktop(false);
@@ -2762,21 +2762,21 @@ function calToggleDesktop() {
   if (weekBtn) weekBtn.classList.toggle('shown', calDesktopOpen);
   if (calDesktopOpen) calRenderDesktop();
 }
-
+ 
 function calToggleWeekMode() {
   calWeekMode = calWeekMode === 'rolling' ? 'fixed' : 'rolling';
   const btn = $('calWeekModeBtn');
   if (btn) btn.textContent = calWeekMode === 'fixed' ? 'Rolling week' : 'Sun – Sat';
   if (calDesktopOpen) calRenderDesktop();
 }
-
+ 
 function calRefresh() {
   if (calDesktopOpen) calRenderDesktop();
   if (document.querySelector('.mobile-app') && getComputedStyle($('mobileApp')).display !== 'none') {
     calRenderMobile();
   }
 }
-
+ 
 function calTickNow() {
   if (!formatMode) {
     document.querySelectorAll('.cal-day-col, .cal-mobile-day-col').forEach(col => {
@@ -2785,7 +2785,7 @@ function calTickNow() {
   }
   setTimeout(calTickNow, 60000);
 }
-
+ 
 /* ── EVENT MODAL — state fully re-initialized on every open ── */
 function renderColorSwatches() {
   const swatchEl = $('calColorSwatches');
@@ -2802,18 +2802,18 @@ function renderColorSwatches() {
     swatchEl.appendChild(dot);
   });
 }
-
+ 
 function setCalEventType(type) {
   calEditType = type;
   $('calTypeEvent').classList.toggle('active', type === 'event');
   $('calTypeDivider').classList.toggle('active', type === 'divider');
   $('calEventEndField').style.visibility = type === 'divider' ? 'hidden' : 'visible';
 }
-
+ 
 function _initCalModal({ isFmt, existingEv, defaultStart }) {
   // 1. type — always re-set
   setCalEventType(existingEv ? (existingEv.type || 'event') : 'event');
-
+ 
   // 2. fields — always re-set
   if (existingEv) {
     $('calEventTitle').value = existingEv.title || '';
@@ -2828,10 +2828,10 @@ function _initCalModal({ isFmt, existingEv, defaultStart }) {
       : '10:00';
     calSelectedColor = CAL_COLORS[0];
   }
-
+ 
   // 3. swatches — rebuilt with current selection
   renderColorSwatches();
-
+ 
   // 4. dow repeat row (format mode only)
   const dowRow = $('calDowRow');
   dowRow.classList.toggle('shown', isFmt);
@@ -2852,13 +2852,13 @@ function _initCalModal({ isFmt, existingEv, defaultStart }) {
       dowRow.appendChild(btn);
     });
   }
-
+ 
   // 5. title + buttons
   $('calEventModalTitle').textContent = existingEv
     ? (isFmt ? 'Edit template' : 'Edit event')
     : (isFmt ? 'Add template'  : 'Add event');
   $('calEventDeleteBtn').classList.toggle('shown', !!existingEv);
-
+ 
   const sendBtn = $('calSendToGcalBtn');
   const showSend = !!existingEv && gcalIsConnected() && !isFmt
     && (existingEv.type || 'event') !== 'divider' && !existingEv.gcalId;
@@ -2866,11 +2866,11 @@ function _initCalModal({ isFmt, existingEv, defaultStart }) {
   sendBtn.textContent = 'Send to Google Calendar';
   sendBtn.disabled = false;
   sendBtn.style.color = '';
-
+ 
   $('calEventModal').classList.add('show');
   setTimeout(() => $('calEventTitle').focus(), 60);
 }
-
+ 
 function openCalModal(dateKey, evId, defaultStart) {
   if (gcalIsConnected()) gcalReconcileDay(dateKey, Object.keys(gcalEvents).length > 0);
   calEditDate = dateKey;
@@ -2879,7 +2879,7 @@ function openCalModal(dateKey, evId, defaultStart) {
   const existingEv = (calEvents[dateKey] || []).find(e => e.id === evId) || null;
   _initCalModal({ isFmt: false, existingEv, defaultStart });
 }
-
+ 
 function openCalModalFmt(dow, evId, defaultStart) {
   calEditDow  = dow;
   calEditDate = null;
@@ -2889,25 +2889,25 @@ function openCalModalFmt(dow, evId, defaultStart) {
     : null;
   _initCalModal({ isFmt: true, existingEv: existingTmpl, defaultStart });
 }
-
+ 
 function closeCalModal() {
   $('calEventModal').classList.remove('show');
   calEditId = null;
   calEditDate = null;
   calEditDow = null;
 }
-
+ 
 /* ── save / delete (GCal hooks integrated) ── */
 async function saveCalEvent() {
   const title = $('calEventTitle').value.trim();
   const start = $('calEventStart').value || '09:00';
   const end   = calEditType === 'divider' ? start : ($('calEventEnd').value || '10:00');
-
+ 
   const wasNew  = (calEditId === null || calEditId === undefined);
   const dateKey = calEditDate;
   const oldEvId = calEditId;
   const isFmt   = (calEditDow !== null) || (formatMode && calEditDate === null);
-
+ 
   if (isFmt) {
     /* template save */
     const dowBtns = document.querySelectorAll('#calDowRow .cal-dow-btn.active');
@@ -2946,12 +2946,12 @@ async function saveCalEvent() {
       });
     }
   }
-
+ 
   closeCalModal();
   calRefresh();
   calSave();
   saveToLocal();
-
+ 
   /* GCal push (user mode, non-divider only) */
   if (!isFmt && gcalIsConnected() && dateKey) {
     const ev = wasNew
@@ -2971,7 +2971,7 @@ async function saveCalEvent() {
     }
   }
 }
-
+ 
 async function deleteCalEvent() {
   let removedEv = null;
   if (calEditDow !== null) {
@@ -2987,24 +2987,24 @@ async function deleteCalEvent() {
   calRefresh();
   calSave();
   saveToLocal();
-
+ 
   if (removedEv?.gcalId && removedEv?.gcalCalId && gcalIsConnected()) {
     await gcalDeleteEvent(removedEv.gcalId, removedEv.gcalCalId);
     await gcalSyncAll();
   }
 }
-
+ 
 async function calSendToGcal() {
   if (!gcalIsConnected() || !calEditDate || calEditId === null) return;
   const ev = (calEvents[calEditDate] || []).find(e => e.id === calEditId);
   if (!ev || ev.type === 'divider' || ev.gcalId) return;
   const calId = gcalCalendars.find(c => c.enabled)?.id;
   if (!calId) { showToast('No Google Calendar enabled.'); return; }
-
+ 
   const btn = $('calSendToGcalBtn');
   btn.textContent = 'Sending…';
   btn.disabled = true;
-
+ 
   const gcalId = await gcalPushEvent(ev, calEditDate, calId);
   if (gcalId) {
     ev.gcalId = gcalId;
@@ -3019,7 +3019,7 @@ async function calSendToGcal() {
     btn.disabled = false;
   }
 }
-
+ 
 /* ───────────────────────── GOOGLE CALENDAR ───────────────────────── */
 function gcalSaveToken(t) {
   gcalToken = t;
@@ -3044,7 +3044,7 @@ function gcalLoadCals() {
   } catch(e) {}
 }
 function gcalIsConnected() { return !!(gcalToken && Date.now() < gcalToken.expires_at); }
-
+ 
 function gcalConnect() {
   const params = new URLSearchParams({
     client_id:     GCAL_CLIENT_ID,
@@ -3062,7 +3062,7 @@ function gcalConnect() {
     `width=${w},height=${h},left=${left},top=${top},toolbar=no,menubar=no`
   );
 }
-
+ 
 function gcalHandleRedirect() {
   const hash = window.location.hash.slice(1);
   if (!hash.includes('access_token')) return;
@@ -3075,7 +3075,7 @@ function gcalHandleRedirect() {
   history.replaceState(null, '', window.location.pathname);
   gcalAfterConnect();
 }
-
+ 
 async function gcalAfterConnect() {
   gcalUpdateBtn();
   showToast('Google Calendar connected ✓');
@@ -3083,7 +3083,7 @@ async function gcalAfterConnect() {
   gcalOpenModal();
   await gcalSyncAll();
 }
-
+ 
 async function gcalFetchCalendars() {
   if (!gcalIsConnected()) return;
   try {
@@ -3104,19 +3104,19 @@ async function gcalFetchCalendars() {
     gcalRenderCalList();
   } catch(e) { showToast('Could not fetch calendars.'); }
 }
-
+ 
 async function gcalSyncAll() {
   if (!gcalIsConnected() || gcalSyncing) return;
   gcalSyncing = true;
   gcalUpdateSyncBtn();
-
+ 
   const days = calDisplayDays();
   const timeMin = new Date(days[0]); timeMin.setHours(0,0,0,0);
   const timeMax = new Date(days[days.length-1]); timeMax.setHours(23,59,59,999);
   const enabledCals = gcalCalendars.filter(c => c.enabled);
-
+ 
   gcalEvents = {};
-
+ 
   try {
     await Promise.all(enabledCals.map(async cal => {
       const params = new URLSearchParams({
@@ -3134,7 +3134,7 @@ async function gcalSyncAll() {
       if (!data.items) return;
       data.items.forEach(ev => {
         if (!ev.start) return;
-
+ 
         /* parse in LOCAL timezone (UTC slicing caused mismatches) */
         let localDateKey, startLocal, endLocal, allDay;
         if (ev.start.dateTime) {
@@ -3151,7 +3151,7 @@ async function gcalSyncAll() {
           allDay = true;
         }
         if (!localDateKey) return;
-
+ 
         if (!gcalEvents[localDateKey]) gcalEvents[localDateKey] = [];
         gcalEvents[localDateKey].push({
           gcalId:   ev.id,
@@ -3168,14 +3168,14 @@ async function gcalSyncAll() {
       });
     }));
   } catch(e) { showToast('Sync error — check connection.'); }
-
+ 
   gcalSyncing = false;
   gcalUpdateSyncBtn();
   gcalReconcile();
   calRefresh();
   calSave();
 }
-
+ 
 /* ── reconcile: derive sync status purely from title+start+end matching ── */
 function gcalReconcileDay(dateKey, canClear) {
   const localEvs = calEvents[dateKey] || [];
@@ -3200,13 +3200,13 @@ function gcalReconcileDay(dateKey, canClear) {
     }
   });
 }
-
+ 
 function gcalReconcile() {
   const canClear = Object.keys(gcalEvents).length > 0;
   calDisplayDays().map(calDateKey).forEach(k => gcalReconcileDay(k, canClear));
   calSave();
 }
-
+ 
 /* ── push / update / delete ── */
 async function gcalPushEvent(ev, dateKey, calId) {
   if (!gcalIsConnected()) return null;
@@ -3227,7 +3227,7 @@ async function gcalPushEvent(ev, dateKey, calId) {
     return data.id || null;
   } catch(e) { showToast('Could not push event to GCal.'); return null; }
 }
-
+ 
 async function gcalUpdateEvent(gcalId, calId, ev, dateKey) {
   if (!gcalIsConnected() || !gcalId) return;
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -3245,7 +3245,7 @@ async function gcalUpdateEvent(gcalId, calId, ev, dateKey) {
     );
   } catch(e) { showToast('Could not update GCal event.'); }
 }
-
+ 
 async function gcalDeleteEvent(gcalId, calId) {
   if (!gcalIsConnected() || !gcalId) return false;
   try {
@@ -3257,7 +3257,7 @@ async function gcalDeleteEvent(gcalId, calId) {
     return res.ok || res.status === 404 || res.status === 410;
   } catch(e) { return false; }
 }
-
+ 
 function gcalDisconnect() {
   gcalToken = null;
   gcalEvents = {};
@@ -3267,7 +3267,7 @@ function gcalDisconnect() {
   calRefresh();
   showToast('Disconnected from Google Calendar');
 }
-
+ 
 /* ── GCal events on the grid (read-only, right half of column) ── */
 function gcalMakeEventEl(ev) {
   const el = document.createElement('div');
@@ -3281,7 +3281,7 @@ function gcalMakeEventEl(ev) {
   el.style.borderLeft = `3px solid ${ev.color}`;
   el.style.color      = ev.color;
   el.style.touchAction = 'auto';   // not draggable
-
+ 
   const t = document.createElement('div');
   t.style.cssText = 'font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
   t.textContent = ev.title;
@@ -3291,11 +3291,11 @@ function gcalMakeEventEl(ev) {
   badge.textContent = ev.calName;
   el.appendChild(t);
   el.appendChild(badge);
-
+ 
   el.addEventListener('click', e => { e.stopPropagation(); gcalOpenEventDetail(ev); });
   return el;
 }
-
+ 
 function gcalInjectEvents(col, dateKey) {
   col.querySelectorAll('.gcal-event').forEach(e => e.remove());
   if (!gcalIsConnected()) return;
@@ -3303,7 +3303,7 @@ function gcalInjectEvents(col, dateKey) {
     if (!ev.allDay && !calColorHidden(ev.color)) col.appendChild(gcalMakeEventEl(ev));
   });
 }
-
+ 
 /* ── GCal detail modal ── */
 function gcalOpenEventDetail(ev) {
   const modal = $('gcalDetailModal');
@@ -3315,7 +3315,7 @@ function gcalOpenEventDetail(ev) {
   modal.dataset.gcalId = ev.gcalId;
   modal.dataset.calId  = ev.calId;
   modal._gcalEv = ev;
-
+ 
   const syncBtn = $('gcalSyncToAppBtn');
   const alreadyLocal = !ev.allDay && calDisplayDays().some(day => {
     const key = calDateKey(day);
@@ -3324,27 +3324,27 @@ function gcalOpenEventDetail(ev) {
   syncBtn.classList.toggle('shown', !ev.allDay && !alreadyLocal);
   syncBtn.textContent = 'Sync to app';
   syncBtn.disabled = false;
-
+ 
   // Delete is available for any real GCal event while connected.
   const delBtn = $('gcalDetailDeleteBtn');
   delBtn.classList.toggle('shown', gcalIsConnected() && !!ev.gcalId);
   delBtn.textContent = 'Delete from Google Calendar';
   delBtn.disabled = false;
-
+ 
   modal.classList.add('show');
 }
-
+ 
 function gcalSyncToApp() {
   const modal = $('gcalDetailModal');
   const ev = modal._gcalEv;
   if (!ev || ev.allDay) return;
-
+ 
   let foundKey = null;
   Object.entries(gcalEvents).forEach(([k, evs]) => {
     if (evs.some(e => e.gcalId === ev.gcalId)) foundKey = k;
   });
   if (!foundKey) { showToast('Could not find event date.'); return; }
-
+ 
   calEnsureDay(foundKey);
   calEvents[foundKey].push({
     id: calEventIdCtr++,
@@ -3355,28 +3355,28 @@ function gcalSyncToApp() {
   calSave();
   saveToLocal();
   calRefresh();
-
+ 
   const syncBtn = $('gcalSyncToAppBtn');
   syncBtn.textContent = '✓ Synced!';
   syncBtn.disabled = true;
   setTimeout(() => closeModal('gcalDetailModal'), 1000);
   showToast('Event added to app ✓');
 }
-
+ 
 async function gcalDeleteFromDetail() {
   const modal = $('gcalDetailModal');
   const gcalId = modal.dataset.gcalId;
   const calId  = modal.dataset.calId;
   if (!gcalId || !calId) return;
-
+ 
   const ev = modal._gcalEv;
   const title = ev?.title || 'this event';
   if (!confirm(`Delete "${title}" from Google Calendar? This can't be undone.`)) return;
-
+ 
   const delBtn = $('gcalDetailDeleteBtn');
   delBtn.textContent = 'Deleting…';
   delBtn.disabled = true;
-
+ 
   const ok = await gcalDeleteEvent(gcalId, calId);
   if (!ok) {
     delBtn.textContent = 'Delete from Google Calendar';
@@ -3384,19 +3384,19 @@ async function gcalDeleteFromDetail() {
     showToast('Could not delete — check connection and try again.');
     return;
   }
-
+ 
   // Remove any local copy linked to this GCal event so no orphan remains.
   Object.keys(calEvents).forEach(key => {
     calEvents[key] = (calEvents[key] || []).filter(e => e.gcalId !== gcalId);
   });
   calSave();
   saveToLocal();
-
+ 
   closeModal('gcalDetailModal');
   await gcalSyncAll();
   showToast('Event deleted from Google Calendar ✓');
 }
-
+ 
 /* ── GCal calendars modal ── */
 function gcalOpenModal() {
   gcalRenderCalList();
@@ -3431,7 +3431,7 @@ function gcalToggleCal(idx, enabled) {
   gcalSaveCals();
   gcalSyncAll();
 }
-
+ 
 function gcalUpdateBtn() {
   const btn = $('gcalConnectBtn');
   if (!btn) return;
@@ -3451,7 +3451,7 @@ function gcalUpdateSyncBtn() {
   btn.textContent = gcalSyncing ? 'Syncing…' : 'Sync now';
   btn.disabled = gcalSyncing;
 }
-
+ 
 /* ───────────────────────── BUDGET ─────────────────────────
  * Minimal daily-envelope budgeting.
  *   Today's balance = (today's allowance) − today's purchases
@@ -3461,19 +3461,19 @@ function gcalUpdateSyncBtn() {
  * banked into the initial balance, the daily budget is added, and purchases
  * and the allowance reset. */
 let budgetDesktopOpen = false;
-
+ 
 function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
-
+ 
 function parseMoney(v) {
   const n = parseFloat(String(v ?? '').replace(/[^0-9.\-]/g, ''));
   return isFinite(n) ? round2(n) : 0;
 }
-
+ 
 function money(n) {
   const v = round2(n);
   return (v < 0 ? '-$' : '$') + Math.abs(v).toFixed(2);
 }
-
+ 
 function normalizeBudget(b) {
   return {
     initial: round2(b?.initial),
@@ -3486,7 +3486,7 @@ function normalizeBudget(b) {
     lastDate: b?.lastDate || null,
   };
 }
-
+ 
 function purchasesTotal() {
   return round2(budget.purchases.reduce((s, p) => s + (Number(p.amount) || 0), 0));
 }
@@ -3498,7 +3498,7 @@ function todayBalance() { return round2(todayAllowance() - purchasesTotal()); }
  * spent. It deliberately ignores today's balance, so editing that envelope
  * never moves it. The daily budget feeds in once per day, at rollover. */
 function totalBalance() { return round2(budget.initial - purchasesTotal()); }
-
+ 
 function daysBetweenKeys(fromKey, toKey) {
   const [y1, m1, d1] = fromKey.split('-').map(Number);
   const [y2, m2, d2] = toKey.split('-').map(Number);
@@ -3507,7 +3507,7 @@ function daysBetweenKeys(fromKey, toKey) {
   const diff = Math.round((b - a) / 86400000);
   return Math.max(1, Math.min(diff, 366));   // clamp: never negative, never absurd
 }
-
+ 
 /* New-day rollover. The new initial balance is what you actually had left
  * (total balance) plus a fresh daily budget; purchases then clear, so the
  * total equals the initial again and today's balance is a full envelope. */
@@ -3522,7 +3522,7 @@ function budgetRollover() {
   budget.lastDate = today;
   return true;
 }
-
+ 
 /* Called by Reset: bank what was spent so the total balance is unchanged,
  * then clear the day. No new envelope — that only happens on a new day. */
 function budgetResetDay() {
@@ -3531,7 +3531,7 @@ function budgetResetDay() {
   budget.todayAllowance = null;
   budget.lastDate = dbdTodayKey();
 }
-
+ 
 function budgetToggleDesktop(force) {
   const want = (typeof force === 'boolean') ? force : !budgetDesktopOpen;
   if (want) {
@@ -3547,13 +3547,13 @@ function budgetToggleDesktop(force) {
   if (rp)    rp.style.display = budgetDesktopOpen ? 'none' : '';
   if (budgetDesktopOpen) renderBudget();
 }
-
+ 
 /* ── UI ──
  * Both the desktop panel and the mobile tab render the same markup, so this
  * module never uses element IDs (they'd collide across the two copies and
  * getElementById would always resolve to the mobile one). Everything is
  * scoped to its container and wired with delegated listeners. */
-
+ 
 function budgetFieldHtml(key, label, value, hint) {
   return `
     <div class="budget-field">
@@ -3566,7 +3566,7 @@ function budgetFieldHtml(key, label, value, hint) {
       <div class="budget-field-hint">${hint}</div>
     </div>`;
 }
-
+ 
 function budgetHtml() {
   const spent = purchasesTotal();
   const tb = todayBalance();
@@ -3579,52 +3579,52 @@ function budgetHtml() {
         value="${Number(p.amount).toFixed(2)}">
       <button class="budget-purchase-del" data-pact="del" title="Remove">×</button>
     </div>`).join('');
-
+ 
   return `
     <div class="budget-wrap">
       <div class="budget-header">
         <div class="budget-title">Budget</div>
       </div>
-
+ 
       <div class="budget-figure ${total < 0 ? 'over' : ''}">
         <div class="budget-figure-label">Total balance</div>
         <div class="budget-figure-value">${money(total)}</div>
         <div class="budget-figure-sub">${money(round2(budget.initial))} initial − ${money(spent)} spent today</div>
       </div>
-
+ 
       <div class="budget-fields">
         ${budgetFieldHtml('today', "Today's balance", tb, 'Spending envelope — editing it won\'t change your total')}
         ${budgetFieldHtml('daily', 'Daily budget', round2(budget.daily), 'Added to your balance each new day')}
         ${budgetFieldHtml('initial', 'Initial balance', round2(budget.initial), 'Grows by the daily budget each morning')}
       </div>
-
+ 
       <div class="budget-section-header">
         <span class="section-sublabel">Purchases today</span>
         <span class="budget-spent">${money(spent)}</span>
       </div>
-
+ 
       <div class="budget-add-row">
         <input class="budget-new-title" placeholder="What did you buy?">
         <input class="budget-new-amount" type="text" inputmode="decimal" placeholder="0.00">
         <button class="add-btn budget-add-btn" data-pact="add">+ Add</button>
       </div>
-
+ 
       <div class="budget-purchase-list">
         ${rows || '<div class="budget-empty">No purchases yet today.</div>'}
       </div>
     </div>`;
 }
-
+ 
 /* Delegated listeners are attached once per container; innerHTML swaps the
  * children but never the container, so the bindings survive re-renders. */
 function bindBudgetContainer(root) {
   if (!root || root._budgetBound) return;
   root._budgetBound = true;
-
+ 
   root.addEventListener('focusin', e => {
     if (e.target.matches('.budget-input, .budget-purchase-amount')) e.target.select();
   });
-
+ 
   root.addEventListener('change', e => {
     const el = e.target;
     if (el.dataset.bfield) { setBudgetField(el.dataset.bfield, el.value); return; }
@@ -3634,7 +3634,7 @@ function bindBudgetContainer(root) {
     if (el.dataset.pact === 'title')  setPurchaseTitle(id, el.value);
     if (el.dataset.pact === 'amount') setPurchaseAmount(id, el.value);
   });
-
+ 
   root.addEventListener('click', e => {
     const btn = e.target.closest('[data-pact]');
     if (!btn || btn.tagName !== 'BUTTON') return;
@@ -3644,7 +3644,7 @@ function bindBudgetContainer(root) {
       if (row) removePurchase(parseInt(row.dataset.purchaseId));
     }
   });
-
+ 
   root.addEventListener('keydown', e => {
     if (e.key !== 'Enter') return;
     const el = e.target;
@@ -3657,7 +3657,7 @@ function bindBudgetContainer(root) {
     }
   });
 }
-
+ 
 function renderBudget() {
   [$('budgetContainer-d'), $('budgetContainer-m')].forEach(el => {
     if (!el) return;
@@ -3665,7 +3665,7 @@ function renderBudget() {
     bindBudgetContainer(el);
   });
 }
-
+ 
 /* Re-render everything except the container holding focus, so committing one
  * field never yanks the cursor out of another. */
 function budgetChanged(skipRoot) {
@@ -3679,7 +3679,7 @@ function budgetChanged(skipRoot) {
   if (skipRoot) budgetPatchFigures(skipRoot);
   renderHome();
 }
-
+ 
 /* Update the derived read-outs in place for the container being edited. */
 function budgetPatchFigures(root) {
   const tb = todayBalance();
@@ -3702,7 +3702,7 @@ function budgetPatchFigures(root) {
     inp.value = val.toFixed(2);
   });
 }
-
+ 
 function setBudgetField(key, raw) {
   const val = parseMoney(raw);
   if (key === 'initial') {
@@ -3717,7 +3717,7 @@ function setBudgetField(key, raw) {
   }
   budgetChanged();
 }
-
+ 
 function addPurchase(root) {
   const scope = root || $('budgetContainer-d') || $('budgetContainer-m');
   if (!scope) return;
@@ -3731,28 +3731,28 @@ function addPurchase(root) {
   const nt = scope.querySelector('.budget-new-title');
   if (nt) nt.focus();
 }
-
+ 
 function purchaseById(id) { return budget.purchases.find(p => p.id === id); }
-
+ 
 function setPurchaseTitle(id, value) {
   const p = purchaseById(id);
   if (!p) return;
   p.title = value;
   saveToLocal();
 }
-
+ 
 function setPurchaseAmount(id, value) {
   const p = purchaseById(id);
   if (!p) return;
   p.amount = parseMoney(value);
   budgetChanged();
 }
-
+ 
 function removePurchase(id) {
   budget.purchases = budget.purchases.filter(p => p.id !== id);
   budgetChanged();
 }
-
+ 
 /* Midnight watcher: roll over without needing a reload. */
 function budgetTickDay() {
   if (budgetRollover()) {
@@ -3763,7 +3763,7 @@ function budgetTickDay() {
   }
   setTimeout(budgetTickDay, 60000);
 }
-
+ 
 /* ───────────────────────── CLOUD SYNC ─────────────────────────
  * Live cross-device sync of the full app state via Firebase.
  *
@@ -3793,11 +3793,11 @@ let syncLastSeenFp  = null;   // fingerprint at the previous local save
 let syncPushTimer   = null;
 let syncLastSyncAt  = null;   // for the settings status line
 const syncClientId  = 'c' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-
+ 
 function syncConfigured() {
   return !!(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.databaseURL && window.firebase);
 }
-
+ 
 /* Fingerprint: state identity for change detection. Running timers
  * tick every second, but (startedAt, secondsAtStart) already fully
  * determine the remaining time — so mask `seconds` on running timers
@@ -3808,7 +3808,7 @@ function syncFingerprint(state) {
     timers: (state.timers || []).map(t => t.running ? { ...t, seconds: -1 } : t),
   });
 }
-
+ 
 function syncLoadMeta() {
   try { return JSON.parse(localStorage.getItem(SYNC_META_LS_KEY)) || {}; }
   catch(e) { return {}; }
@@ -3816,7 +3816,7 @@ function syncLoadMeta() {
 function syncSaveMeta(m) {
   try { localStorage.setItem(SYNC_META_LS_KEY, JSON.stringify(m)); } catch(e) {}
 }
-
+ 
 /* Called by saveToLocal() on every save (mutations + 2s autosave). */
 function syncOnLocalSave(state) {
   if (syncApplying) return;
@@ -3828,12 +3828,12 @@ function syncOnLocalSave(state) {
   syncSaveMeta(meta);
   if (syncUser && syncRef) syncSchedulePush();
 }
-
+ 
 function syncSchedulePush() {
   clearTimeout(syncPushTimer);
   syncPushTimer = setTimeout(syncPushNow, 1200);
 }
-
+ 
 function syncPushNow() {
   if (!syncUser || !syncRef) return;
   const state = gatherState();
@@ -3853,9 +3853,12 @@ function syncPushNow() {
       syncSaveMeta(meta);
       syncUpdateUI();
     })
-    .catch(() => { /* offline etc. — RTDB retries on reconnect; next save re-schedules too */ });
+    .catch(err => {
+      /* offline is normal (RTDB retries on reconnect); permission errors are not */
+      if (err && /permission/i.test(String(err.message || err.code || ''))) syncRecordAuthError(err, 'database write');
+    });
 }
-
+ 
 /* Apply a remote state through the standard load path, then let the
  * normal save machinery detect any follow-up local diff (e.g. a budget
  * rollover triggered by the incoming state) and push it back. */
@@ -3890,12 +3893,12 @@ function syncApplyRemote(remoteStr, remoteUpdatedAt) {
   showToast('Synced from cloud ✓');
   saveToLocal();   // persists rollover diffs; pushes them if they exist
 }
-
+ 
 /* Realtime listener — also performs the initial reconcile on connect. */
 function syncOnRemoteValue(snap) {
   const v = snap.val();
   const localFp = syncFingerprint(gatherState());
-
+ 
   if (!v || typeof v.state !== 'string') {    // no cloud copy yet → seed it
     syncKnownFp = null;
     syncPushNow();
@@ -3926,7 +3929,7 @@ function syncOnRemoteValue(snap) {
     syncApplyRemote(v.state, v.updatedAt);
   }
 }
-
+ 
 function syncStart() {
   if (!syncUser || !syncConfigured()) return;
   syncRef = firebase.database().ref('users/' + syncUser.uid);
@@ -3937,7 +3940,7 @@ function syncStop() {
   if (syncRef) { syncRef.off(); syncRef = null; }
   syncKnownFp = null;
 }
-
+ 
 /* ── Sign-in flow ── */
 function syncConnect() {
   const params = new URLSearchParams({
@@ -3950,7 +3953,7 @@ function syncConnect() {
   });
   window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
 }
-
+ 
 function syncHandleRedirect() {
   const hash = window.location.hash.slice(1);
   if (!hash.includes('access_token')) return;
@@ -3967,12 +3970,13 @@ function syncHandleRedirect() {
       showToast('Sync sign-in failed — check Firebase setup.');
     });
 }
-
+ 
 function syncSignOut() {
   if (!confirm('Sign out of cloud sync? Data stays on this device and in the cloud.')) return;
+  syncManualSignOut = true;
   firebase.auth().signOut();
 }
-
+ 
 /* ── Settings UI ── */
 function syncUpdateUI() {
   const line = $('syncStatusLine');
@@ -3993,17 +3997,48 @@ function syncUpdateUI() {
     line.textContent = `Syncing as ${syncUser.email || 'Google account'}${when}`;
     btn.textContent = 'Sign out';
   } else {
-    line.textContent = 'Not signed in.';
+    const meta = syncLoadMeta();
+    if (meta.outAt || meta.authErr) {
+      const when = new Date((meta.authErr && meta.authErr.at) || meta.outAt);
+      const stamp = when.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+      const why = meta.authErr
+        ? (meta.authErr.code || meta.authErr.msg)
+        : 'no error captured — likely a silent token-refresh failure';
+      line.textContent = `Signed out unexpectedly (${stamp}): ${why}`;
+    } else {
+      line.textContent = 'Not signed in.';
+    }
     btn.textContent = 'Sign in with Google';
   }
 }
-
+ 
 function syncBtnClick() {
   if (!syncConfigured()) return;
   if (syncUser) syncSignOut();
   else syncConnect();
 }
-
+ 
+let syncManualSignOut = false;
+ 
+/* Capture WHY a session died. onAuthStateChanged(null) never says, so:
+ * (a) note the timestamp of any sign-out we didn't ask for, and
+ * (b) on every startup force a token refresh — if silent renewal is
+ *     broken (revoked token, deleted user, blocked securetoken call),
+ *     this fails NOW with the real error code instead of signing us
+ *     out mysteriously an hour later. */
+function syncRecordAuthError(err, where) {
+  const meta = syncLoadMeta();
+  meta.authErr = {
+    code: (err && err.code) || '',
+    msg:  String((err && err.message) || err || 'unknown'),
+    at:   Date.now(),
+    where,
+  };
+  syncSaveMeta(meta);
+  console.warn('[sync] auth error (' + where + '):', err);
+  syncUpdateUI();
+}
+ 
 function syncInit() {
   if (!syncConfigured()) { syncUpdateUI(); return; }
   try {
@@ -4016,17 +4051,38 @@ function syncInit() {
   firebase.auth().onAuthStateChanged(user => {
     syncUser = user;
     syncStop();
-    if (user) syncStart();
+    const meta = syncLoadMeta();
+    if (user) {
+      meta.authAt    = Date.now();
+      meta.authEmail = user.email || '';
+      delete meta.outAt;
+      delete meta.authErr;
+      syncSaveMeta(meta);
+      /* diagnostic: force a refresh so a broken renewal fails loudly now */
+      if (typeof user.getIdToken === 'function') {
+        user.getIdToken(true).catch(err => syncRecordAuthError(err, 'token refresh'));
+      }
+      syncStart();
+    } else {
+      if (meta.authAt && !syncManualSignOut) {
+        meta.outAt = Date.now();           // sign-out we did NOT request
+        console.warn('[sync] unexpected sign-out at', new Date(meta.outAt).toString());
+      }
+      delete meta.authAt;
+      delete meta.authEmail;
+      syncManualSignOut = false;
+      syncSaveMeta(meta);
+    }
     syncUpdateUI();
   });
 }
-
+ 
 /* ───────────────────────── STATIC BINDINGS ───────────────────────── */
 function bindStatic() {
   /* wakeup */
   $('wakeupRow-d')?.addEventListener('click', toggleWakeup);
   $('wakeupRow-m')?.addEventListener('click', toggleWakeup);
-
+ 
   /* calendar nav */
   $('calDesktopNavTab')?.addEventListener('click', calToggleDesktop);
   $('homeDesktopNavTab')?.addEventListener('click', () => homeToggleDesktop());
@@ -4039,12 +4095,12 @@ function bindStatic() {
   $('calWeekModeBtn')?.addEventListener('click', e => { e.stopPropagation(); calToggleWeekMode(); });
   $('calNavPrev')?.addEventListener('click', () => calNavDay(-1));
   $('calNavNext')?.addEventListener('click', () => calNavDay(1));
-
+ 
   /* tabs */
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => goTab(btn.dataset.view, true));
   });
-
+ 
   /* add buttons */
   $('addTimerBtn-d')?.addEventListener('click', addFormatTimer);
   $('addTimerBtn-m')?.addEventListener('click', addFormatTimer);
@@ -4054,7 +4110,7 @@ function bindStatic() {
   $('dbdAddBtn-m')?.addEventListener('click', () => addDbdTask('m'));
   $('addListBtn-d')?.addEventListener('click', addTodoList);
   $('addListBtn-m')?.addEventListener('click', addTodoList);
-
+ 
   /* data bar */
   $('fmtBtn')?.addEventListener('click', toggleFormatMode);
   $('exportBtn')?.addEventListener('click', openExportModal);
@@ -4062,23 +4118,23 @@ function bindStatic() {
   $('resetAllBtn')?.addEventListener('click', () => $('confirmOverlay').classList.add('show'));
   $('clearStorageBtn')?.addEventListener('click', confirmClearStorage);
   $('syncConnectBtn')?.addEventListener('click', syncBtnClick);
-
+ 
   /* confirm */
   $('confirmCancelBtn')?.addEventListener('click', () => closeModal('confirmOverlay'));
   $('confirmResetBtn')?.addEventListener('click', resetAll);
-
+ 
   /* schedule */
   $('scheduleCancelBtn')?.addEventListener('click', () => closeModal('scheduleModal'));
   $('scheduleSaveBtn')?.addEventListener('click', saveSchedule);
   $('scheduleEveryDayBtn')?.addEventListener('click', scheduleEveryDay);
-
+ 
   /* export / import */
   $('exportCopyBtn')?.addEventListener('click', exportCopy);
   $('exportDownloadBtn')?.addEventListener('click', exportDownload);
   $('importTextBtn')?.addEventListener('click', importFromText);
   $('importFileBtn')?.addEventListener('click', () => $('fileInput').click());
   $('fileInput')?.addEventListener('change', e => loadStateFile(e.target));
-
+ 
   /* event modal */
   $('calModalCancel')?.addEventListener('click', closeCalModal);
   $('calEventSaveBtn')?.addEventListener('click', saveCalEvent);
@@ -4086,18 +4142,18 @@ function bindStatic() {
   $('calSendToGcalBtn')?.addEventListener('click', calSendToGcal);
   $('calTypeEvent')?.addEventListener('click', () => setCalEventType('event'));
   $('calTypeDivider')?.addEventListener('click', () => setCalEventType('divider'));
-
+ 
   /* gcal modals */
   $('gcalDisconnectBtn')?.addEventListener('click', gcalDisconnect);
   $('gcalSyncBtn')?.addEventListener('click', gcalSyncAll);
   $('gcalDetailDeleteBtn')?.addEventListener('click', gcalDeleteFromDetail);
   $('gcalSyncToAppBtn')?.addEventListener('click', gcalSyncToApp);
-
+ 
   /* modal-x close buttons */
   document.querySelectorAll('.modal-x[data-close]').forEach(btn => {
     btn.addEventListener('click', () => closeModal(btn.dataset.close));
   });
-
+ 
   /* backdrop click closes any modal */
   document.querySelectorAll('.modal-overlay').forEach(ov => {
     ov.addEventListener('click', e => {
@@ -4106,7 +4162,7 @@ function bindStatic() {
       else ov.classList.remove('show');
     });
   });
-
+ 
   /* Escape closes the topmost open modal */
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
@@ -4115,7 +4171,7 @@ function bindStatic() {
     if (open.id === 'calEventModal') closeCalModal();
     else open.classList.remove('show');
   });
-
+ 
   /* resize */
   let _rt;
   window.addEventListener('resize', () => {
@@ -4123,17 +4179,17 @@ function bindStatic() {
     _rt = setTimeout(setSwipePanelWidths, 80);
   });
 }
-
+ 
 /* ───────────────────────── INIT ───────────────────────── */
 (function init() {
   loadFromLocal();
   calLoad();
   calLoadHiddenColors();
   calPruneDays();
-
+ 
   bindStatic();
   initSwipe();
-
+ 
   renderTimers();
   renderTodos();
   homeToggleDesktop(true);   // desktop lands on Home; toggle back via nav
@@ -4151,7 +4207,7 @@ function bindStatic() {
   calRenderMobile();
   calTickNow();
   budgetTickDay();
-
+ 
   /* autosave */
   setInterval(saveToLocal, 2000);
   /* day-by-day midnight rollover (also fires after device sleep) */
@@ -4165,11 +4221,11 @@ function bindStatic() {
     if (document.visibilityState === 'hidden') saveToLocal();
   });
   window.addEventListener('pagehide', saveToLocal);
-
+ 
   /* cloud sync */
   syncInit();
   syncHandleRedirect();
-
+ 
   /* gcal */
   gcalLoadToken();
   gcalLoadCals();
