@@ -292,6 +292,10 @@
     <div class="modal-sub" id="gcalStatusLine">Not connected.</div>
     <button class="gcal-connect-btn" id="gcalConnectBtn">+ Google Cal</button>
 
+    <div class="settings-section-label">Cloud Sync</div>
+    <div class="modal-sub" id="syncStatusLine">Not configured.</div>
+    <button class="gcal-connect-btn" id="syncConnectBtn" style="display:none">Sign in with Google</button>
+
     <div class="settings-section-label">Data</div>
     <div class="modal-sub">Wipes all saved data on this device and starts fresh.</div>
     <button class="modal-file-btn settings-danger-btn" id="clearStorageBtn">Clear storage</button>
@@ -391,6 +395,12 @@
 </div>
 
 <div class="toast" id="toast"></div>
+<!-- ── Firebase (Cloud Sync) — compat builds, no bundler needed.
+     Loaded before app.js; if these fail (offline first-run), the app
+     detects the missing global and simply disables sync. ── -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script src="app.js"></script>
 <script>
   /* ── Offline support: register the service worker ──

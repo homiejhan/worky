@@ -6,8 +6,10 @@
      update the cache. Offline loads fall back to the cached copy.
      → Deploys are never stuck behind the SW cache.
    • Google Fonts (CSS + font files): CACHE-FIRST (they never change).
-   • Everything else (Google Calendar API, OAuth, etc.): passed
-     straight through to the network — never cached.
+   • Firebase SDK scripts (www.gstatic.com/firebasejs, versioned):
+     CACHE-FIRST — immutable, lets cloud sync initialize offline.
+   • Everything else (Google Calendar API, Firebase API, OAuth, etc.):
+     passed straight through to the network — never cached.
    ════════════════════════════════════════════════════════════ */
 
 const CACHE_VERSION = 'focus-v1';
@@ -60,6 +62,14 @@ self.addEventListener('fetch', (event) => {
 
   // Google Fonts → cache-first
   if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com') {
+    event.respondWith(cacheFirst(req, FONT_CACHE));
+    return;
+  }
+
+  // Firebase SDK (versioned, immutable URLs) → cache-first, so the
+  // sync layer still initializes offline. Firebase API/auth traffic
+  // itself is cross-origin non-GET or other hosts → never cached.
+  if (url.hostname === 'www.gstatic.com' && url.pathname.startsWith('/firebasejs/')) {
     event.respondWith(cacheFirst(req, FONT_CACHE));
     return;
   }

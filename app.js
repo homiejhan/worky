@@ -2,7 +2,7 @@
    FOCUS — app.js
    Sections: CONFIG · STATE · UTIL · PERSISTENCE · TIMERS ·
    WAKEUP · TODOS · DRAG ENGINE · FORMAT MODE · DATA ·
-   TABS · CALENDAR · GOOGLE CALENDAR · BINDINGS · INIT
+   TABS · CALENDAR · GOOGLE CALENDAR · CLOUD SYNC · BINDINGS · INIT
    ═══════════════════════════════════════════════════════ */
 
 /* ───────────────────────── CONFIG ───────────────────────── */
@@ -19,6 +19,27 @@ const CAL_COLORS   = ['#378ADD','#EC3636','#8B5CF6','#F97316','#22C55E','#EAB308
 const GCAL_CLIENT_ID = '855884688171-80lpepboe9q7io8m8lpd3njllnrgvl0d.apps.googleusercontent.com';
 const GCAL_SCOPES    = 'https://www.googleapis.com/auth/calendar';
 const GCAL_REDIRECT  = 'https://homiejhan.github.io/worky/';
+
+/* ── Cloud Sync (Firebase) ──
+ * Paste the web-app config from the Firebase console here to enable
+ * cross-device sync. Leave apiKey empty to keep sync disabled — the
+ * rest of the app is unaffected. These values are safe to ship in
+ * client code; access control lives in the Realtime Database rules
+ * (each user can only read/write users/<their own uid>). */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCG7dkADn9NIw4GFJV9cNyKVEHfqHvpe4I",
+  authDomain: "worky-b3e3a.firebaseapp.com",
+  databaseURL: "https://worky-b3e3a-default-rtdb.firebaseio.com",
+  projectId: "worky-b3e3a",
+  appId: "1:996860584518:web:61b0638c1f8512c6786047"
+};
+/* Sign-in reuses the same Google OAuth client + redirect that the
+ * Google Calendar connection already uses (proven to work in the
+ * iOS PWA). The `state` tag tells the two redirect handlers apart. */
+const SYNC_CLIENT_ID   = GCAL_CLIENT_ID;
+const SYNC_REDIRECT    = GCAL_REDIRECT;
+const SYNC_STATE_TAG   = 'worky-sync';
+const SYNC_META_LS_KEY = 'focus-sync-meta';
 
 /* ───────────────────────── STATE ───────────────────────── */
 let TIMER_DEFAULTS = [
@@ -385,7 +406,11 @@ function applyState(state) {
 }
 
 function saveToLocal() {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(gatherState())); } catch(e) {}
+  try {
+    const state = gatherState();
+    localStorage.setItem(LS_KEY, JSON.stringify(state));
+    syncOnLocalSave(state);
+  } catch(e) {}
 }
 function loadFromLocal() {
   try {
@@ -3042,6 +3067,7 @@ function gcalHandleRedirect() {
   const hash = window.location.hash.slice(1);
   if (!hash.includes('access_token')) return;
   const params = new URLSearchParams(hash);
+  if (params.get('state') === SYNC_STATE_TAG) return;   // handled by syncHandleRedirect
   const token = params.get('access_token');
   const expiresIn = parseInt(params.get('expires_in') || '3600');
   if (!token) return;
@@ -3738,6 +3764,263 @@ function budgetTickDay() {
   setTimeout(budgetTickDay, 60000);
 }
 
+/* ───────────────────────── CLOUD SYNC ─────────────────────────
+ * Live cross-device sync of the full app state via Firebase.
+ *
+ *   • Sign-in: same full-page Google OAuth redirect the Calendar
+ *     connection uses (state=worky-sync distinguishes the two), then
+ *     the access token is exchanged for a persistent Firebase session
+ *     (survives restarts; no repeated sign-ins).
+ *   • Storage: one node per account — users/<uid> = { state, updatedAt,
+ *     client }. `state` is the exact JSON blob saveToLocal() writes,
+ *     so cloud and localStorage always speak the same format.
+ *   • Push: saveToLocal() reports every save here; a fingerprint that
+ *     ignores the ticking seconds of RUNNING timers decides whether a
+ *     real change happened (otherwise a running timer would push every
+ *     2s forever). Real changes push after a short debounce.
+ *   • Pull: a realtime listener applies remote changes from other
+ *     devices through the same localStorage → loadFromLocal() path
+ *     used everywhere else. Own writes echo back and are ignored via
+ *     the per-session client id.
+ *   • Conflicts: last-write-wins by timestamp. Offline edits win over
+ *     an older cloud copy when the device reconnects.
+ * ─────────────────────────────────────────────────────────────── */
+let syncUser        = null;   // firebase user (null = signed out)
+let syncRef         = null;   // RTDB ref users/<uid>
+let syncApplying    = false;  // true while a remote state is being applied
+let syncKnownFp     = null;   // fingerprint both sides last agreed on
+let syncLastSeenFp  = null;   // fingerprint at the previous local save
+let syncPushTimer   = null;
+let syncLastSyncAt  = null;   // for the settings status line
+const syncClientId  = 'c' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+function syncConfigured() {
+  return !!(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.databaseURL && window.firebase);
+}
+
+/* Fingerprint: state identity for change detection. Running timers
+ * tick every second, but (startedAt, secondsAtStart) already fully
+ * determine the remaining time — so mask `seconds` on running timers
+ * to keep the fingerprint stable while a timer runs. */
+function syncFingerprint(state) {
+  return JSON.stringify({
+    ...state,
+    timers: (state.timers || []).map(t => t.running ? { ...t, seconds: -1 } : t),
+  });
+}
+
+function syncLoadMeta() {
+  try { return JSON.parse(localStorage.getItem(SYNC_META_LS_KEY)) || {}; }
+  catch(e) { return {}; }
+}
+function syncSaveMeta(m) {
+  try { localStorage.setItem(SYNC_META_LS_KEY, JSON.stringify(m)); } catch(e) {}
+}
+
+/* Called by saveToLocal() on every save (mutations + 2s autosave). */
+function syncOnLocalSave(state) {
+  if (syncApplying) return;
+  const fp = syncFingerprint(state);
+  if (fp === syncLastSeenFp) return;          // nothing meaningful changed
+  syncLastSeenFp = fp;
+  const meta = syncLoadMeta();
+  meta.editAt = Date.now();
+  syncSaveMeta(meta);
+  if (syncUser && syncRef) syncSchedulePush();
+}
+
+function syncSchedulePush() {
+  clearTimeout(syncPushTimer);
+  syncPushTimer = setTimeout(syncPushNow, 1200);
+}
+
+function syncPushNow() {
+  if (!syncUser || !syncRef) return;
+  const state = gatherState();
+  const fp = syncFingerprint(state);
+  if (fp === syncKnownFp) return;             // cloud already has this
+  const payload = {
+    state: JSON.stringify(state),
+    updatedAt: Date.now(),
+    client: syncClientId,
+  };
+  syncRef.set(payload)
+    .then(() => {
+      syncKnownFp = fp;
+      syncLastSyncAt = Date.now();
+      const meta = syncLoadMeta();
+      meta.pushedAt = syncLastSyncAt;
+      syncSaveMeta(meta);
+      syncUpdateUI();
+    })
+    .catch(() => { /* offline etc. — RTDB retries on reconnect; next save re-schedules too */ });
+}
+
+/* Apply a remote state through the standard load path, then let the
+ * normal save machinery detect any follow-up local diff (e.g. a budget
+ * rollover triggered by the incoming state) and push it back. */
+function syncApplyRemote(remoteStr, remoteUpdatedAt) {
+  let remoteFp = null;
+  syncApplying = true;
+  try {
+    localStorage.setItem(LS_KEY, remoteStr);
+    if (!loadFromLocal()) return;             // corrupt payload — keep local
+    calSave();
+    calPruneDays();
+    budgetRollover();
+    syncWakeupUI();
+    renderTimers();
+    renderTodos();
+    renderDbd();
+    renderBudget();
+    applyViewVisibility();
+    calRefresh();
+    renderHome();
+    updateTimerSummary();
+    try { remoteFp = syncFingerprint(JSON.parse(remoteStr)); } catch(e) {}
+  } finally {
+    if (remoteFp) { syncKnownFp = remoteFp; syncLastSeenFp = remoteFp; }
+    const meta = syncLoadMeta();
+    meta.editAt = remoteUpdatedAt || Date.now();
+    syncSaveMeta(meta);
+    syncLastSyncAt = Date.now();
+    syncApplying = false;
+  }
+  syncUpdateUI();
+  showToast('Synced from cloud ✓');
+  saveToLocal();   // persists rollover diffs; pushes them if they exist
+}
+
+/* Realtime listener — also performs the initial reconcile on connect. */
+function syncOnRemoteValue(snap) {
+  const v = snap.val();
+  const localFp = syncFingerprint(gatherState());
+
+  if (!v || typeof v.state !== 'string') {    // no cloud copy yet → seed it
+    syncKnownFp = null;
+    syncPushNow();
+    return;
+  }
+  if (v.client === syncClientId) {            // echo of our own write
+    try { syncKnownFp = syncFingerprint(JSON.parse(v.state)); } catch(e) {}
+    syncLastSyncAt = Date.now();
+    syncUpdateUI();
+    return;
+  }
+  let remoteFp = null;
+  try { remoteFp = syncFingerprint(JSON.parse(v.state)); } catch(e) { return; }
+  if (remoteFp === localFp) {                 // already identical
+    syncKnownFp = remoteFp;
+    syncLastSeenFp = remoteFp;
+    syncLastSyncAt = Date.now();
+    syncUpdateUI();
+    return;
+  }
+  /* Divergence: local wins only if it has unagreed edits NEWER than
+   * the cloud copy (classic offline-edits-then-reconnect case). */
+  const meta = syncLoadMeta();
+  const localDirty = localFp !== syncKnownFp;
+  if (localDirty && (meta.editAt || 0) > (v.updatedAt || 0)) {
+    syncPushNow();
+  } else {
+    syncApplyRemote(v.state, v.updatedAt);
+  }
+}
+
+function syncStart() {
+  if (!syncUser || !syncConfigured()) return;
+  syncRef = firebase.database().ref('users/' + syncUser.uid);
+  syncRef.on('value', syncOnRemoteValue);
+}
+function syncStop() {
+  clearTimeout(syncPushTimer);
+  if (syncRef) { syncRef.off(); syncRef = null; }
+  syncKnownFp = null;
+}
+
+/* ── Sign-in flow ── */
+function syncConnect() {
+  const params = new URLSearchParams({
+    client_id:     SYNC_CLIENT_ID,
+    redirect_uri:  SYNC_REDIRECT,
+    response_type: 'token',
+    scope:         'openid email profile',
+    prompt:        'select_account',
+    state:         SYNC_STATE_TAG,
+  });
+  window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
+}
+
+function syncHandleRedirect() {
+  const hash = window.location.hash.slice(1);
+  if (!hash.includes('access_token')) return;
+  const params = new URLSearchParams(hash);
+  if (params.get('state') !== SYNC_STATE_TAG) return;   // gcal redirect — not ours
+  const token = params.get('access_token');
+  history.replaceState(null, '', window.location.pathname);
+  if (!token || !syncConfigured()) return;
+  const cred = firebase.auth.GoogleAuthProvider.credential(null, token);
+  firebase.auth().signInWithCredential(cred)
+    .then(() => showToast('Cloud sync connected ✓'))
+    .catch(err => {
+      console.warn('Sync sign-in failed:', err);
+      showToast('Sync sign-in failed — check Firebase setup.');
+    });
+}
+
+function syncSignOut() {
+  if (!confirm('Sign out of cloud sync? Data stays on this device and in the cloud.')) return;
+  firebase.auth().signOut();
+}
+
+/* ── Settings UI ── */
+function syncUpdateUI() {
+  const line = $('syncStatusLine');
+  const btn  = $('syncConnectBtn');
+  if (!line || !btn) return;
+  if (!syncConfigured()) {
+    line.textContent = window.firebase
+      ? 'Not configured — paste your Firebase config into app.js.'
+      : 'Sync unavailable (Firebase failed to load).';
+    btn.style.display = 'none';
+    return;
+  }
+  btn.style.display = '';
+  if (syncUser) {
+    const when = syncLastSyncAt
+      ? ` · last sync ${new Date(syncLastSyncAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+      : '';
+    line.textContent = `Syncing as ${syncUser.email || 'Google account'}${when}`;
+    btn.textContent = 'Sign out';
+  } else {
+    line.textContent = 'Not signed in.';
+    btn.textContent = 'Sign in with Google';
+  }
+}
+
+function syncBtnClick() {
+  if (!syncConfigured()) return;
+  if (syncUser) syncSignOut();
+  else syncConnect();
+}
+
+function syncInit() {
+  if (!syncConfigured()) { syncUpdateUI(); return; }
+  try {
+    firebase.initializeApp(FIREBASE_CONFIG);
+  } catch(e) {
+    console.warn('Firebase init failed:', e);
+    syncUpdateUI();
+    return;
+  }
+  firebase.auth().onAuthStateChanged(user => {
+    syncUser = user;
+    syncStop();
+    if (user) syncStart();
+    syncUpdateUI();
+  });
+}
+
 /* ───────────────────────── STATIC BINDINGS ───────────────────────── */
 function bindStatic() {
   /* wakeup */
@@ -3778,6 +4061,7 @@ function bindStatic() {
   $('importBtn')?.addEventListener('click', openImportModal);
   $('resetAllBtn')?.addEventListener('click', () => $('confirmOverlay').classList.add('show'));
   $('clearStorageBtn')?.addEventListener('click', confirmClearStorage);
+  $('syncConnectBtn')?.addEventListener('click', syncBtnClick);
 
   /* confirm */
   $('confirmCancelBtn')?.addEventListener('click', () => closeModal('confirmOverlay'));
@@ -3881,6 +4165,10 @@ function bindStatic() {
     if (document.visibilityState === 'hidden') saveToLocal();
   });
   window.addEventListener('pagehide', saveToLocal);
+
+  /* cloud sync */
+  syncInit();
+  syncHandleRedirect();
 
   /* gcal */
   gcalLoadToken();
