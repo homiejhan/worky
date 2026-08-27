@@ -27,11 +27,11 @@ const GCAL_REDIRECT  = 'https://homiejhan.github.io/worky/';
  * client code; access control lives in the Realtime Database rules
  * (each user can only read/write users/<their own uid>). */
 const FIREBASE_CONFIG = {
-  apiKey:      '',
-  authDomain:  '',
-  databaseURL: '',
-  projectId:   '',
-  appId:       '',
+  apiKey: "AIzaSyCG7dkADn9NIw4GFJV9cNyKVEHfqHvpe4I",
+  authDomain: "worky-b3e3a.firebaseapp.com",
+  databaseURL: "https://worky-b3e3a-default-rtdb.firebaseio.com",
+  projectId: "worky-b3e3a",
+  appId: "1:996860584518:web:61b0638c1f8512c6786047"
 };
 /* Sign-in reuses the same Google OAuth client + redirect that the
  * Google Calendar connection already uses (proven to work in the
