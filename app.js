@@ -3822,6 +3822,8 @@ let syncKnownFp     = null;   // fingerprint both sides last agreed on
 let syncLastSeenFp  = null;   // fingerprint at the previous local save
 let syncPushTimer   = null;
 let syncLastSyncAt  = null;   // for the settings status line
+let syncBooting     = true;   // true during init: nothing saved then is a user edit
+let syncReconciled  = false;  // true once this connection has seen the cloud copy
 let syncDeferredRemote = null; // foreign cloud value that arrived while Formats was open
 let syncCommitPending  = 0;    // >0 while a Done push awaits server ack (priority window)
 const SYNC_COMMIT_MAX_REPUSH = 2;
@@ -3840,6 +3842,27 @@ function syncFingerprint(state) {
     ...state,
     timers: (state.timers || []).map(t => t.running ? { ...t, seconds: -1 } : t),
   });
+}
+
+/* Short stable hash of a fingerprint, persisted in sync meta as
+ * `knownHash` = the last state both sides agreed on. On reconnect this
+ * tells us WHICH side actually changed (local, cloud, or both) instead
+ * of guessing from timestamps alone. */
+function syncHash(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16) + ':' + str.length;
+}
+
+/* Record that cloud and this device now hold `fp` (post-push, echo,
+ * apply, or an identical-on-connect check). */
+function syncAgree(fp, extra) {
+  syncKnownFp = fp;
+  syncLastSyncAt = Date.now();
+  const meta = syncLoadMeta();
+  meta.knownHash = syncHash(fp);
+  Object.assign(meta, extra || {});
+  syncSaveMeta(meta);
 }
 
 function syncLoadMeta() {
@@ -3876,6 +3899,10 @@ function syncOnLocalSave(state) {
   const fp = syncFingerprint(state);
   if (fp === syncLastSeenFp) return;          // nothing meaningful changed
   syncLastSeenFp = fp;
+  /* Init-time saves (load normalisation, rollovers, the first autosave)
+   * are not user edits: they must not bump editAt, or every app launch
+   * would look like "fresh local edits" and win the reconcile. */
+  if (syncBooting) return;
   const meta = syncLoadMeta();
   meta.editAt = Date.now();
   syncSaveMeta(meta);
@@ -3885,6 +3912,7 @@ function syncOnLocalSave(state) {
 
 function syncSchedulePush() {
   if (syncPendingRemote || syncHeld()) return; // don't touch the cloud until the user chooses / finishes
+  if (!syncReconciled) return;                 // first cloud value not seen yet — reconcile will push if needed
   clearTimeout(syncPushTimer);
   syncPushTimer = setTimeout(syncPushNow, 1200);
 }
@@ -3892,6 +3920,7 @@ function syncSchedulePush() {
 function syncPushNow(opts) {
   const priority = !!(opts && opts.priority);
   if (!syncUser || !syncRef || syncPendingRemote) return false;
+  if (!syncReconciled) return false;          // never write blind over an unseen cloud copy
   if (syncHeld() && !priority) return false;  // Formats open — only Done may push
   clearTimeout(syncPushTimer);
   syncPushTimer = null;
@@ -3906,12 +3935,8 @@ function syncPushNow(opts) {
   if (priority) syncCommitPending = Math.max(1, syncCommitPending);   // open (or keep) the priority window
   syncRef.set(payload)
     .then(() => {
-      syncKnownFp = fp;
-      syncLastSyncAt = Date.now();
+      syncAgree(fp, { pushedAt: Date.now() });
       syncCommitPending = 0;                  // server has it — priority window closes
-      const meta = syncLoadMeta();
-      meta.pushedAt = syncLastSyncAt;
-      syncSaveMeta(meta);
       syncUpdateUI();
     })
     .catch(err => {
@@ -3958,11 +3983,8 @@ function syncApplyRemote(remoteStr, remoteUpdatedAt) {
     updateTimerSummary();
     try { remoteFp = syncFingerprint(JSON.parse(remoteStr)); } catch(e) {}
   } finally {
-    if (remoteFp) { syncKnownFp = remoteFp; syncLastSeenFp = remoteFp; }
-    const meta = syncLoadMeta();
-    meta.editAt = remoteUpdatedAt || Date.now();
-    syncSaveMeta(meta);
-    syncLastSyncAt = Date.now();
+    if (remoteFp) { syncLastSeenFp = remoteFp; syncAgree(remoteFp, { editAt: remoteUpdatedAt || Date.now() }); }
+    else syncLastSyncAt = Date.now();
     syncApplying = false;
   }
   syncUpdateUI();
@@ -3974,6 +3996,7 @@ function syncApplyRemote(remoteStr, remoteUpdatedAt) {
 function syncOnRemoteValue(snap) {
   const v = snap.val();
   const localFp = syncFingerprint(gatherState());
+  syncReconciled = true;                      // from here on pushes are allowed
 
   if (syncPendingRemote) {                    // choice not made yet — just keep the stash fresh
     if (v && typeof v.state === 'string' && v.client !== syncClientId) {
@@ -3989,8 +4012,7 @@ function syncOnRemoteValue(snap) {
     return;
   }
   if (v.client === syncClientId) {            // echo of our own write
-    try { syncKnownFp = syncFingerprint(JSON.parse(v.state)); } catch(e) {}
-    syncLastSyncAt = Date.now();
+    try { syncAgree(syncFingerprint(JSON.parse(v.state))); } catch(e) {}
     syncUpdateUI();
     return;
   }
@@ -4011,9 +4033,8 @@ function syncOnRemoteValue(snap) {
     }
   }
   if (remoteFp === localFp) {                 // already identical
-    syncKnownFp = remoteFp;
     syncLastSeenFp = remoteFp;
-    syncLastSyncAt = Date.now();
+    syncAgree(remoteFp);
     syncUpdateUI();
     return;
   }
@@ -4031,10 +4052,21 @@ function syncOnRemoteValue(snap) {
     syncUpdateUI();
     return;
   }
-  /* Established baseline: local wins only if it has unagreed edits NEWER
-   * than the cloud copy (classic offline-edits-then-reconnect case). */
-  const localDirty = localFp !== syncKnownFp;
-  if (localDirty && (meta.editAt || 0) > (v.updatedAt || 0)) {
+  /* Established baseline. Mid-session, syncKnownFp is the live baseline;
+   * on a fresh connection it is null, so fall back to the persisted hash
+   * of the last agreed state to work out which side actually moved:
+   *   • only the cloud moved → apply it (the common "other device
+   *     edited while this one was closed" case)
+   *   • only this device moved → push it (offline edits)
+   *   • both moved → true conflict: newer edit wins by timestamp */
+  const knownHash = syncKnownFp !== null ? syncHash(syncKnownFp) : (meta.knownHash || null);
+  const localDirty  = knownHash ? syncHash(localFp)  !== knownHash : true;
+  const remoteDirty = knownHash ? syncHash(remoteFp) !== knownHash : true;
+  if (!localDirty) {
+    syncApplyRemote(v.state, v.updatedAt);
+  } else if (!remoteDirty) {
+    syncPushNow();
+  } else if ((meta.editAt || 0) > (v.updatedAt || 0)) {
     syncPushNow();
   } else {
     syncApplyRemote(v.state, v.updatedAt);
@@ -4051,6 +4083,7 @@ function syncStop() {
   syncPushTimer = null;
   if (syncRef) { syncRef.off(); syncRef = null; }
   syncKnownFp = null;
+  syncReconciled = false;
   syncPendingRemote = null;
   syncDeferredRemote = null;
   syncCommitPending = 0;
@@ -4808,6 +4841,13 @@ function bindStatic() {
   calRenderMobile();
   calTickNow();
   budgetTickDay();
+
+  /* Everything above was load + normalisation + rollovers, not user
+   * edits: take it as the sync baseline so the first autosave (or a
+   * rollover) can't masquerade as "fresh local edits" and win a
+   * reconcile against a newer cloud copy. */
+  syncLastSeenFp = syncFingerprint(gatherState());
+  syncBooting = false;
 
   /* autosave */
   setInterval(saveToLocal, 2000);
