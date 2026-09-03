@@ -21,6 +21,9 @@
 </head>
 <body>
 
+<!-- Theme background image layer (painted beneath every panel) -->
+<div class="theme-bg" id="themeBg" aria-hidden="true"></div>
+
 <!-- ════════ DESKTOP LAYOUT ════════ -->
 <div class="desktop-app" id="desktopApp">
 
@@ -288,6 +291,13 @@
     <div class="modal-sub">Choose which sections appear. Home is always on.</div>
     <div class="settings-view-list" id="settingsViewList"></div>
 
+    <div class="settings-section-label">Appearance</div>
+    <div class="modal-sub">Pick a preset, or open the editor for colors, fonts and a background image.</div>
+    <div class="settings-theme-row">
+      <div class="theme-presets" id="themePresets-s"></div>
+      <button class="modal-file-btn" id="themeOpenBtn">Customize theme</button>
+    </div>
+
     <div class="settings-section-label">Google Calendar</div>
     <div class="modal-sub" id="gcalStatusLine">Not connected.</div>
     <button class="gcal-connect-btn" id="gcalConnectBtn">+ Google Cal</button>
@@ -404,6 +414,73 @@
     <button class="gcal-send-btn" id="gcalSyncToAppBtn">Sync to app</button>
   </div>
 </div>
+
+<!-- ════════ THEME EDITOR ════════ -->
+<div class="modal-overlay theme-overlay" id="themeModal">
+  <div class="modal-box theme-box">
+    <button class="modal-x" data-close="themeModal" title="Close">×</button>
+    <div class="modal-title">Theme</div>
+    <div class="modal-sub">Changes apply as you make them and sync with your data.</div>
+
+    <div class="settings-section-label">Presets</div>
+    <div class="theme-presets" id="themePresets-m"></div>
+
+    <div class="settings-section-label">Colors</div>
+    <div class="theme-color-grid" id="themeColorGrid"></div>
+
+    <div class="settings-section-label">Type &amp; shape</div>
+    <div class="theme-group">
+      <select class="theme-select" id="thFontSelect" data-th="font"></select>
+      <input class="theme-text" id="thFontCustom" type="text" placeholder="Any Google Font name, e.g. Outfit" autocomplete="off" spellcheck="false" style="display:none">
+      <div class="theme-slider-row">
+        <label for="thFontSize">Text size</label>
+        <input type="range" id="thFontSize" data-th="fontSize" min="12" max="18" step="0.5">
+        <span class="theme-slider-val" id="thFontSizeVal"></span>
+      </div>
+      <div class="theme-slider-row">
+        <label for="thRadius">Corners</label>
+        <input type="range" id="thRadius" data-th="radius" min="0" max="20" step="1">
+        <span class="theme-slider-val" id="thRadiusVal"></span>
+      </div>
+    </div>
+
+    <div class="settings-section-label">Background image</div>
+    <div class="theme-group">
+      <div class="theme-inline">
+        <input class="theme-text" id="thBgUrl" type="url" placeholder="Paste an image URL" autocomplete="off" spellcheck="false">
+        <button class="modal-primary" id="thBgUseUrl">Use</button>
+      </div>
+      <div class="theme-bg-actions">
+        <button class="modal-file-btn" id="thBgUpload">Upload from device</button>
+        <button class="modal-file-btn" id="thBgRemove">Remove image</button>
+      </div>
+      <div class="theme-bg-status" id="thBgStatus"></div>
+      <div class="theme-group" id="thBgControls">
+        <div class="theme-slider-row">
+          <label for="thBgDim">Dim</label>
+          <input type="range" id="thBgDim" data-th="bgDim" min="0" max="90" step="5">
+          <span class="theme-slider-val" id="thBgDimVal"></span>
+        </div>
+        <div class="theme-slider-row">
+          <label for="thBgBlur">Blur</label>
+          <input type="range" id="thBgBlur" data-th="bgBlur" min="0" max="24" step="1">
+          <span class="theme-slider-val" id="thBgBlurVal"></span>
+        </div>
+        <div class="theme-slider-row">
+          <label for="thBgGlass">See-through</label>
+          <input type="range" id="thBgGlass" data-th="bgGlass" min="0" max="80" step="5">
+          <span class="theme-slider-val" id="thBgGlassVal"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="theme-footer">
+      <button class="modal-cancel" id="thResetBtn">Reset to preset</button>
+      <button class="modal-primary" id="thDoneBtn">Done</button>
+    </div>
+  </div>
+</div>
+<input type="file" id="themeBgFile" accept="image/*" style="display:none">
 
 <div class="toast" id="toast"></div>
 <!-- ── Firebase (Cloud Sync) — compat builds, no bundler needed.
