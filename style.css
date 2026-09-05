@@ -1922,3 +1922,89 @@ body.format-mode .fmt-banner { display: inline; }
 
 /* Settings → Appearance summary row */
 .settings-theme-row { display: flex; flex-direction: column; gap: 10px; }
+
+/* ═══════════════════════════════════════════════════════
+   ONBOARDING — welcome card + guided tour
+   ═══════════════════════════════════════════════════════ */
+.tour-welcome-note {
+  font-size: 11px; color: var(--ink-3);
+  text-align: center;
+}
+
+/* The overlay is transparent and only exists to swallow clicks; the dimming
+   comes from the spotlight's oversized box-shadow, which leaves the target
+   itself uncovered. It sits below modals (200) so the cloud-sync choice can
+   still surface mid-tour, and below the toast (300). */
+.tour-overlay {
+  position: fixed; inset: 0; z-index: 190;
+  display: none;
+}
+.tour-overlay.show { display: block; }
+
+.tour-spot {
+  position: fixed;
+  border-radius: var(--radius-md);
+  box-shadow:
+    0 0 0 9999px rgba(0,0,0,0.62),
+    0 0 0 2px rgba(var(--accent-rgb),0.9),
+    0 0 0 7px rgba(var(--accent-rgb),0.16);
+  pointer-events: none;
+  transition: top 0.28s var(--ease), left 0.28s var(--ease),
+              width 0.28s var(--ease), height 0.28s var(--ease);
+}
+.tour-spot.none {
+  top: 50%; left: 50%; width: 0; height: 0;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,0.62);
+}
+
+.tour-card {
+  position: fixed;
+  width: 340px; max-width: calc(100vw - 32px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-mid);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  padding: 16px 18px 12px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.tour-card.bottom {
+  left: 16px !important; right: 16px; top: auto !important;
+  bottom: 56px;
+  width: auto; max-width: none;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+}
+
+.tour-progress { display: flex; gap: 4px; }
+.tour-progress i {
+  flex: 1; height: 3px; border-radius: 2px;
+  background: var(--border-mid);
+  transition: background 0.2s var(--ease);
+}
+.tour-progress i.on { background: var(--accent); }
+
+.tour-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.tour-title { font-size: 15px; font-weight: 600; }
+.tour-count { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); white-space: nowrap; }
+.tour-body  { font-size: 12.5px; line-height: 1.55; color: var(--ink-2); }
+
+.tour-nav { display: flex; align-items: center; gap: 8px; padding-top: 2px; }
+.tour-nav-spacer { flex: 1; }
+.tour-skip, .tour-back, .tour-next {
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px; font-weight: 500;
+  transition: all 0.15s;
+  touch-action: manipulation;
+}
+.tour-skip { color: var(--ink-3); padding-left: 0; }
+.tour-skip:hover { color: var(--ink-2); }
+.tour-back { color: var(--ink-2); border: 1px solid var(--border-mid); }
+.tour-back:hover { color: var(--ink); border-color: var(--border-strong); }
+.tour-next {
+  background: var(--accent-dim);
+  border: 1px solid rgba(var(--accent-rgb),0.4);
+  color: var(--accent);
+  min-width: 68px;
+}
+.tour-next:hover { background: rgba(var(--accent-rgb),0.22); }

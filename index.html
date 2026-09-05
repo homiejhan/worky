@@ -91,7 +91,7 @@
     <div class="dbd-section-header">
       <span class="section-sublabel">Day by Day</span>
     </div>
-    <div class="dbd-add-row">
+    <div class="dbd-add-row" id="dbdAddRow-d">
       <input class="dbd-new-text" id="dbdText-d" placeholder="New task…"
         onkeydown="if(event.key==='Enter'){event.preventDefault();addDbdTask('d');}">
       <input type="date" class="dbd-new-date" id="dbdDate-d">
@@ -165,7 +165,7 @@
         <div class="dbd-section-header">
           <span class="section-sublabel">Day by Day</span>
         </div>
-        <div class="dbd-add-row">
+        <div class="dbd-add-row" id="dbdAddRow-m">
           <input class="dbd-new-text" id="dbdText-m" placeholder="New task…"
             onkeydown="if(event.key==='Enter'){event.preventDefault();addDbdTask('m');}">
           <input type="date" class="dbd-new-date" id="dbdDate-m">
@@ -306,6 +306,10 @@
     <div class="modal-sub" id="syncStatusLine">Not configured.</div>
     <button class="gcal-connect-btn" id="syncConnectBtn" style="display:none">Sign in with Google</button>
 
+    <div class="settings-section-label">Help</div>
+    <div class="modal-sub">Walk through every section again, one step at a time.</div>
+    <button class="modal-file-btn" id="tourReplayBtn">Take the tour</button>
+
     <div class="settings-section-label">Data</div>
     <div class="modal-sub">Wipes all saved data on this device and starts fresh.</div>
     <button class="modal-file-btn settings-danger-btn" id="clearStorageBtn">Clear storage</button>
@@ -367,6 +371,38 @@
       <button class="modal-primary" id="scheduleSaveBtn">Save</button>
     </div>
     <button class="modal-file-btn" id="scheduleEveryDayBtn">Select all — show every day</button>
+  </div>
+</div>
+
+<!-- ════════ WELCOME (first run) ════════ -->
+<div class="modal-overlay" id="tourWelcomeModal">
+  <div class="modal-box">
+    <div class="modal-title">Welcome to Worky</div>
+    <div class="modal-sub">This is a starter day: a few timers, two daily routines, a grocery list, a week of calendar templates and a small budget, so nothing starts empty. Rename, rearrange or delete any of it.</div>
+    <div class="modal-actions">
+      <button class="modal-cancel" id="tourSkipWelcomeBtn">Skip</button>
+      <button class="modal-primary" id="tourStartBtn">Show me around</button>
+    </div>
+    <div class="tour-welcome-note">The tour takes about a minute. You can replay it from Settings.</div>
+  </div>
+</div>
+
+<!-- ════════ GUIDED TOUR ════════ -->
+<div class="tour-overlay" id="tourOverlay">
+  <div class="tour-spot" id="tourSpot"></div>
+  <div class="tour-card" id="tourCard" role="dialog" aria-live="polite">
+    <div class="tour-progress" id="tourProgress"></div>
+    <div class="tour-head">
+      <div class="tour-title" id="tourTitle"></div>
+      <div class="tour-count" id="tourCount"></div>
+    </div>
+    <div class="tour-body" id="tourBody"></div>
+    <div class="tour-nav">
+      <button class="tour-skip" id="tourSkipBtn">Skip tour</button>
+      <div class="tour-nav-spacer"></div>
+      <button class="tour-back" id="tourBackBtn">Back</button>
+      <button class="tour-next" id="tourNextBtn">Next</button>
+    </div>
   </div>
 </div>
 

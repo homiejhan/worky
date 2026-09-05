@@ -4101,6 +4101,10 @@ function syncRenderChoiceInfo() {
 }
 function syncOpenChoiceModal() {
   syncRenderChoiceInfo();
+  if ($('tourWelcomeModal')?.classList.contains('show')) {   // sync choice first, tour after
+    closeModal('tourWelcomeModal');
+    tourReoffer = true;
+  }
   $('syncChoiceModal')?.classList.add('show');
 }
 function syncChooseImport() {
@@ -4109,6 +4113,7 @@ function syncChooseImport() {
   $('syncChoiceModal')?.classList.remove('show');
   if (pending) syncApplyRemote(pending.state, pending.updatedAt);
   syncUpdateUI();
+  if (tourReoffer) { tourReoffer = false; tourMarkSeen(); }   // cloud data → returning user
 }
 function syncChooseExport() {
   syncPendingRemote = null;
@@ -4116,6 +4121,7 @@ function syncChooseExport() {
   syncPushNow();
   showToast('Exported to cloud ✓');
   syncUpdateUI();
+  if (tourReoffer) tourOffer();
 }
 
 /* ── Sign-in flow ── */
@@ -4710,6 +4716,7 @@ function bindTheme() {
 /* ───────────────────────── STATIC BINDINGS ───────────────────────── */
 function bindStatic() {
   bindTheme();
+  bindTour();
   /* wakeup */
   $('wakeupRow-d')?.addEventListener('click', toggleWakeup);
   $('wakeupRow-m')?.addEventListener('click', toggleWakeup);
@@ -4813,9 +4820,361 @@ function bindStatic() {
   });
 }
 
+/* ───────────────────────── ONBOARDING ─────────────────────────
+ * First run on a device (no saved state) → seed a starter profile that
+ * shows a little of every feature, then offer a guided tour.
+ *
+ * The starter profile is ordinary state: it goes through the same save /
+ * sync / export paths as anything the user builds, so there is nothing
+ * special to unwind — rename, delete or "Clear storage" as usual.
+ *
+ * The tour flag is device-local (TOUR_LS_KEY), deliberately outside the
+ * synced state: a new device is a new first run even for a returning cloud
+ * user, and Skip is one tap. Settings → "Take the tour" replays it. */
+const TOUR_LS_KEY = 'focus-tour-done';
+
+function starterDateKey(offset) {
+  const d = calToday(); d.setDate(d.getDate() + offset); return calDateKey(d);
+}
+
+/* Build the starter state in place. Dates are relative to today so the
+ * profile always looks live: something due today, something upcoming,
+ * an event in the next few hours. */
+function applyStarterProfile() {
+  const today = dbdTodayKey();
+
+  /* timers */
+  TIMER_DEFAULTS = [
+    { label: 'Deep work', seconds: 4 * 3600, color: '#378ADD' },
+    { label: 'Learning',  seconds: 90 * 60,  color: '#8B5CF6' },
+    { label: 'Exercise',  seconds: 1 * 3600, color: '#22C55E' },
+    { label: 'Reading',   seconds: 30 * 60,  color: '#F97316' },
+  ];
+  timers = TIMER_DEFAULTS.map((t, i) => ({
+    id: i, label: t.label, seconds: t.seconds, color: t.color,
+    running: false, startedAt: null, secondsAtStart: null,
+  }));
+  wokenUp = false;
+
+  /* lists — Daily (repeating) and custom Lists */
+  todoIdCounter = 0;
+  taskIdCounter = 0;
+  const mk = (title, color, texts, extra) => ({
+    id: todoIdCounter++, title, color,
+    isDefault: false, starred: false, activeDays: null,
+    tasks: makeTasks(texts),
+    ...extra,
+  });
+  const projects = mk('Projects', '#8B5CF6',
+    ['Finish the reading list', 'Book a dentist appointment', 'Back up the laptop']);
+  projects.tasks[0].due = starterDateKey(3);   // dated list tasks surface in Day by Day
+
+  todoLists = [
+    /* "Morning routine" is also a task inside Health: a task named after a
+     * Daily list checks itself off when that list is complete. */
+    mk('Morning routine', '#22C55E',
+      ['Make the bed', 'Stretch for 10 minutes', 'Drink a glass of water', 'Plan the day'],
+      { isDefault: true, starred: true }),
+    mk('Health', '#378ADD',
+      ['Morning routine', 'Walk or workout', 'Eight glasses of water', 'In bed by 11'],
+      { isDefault: true, starred: true }),
+    mk('Weekend reset', '#F97316',
+      ['Tidy up', 'Meal prep', 'Plan next week'],
+      { isDefault: true, activeDays: [0, 6] }),   // only shows Sat + Sun
+    mk('Groceries', '#EAB308',
+      ['Eggs', 'Oat milk', 'Spinach', 'Coffee beans'],
+      { starred: true }),
+    projects,
+    mk('Someday', '#505050', ['Learn to bake sourdough', 'Plan a weekend trip']),
+  ];
+
+  /* day by day */
+  dbdIdCounter = 1;
+  dbdTasks = [
+    { id: dbdIdCounter++, text: 'Take a look around Worky',            due: today,             done: false },
+    { id: dbdIdCounter++, text: 'Rename the timers to match your day', due: starterDateKey(1), done: false },
+    { id: dbdIdCounter++, text: 'Open Formats and save your setup',    due: starterDateKey(2), done: false },
+  ];
+
+  /* calendar — weekly templates plus one event in the next few hours */
+  calEvents = {};
+  calEventIdCtr = 1;
+  const tmpl = (title, start, end, color, repeatDays, type) => ({
+    id: calEventIdCtr++, title, start, end, color,
+    type: type || 'event', isTemplate: true, repeatDays,
+  });
+  calTemplates = [
+    tmpl('Deep work',     '09:00', '11:00', '#378ADD', [1, 2, 3, 4, 5]),
+    tmpl('Lunch',         '12:30', '12:30', '#505050', [1, 2, 3, 4, 5], 'divider'),
+    tmpl('Workout',       '17:30', '18:30', '#22C55E', [1, 3, 5]),
+    tmpl('Weekly review', '18:00', '18:45', '#8B5CF6', [0]),
+  ];
+  calEnsureDay(today);
+  const startMins = Math.min((new Date().getHours() + 1) * 60, 22 * 60);
+  calEvents[today].push({
+    id: calEventIdCtr++, title: 'Explore the calendar',
+    start: calMinsToStr(startMins), end: calMinsToStr(startMins + 45),
+    color: '#5DCAA5', type: 'event',
+  });
+
+  /* budget */
+  purchaseIdCounter = 1;
+  budget = normalizeBudget({
+    initial: 60, daily: 20, todayAllowance: null, lastDate: today,
+    purchases: [{ id: purchaseIdCounter++, title: 'Coffee', amount: 4.5 }],
+  });
+
+  views = normalizeViews(null);
+  theme = normalizeTheme(null);
+  calSave();
+}
+
+/* ── Guided tour ──
+ * A spotlight (one element with a huge box-shadow) plus a card. Each step
+ * names the view it lives in; the tour switches to that view on whichever
+ * layout is active, then measures the target after the DOM settles. */
+const TOUR_STEPS = [
+  { key: 'home', view: 'home', title: 'Home',
+    body: 'Your day on one page: today\'s progress, what\'s due, timers, the next few hours of your calendar and any list you\'ve starred. Everything here is pulled from the other sections — tap a task to check it off right from Home.',
+    target: { d: '#homeContainer-d .home-hero', m: '#homeContainer-m .home-hero' } },
+  { key: 'timers', view: 'timers', title: 'Timers',
+    body: 'Countdown budgets for the things you want to spend time on. Tap a timer to start or pause it, tap the time to edit it, and mark "Woke up" to start the day. Timers reset to their defaults with Reset.',
+    target: { d: '#timersSection-d', m: ['#wakeupRow-m', '#timerStack-m'] } },
+  { key: 'daily', view: 'daily', title: 'Daily',
+    body: 'Lists that repeat every day. Star a list to pin it on Home, or open its schedule to show it only on certain days — "Weekend reset" only appears on Saturdays and Sundays. A task named after another Daily list (like "Morning routine" inside Health) checks itself off when that list is complete.',
+    target: { d: '#dailySection-d', m: '#defaultContainer-m' } },
+  { key: 'dbd', view: 'lists', title: 'Day by Day',
+    body: 'One-off tasks with a date. Overdue ones turn red and stay until you clear them. Use the Tag menu on a task to file it under one of your lists; it keeps its date and still shows up here.',
+    target: { d: ['#dbdAddRow-d', '#dbdContainer-d'], m: ['#dbdAddRow-m', '#dbdContainer-m'] } },
+  { key: 'lists', view: 'lists', title: 'Lists',
+    body: 'Your own lists for anything: groceries, projects, someday. Give a task a date and it appears in Day by Day too. Star a list to see it on Home, and drag lists and tasks to reorder them.',
+    target: { d: '#todoContainer-d', m: '#todoContainer-m' } },
+  { key: 'calendar', view: 'calendar', title: 'Calendar',
+    body: 'Tap an empty slot to add an event, drag to move one. Dividers mark a moment without a duration. The color chips filter what you see. In Formats, events you add repeat weekly as templates. Connect Google Calendar in Settings to see and send events.',
+    target: { d: '#calDesktopPanel', m: '#mobileCalPanel' } },
+  { key: 'budget', view: 'budget', title: 'Budget',
+    body: 'A daily envelope. Set a daily amount and a starting balance, log purchases as you go, and whatever is left rolls over at midnight. Home shows today\'s balance at a glance.',
+    target: { d: '#budgetContainer-d .budget-wrap', m: '#budgetContainer-m .budget-wrap' } },
+  { key: 'formats', title: 'Formats',
+    body: 'Formats is where you edit your defaults: which timers exist and how long they run, which Daily lists there are, and the weekly calendar templates. Press Done to save. Reset returns timers and Daily tasks to whatever you set here.',
+    target: { d: '#fmtBtn', m: '#fmtBtn' } },
+  { key: 'settings', title: 'Settings',
+    body: 'Hide sections you don\'t use, pick a theme or build your own, connect Google Calendar, and sign in to sync everything across your devices. You can replay this tour from here too.',
+    target: { d: '#settingsBtn', m: '#settingsBtn' } },
+  { key: 'data', title: 'Your data',
+    body: 'Everything lives on this device unless you turn on cloud sync. Export saves a copy you can import anywhere; Reset starts a fresh day without touching your lists.',
+    target: { d: ['#exportBtn', '#resetAllBtn'], m: ['#exportBtn', '#resetAllBtn'] } },
+  { key: 'finish', view: 'home', title: 'That\'s the tour',
+    body: 'This starter setup is just a starting point. Rename the timers, replace the lists, clear the calendar, or wipe it all from Settings → Clear storage. Have a good day.',
+    target: null },
+];
+
+let tourActive   = false;
+let tourIdx      = 0;
+let tourSteps    = [];
+let tourReoffer  = false;   // welcome was hidden by the cloud-sync choice modal
+let _tourRaf     = 0;
+let _tourTimer   = null;
+
+function tourIsMobile() {
+  const m = $('mobileApp');
+  return !!m && getComputedStyle(m).display !== 'none';
+}
+function tourSeen() {
+  try { return localStorage.getItem(TOUR_LS_KEY) === '1'; } catch (e) { return false; }
+}
+function tourMarkSeen() {
+  try { localStorage.setItem(TOUR_LS_KEY, '1'); } catch (e) {}
+}
+
+/* Show the welcome card unless the tour was already seen or the cloud-sync
+ * choice modal needs the user's attention first (it re-offers afterwards). */
+function tourOffer() {
+  if (tourSeen() || tourActive) return;
+  if (syncPendingRemote || $('syncChoiceModal')?.classList.contains('show')) { tourReoffer = true; return; }
+  tourReoffer = false;
+  $('tourWelcomeModal')?.classList.add('show');
+}
+function tourDismissWelcome() {
+  closeModal('tourWelcomeModal');
+  tourMarkSeen();
+}
+
+function tourStart() {
+  document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
+  if (formatMode) commitFormatMode();
+  tourMarkSeen();
+  tourSteps = TOUR_STEPS.filter(s => !s.view || viewEnabled(s.view));
+  tourIdx = 0;
+  tourActive = true;
+  $('tourOverlay')?.classList.add('show');
+  document.body.classList.add('tour-on');
+  window.addEventListener('resize', tourRelayout);
+  document.addEventListener('scroll', tourRelayout, true);
+  document.addEventListener('keydown', tourKeydown);
+  tourShowStep();
+}
+
+function tourEnd() {
+  if (!tourActive) return;
+  tourActive = false;
+  clearTimeout(_tourTimer);
+  cancelAnimationFrame(_tourRaf);
+  $('tourOverlay')?.classList.remove('show');
+  document.body.classList.remove('tour-on');
+  window.removeEventListener('resize', tourRelayout);
+  document.removeEventListener('scroll', tourRelayout, true);
+  document.removeEventListener('keydown', tourKeydown);
+  tourGoView('home');
+}
+
+function tourNext() {
+  if (tourIdx >= tourSteps.length - 1) { tourEnd(); return; }
+  tourIdx++;
+  tourShowStep();
+}
+function tourPrev() {
+  if (tourIdx === 0) return;
+  tourIdx--;
+  tourShowStep();
+}
+
+function tourKeydown(e) {
+  if (!tourActive) return;
+  if (e.key === 'Escape')                       { e.preventDefault(); tourEnd(); }
+  else if (e.key === 'ArrowRight' || e.key === 'Enter') { e.preventDefault(); tourNext(); }
+  else if (e.key === 'ArrowLeft')               { e.preventDefault(); tourPrev(); }
+}
+
+/* Switch whichever layout is active to the view a step lives in. Desktop
+ * views are overlays over the right panel, so opening one closes the rest. */
+function tourGoView(view) {
+  if (!view) return;
+  if (tourIsMobile()) { goTab(view, false); return; }
+  switch (view) {
+    case 'home':
+    case 'timers':
+      homeToggleDesktop(true); break;
+    case 'calendar':
+      if (!calDesktopOpen) calToggleDesktop(); break;
+    case 'budget':
+      budgetToggleDesktop(true); break;
+    default:                                   // daily / lists live in the right panel
+      if (calDesktopOpen) calToggleDesktop();
+      if (budgetDesktopOpen) budgetToggleDesktop(false);
+      homeToggleDesktop(false);
+  }
+}
+
+function tourTargets(step) {
+  if (!step.target) return [];
+  const sel = step.target[tourIsMobile() ? 'm' : 'd'];
+  const list = Array.isArray(sel) ? sel : [sel];
+  return list.map(s => document.querySelector(s)).filter(el => el && el.getClientRects().length > 0);
+}
+
+function tourShowStep() {
+  const step = tourSteps[tourIdx];
+  if (!step) { tourEnd(); return; }
+  tourGoView(step.view);
+
+  const total = tourSteps.length;
+  const prog = $('tourProgress');
+  if (prog) prog.innerHTML = tourSteps.map((_, i) => `<i class="${i <= tourIdx ? 'on' : ''}"></i>`).join('');
+  const title = $('tourTitle'); if (title) title.textContent = step.title;
+  const body  = $('tourBody');  if (body)  body.textContent  = step.body;
+  const count = $('tourCount'); if (count) count.textContent = `${tourIdx + 1} of ${total}`;
+  const back  = $('tourBackBtn'); if (back) back.style.visibility = tourIdx === 0 ? 'hidden' : '';
+  const next  = $('tourNextBtn'); if (next) next.textContent = tourIdx === total - 1 ? 'Finish' : 'Next';
+  const skip  = $('tourSkipBtn'); if (skip) skip.style.visibility = tourIdx === total - 1 ? 'hidden' : '';
+
+  /* let the view switch / render settle, then bring the target into view and measure */
+  clearTimeout(_tourTimer);
+  _tourTimer = setTimeout(() => {
+    const els = tourTargets(step);
+    if (els[0]) { try { els[0].scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) {} }
+    tourRelayout();
+  }, 60);
+}
+
+function tourRelayout() {
+  if (!tourActive) return;
+  cancelAnimationFrame(_tourRaf);
+  _tourRaf = requestAnimationFrame(tourLayout);
+}
+
+function tourLayout() {
+  const step = tourSteps[tourIdx];
+  const spot = $('tourSpot');
+  const card = $('tourCard');
+  if (!step || !spot || !card) return;
+
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const els = tourTargets(step);
+  let rect = null;
+  if (els.length) {
+    const rs = els.map(el => el.getBoundingClientRect());
+    const pad = 6;
+    rect = {
+      left:   Math.max(4,      Math.min(...rs.map(r => r.left))   - pad),
+      top:    Math.max(4,      Math.min(...rs.map(r => r.top))    - pad),
+      right:  Math.min(vw - 4, Math.max(...rs.map(r => r.right))  + pad),
+      bottom: Math.min(vh - 4, Math.max(...rs.map(r => r.bottom)) + pad),
+    };
+    if (rect.right - rect.left < 8 || rect.bottom - rect.top < 8) rect = null;
+  }
+
+  spot.classList.toggle('none', !rect);
+  if (rect) {
+    spot.style.left   = rect.left + 'px';
+    spot.style.top    = rect.top + 'px';
+    spot.style.width  = (rect.right - rect.left) + 'px';
+    spot.style.height = (rect.bottom - rect.top) + 'px';
+  }
+
+  /* card placement: mobile pins it above the data bar; desktop tries beside,
+   * below, above the spotlight, and finally the screen centre */
+  card.classList.toggle('bottom', tourIsMobile());
+  if (tourIsMobile()) { card.style.left = card.style.top = ''; return; }
+
+  const cw = card.offsetWidth, ch = card.offsetHeight, gap = 14;
+  let left, top;
+  if (!rect) {
+    left = (vw - cw) / 2; top = (vh - ch) / 2;
+  } else if (rect.right + gap + cw <= vw - 16) {                 // right of target
+    left = rect.right + gap; top = Math.min(Math.max(16, rect.top), vh - ch - 60);
+  } else if (rect.bottom + gap + ch <= vh - 60) {                // below
+    left = Math.min(Math.max(16, rect.left), vw - cw - 16); top = rect.bottom + gap;
+  } else if (rect.top - gap - ch >= 16) {                        // above
+    left = Math.min(Math.max(16, rect.left), vw - cw - 16); top = rect.top - gap - ch;
+  } else if (rect.left - gap - cw >= 16) {                       // left of target
+    left = rect.left - gap - cw; top = Math.min(Math.max(16, rect.top), vh - ch - 60);
+  } else {                                                       // huge target → centre over it
+    left = (vw - cw) / 2; top = Math.max(16, Math.min(vh - ch - 60, (rect.top + rect.bottom - ch) / 2));
+  }
+  card.style.left = Math.round(left) + 'px';
+  card.style.top  = Math.round(top) + 'px';
+}
+
+function bindTour() {
+  $('tourStartBtn')?.addEventListener('click', tourStart);
+  $('tourSkipWelcomeBtn')?.addEventListener('click', tourDismissWelcome);
+  $('tourWelcomeModal')?.addEventListener('click', e => { if (e.target === e.currentTarget) tourMarkSeen(); });
+  $('tourReplayBtn')?.addEventListener('click', tourStart);
+  $('tourNextBtn')?.addEventListener('click', tourNext);
+  $('tourBackBtn')?.addEventListener('click', tourPrev);
+  $('tourSkipBtn')?.addEventListener('click', tourEnd);
+  $('tourOverlay')?.addEventListener('click', e => { if (e.target === e.currentTarget) tourNext(); });
+  /* Escape on the welcome card counts as a skip (the generic handler closes it) */
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && $('tourWelcomeModal')?.classList.contains('show')) tourMarkSeen();
+  });
+}
+
 /* ───────────────────────── INIT ───────────────────────── */
 (function init() {
-  loadFromLocal();
+  const firstRun = !loadFromLocal();
+  if (firstRun) applyStarterProfile();   // seed a starter day on a fresh device
   applyTheme();
   calLoad();
   calLoadHiddenColors();
@@ -4874,4 +5233,7 @@ function bindStatic() {
   gcalUpdateBtn();
   if (gcalIsConnected()) gcalSyncAll();
   setInterval(() => { if (gcalIsConnected()) gcalSyncAll(); }, 5 * 60 * 1000);
+
+  /* onboarding: welcome + guided tour on a fresh device */
+  if (firstRun) tourOffer();
 })();
