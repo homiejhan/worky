@@ -2,7 +2,8 @@
    FOCUS — app.js
    Sections: CONFIG · STATE · UTIL · PERSISTENCE · TIMERS ·
    WAKEUP · TODOS · DRAG ENGINE · FORMAT MODE · DATA ·
-   TABS · CALENDAR · GOOGLE CALENDAR · CLOUD SYNC · THEME · BINDINGS · INIT
+   TASK↔CALENDAR LINKS · TABS · CALENDAR · GOOGLE CALENDAR · CLOUD SYNC ·
+   THEME · BINDINGS · INIT
    ═══════════════════════════════════════════════════════ */
 
 /* ───────────────────────── CONFIG ───────────────────────── */
@@ -233,6 +234,7 @@ function calPxToMins(px) { return Math.round((px/CAL_HOUR_PX)*60/15)*15; }
  *   dbdTask: id→i text→tx due→du done→dn doneOn→dw
  *   calEvent: id→i title→ti start→s end→e color→c type→tp
  *     fromTemplate→ft templateId→tid repeatDays→rd gcalId→gi gcalCalId→gc
+ *     linkTaskId→tk linkDbdId→dk   (task ↔ event link, see TASK↔CALENDAR LINKS)
  */
 function compressState(st) {
   const cTimer = t => {
@@ -265,6 +267,8 @@ function compressState(st) {
     if (e.repeatDays) o.rd = e.repeatDays;
     if (e.gcalId)    o.gi = e.gcalId;
     if (e.gcalCalId) o.gc = e.gcalCalId;
+    if (e.linkTaskId != null) o.tk = e.linkTaskId;
+    if (e.linkDbdId  != null) o.dk = e.linkDbdId;
     return o;
   };
   const cDbd = t => { const o = { i:t.id, tx:t.text, du:t.due }; if (t.done) o.dn=1; if (t.doneOn) o.dw=t.doneOn; return o; };
@@ -301,6 +305,8 @@ function decompressState(c) {
     type:e.tp || 'event', fromTemplate:!!e.ft,
     templateId:e.tid ?? null, repeatDays:e.rd || null,
     gcalId:e.gi ?? null, gcalCalId:e.gc ?? null,
+    ...(e.tk != null ? { linkTaskId: e.tk } : {}),
+    ...(e.dk != null ? { linkDbdId: e.dk } : {}),
   });
   const dDbd = t => ({ id:t.i, text:t.tx, due:t.du, done:!!t.dn, doneOn:t.dw });
   // Missing bg (data saved before the Budget feature) loads as a clean zero budget.
@@ -736,6 +742,7 @@ function buildCard(list, pfx) {
       ? `<span class="task-sync-badge task-parent-badge" title="Linked to the &quot;${escAttr(task.text)}&quot; list — all subtasks complete = this task checks off">${CHILD_SVG}</span>`
       : '';
     const dateCtl = !list.isDefault ? taskDateCtlHtml(list, task) : '';
+    const calCtl  = !list.isDefault ? taskLinkChipHtml('list', task.id) : '';
     return `
       <div class="task-row" data-task-id="${task.id}" data-list-id="${list.id}">
         ${rowHandle}
@@ -748,9 +755,10 @@ function buildCard(list, pfx) {
         <input class="task-text task-text-${task.id} ${task.done?'done':''}"
           value="${escAttr(task.text)}" placeholder="Task…"
           oninput="setTaskText(${list.id},${task.id},this.value)"
-          onblur="refreshSyncBadges()"
+          onblur="refreshSyncBadges();taskLinkFlushRename('list',${task.id})"
           onkeydown="if(event.key==='Enter'){event.preventDefault();addTask(${list.id});}">
         ${dateCtl}
+        ${calCtl}
         ${syncBadge}
         ${parentBadge}
         <button class="task-del" onclick="removeTask(${list.id},${task.id})">×</button>
@@ -1025,6 +1033,7 @@ function removeTask(listId, taskId) {
   if (!list) return;
   if (list.isDefault && !formatMode) return;
   list.tasks = list.tasks.filter(t => t.id !== taskId);
+  if (taskLinkClearAll(taskLinkRef('list', taskId))) { calSave(); calRefresh(); }
   renderTodos();
   renderDbd();
   saveToLocal();
@@ -1040,6 +1049,7 @@ function setTaskText(listId, taskId, value) {
   document.querySelectorAll(`input.task-text-${taskId}`).forEach(el => {
     if (el !== document.activeElement) el.value = value;
   });
+  if (!list.isDefault) taskLinkOnTaskRenamed(taskLinkRef('list', taskId), value);
   saveToLocal();
 }
 
@@ -1175,6 +1185,7 @@ function toggleTask(listId, taskId) {
   if (touchedDated) renderDbd();   // re-group (overdue/today/completed) + repaint tags
   saveToLocal();
   homeUpdateProgressDom();
+  if (!list.isDefault) taskLinkRepaint(taskLinkRef('list', taskId));
 }
 
 function moveList(fromListId, toListId, placeAfter, isDefault) {
@@ -1554,23 +1565,26 @@ function toggleDbdTask(id) {
   else delete t.doneOn;
   renderDbd();
   saveToLocal();
+  taskLinkRepaint(taskLinkRef('dbd', id));
 }
 
 function removeDbdTask(id) {
   dbdTasks = dbdTasks.filter(t => t.id !== id);
+  if (taskLinkClearAll(taskLinkRef('dbd', id))) { calSave(); calRefresh(); }
   renderDbd();
   saveToLocal();
 }
 
 function setDbdText(id, value) {
   const t = dbdById(id);
-  if (t) { t.text = value; saveToLocal(); }
+  if (t) { t.text = value; taskLinkOnTaskRenamed(taskLinkRef('dbd', id), value); saveToLocal(); }
 }
 
 function setDbdDue(id, value) {
   const t = dbdById(id);
   if (!t || !value) return;
   t.due = value;
+  taskLinkOnTaskDueChanged(taskLinkRef('dbd', id), value);
   renderDbd();
   saveToLocal();
 }
@@ -1609,6 +1623,7 @@ function tagDbdTask(dbdId, val) {
   const nt = { id: taskIdCounter++, text: t.text, done: t.done, due: t.due || dbdTodayKey() };
   if (t.doneOn) nt.doneOn = t.doneOn;
   list.tasks.push(nt);
+  taskLinkRepoint(taskLinkRef('dbd', dbdId), taskLinkRef('list', nt.id));
   renderTodos();
   renderDbd();
   saveToLocal();
@@ -1622,8 +1637,10 @@ function retagListTask(listId, taskId, val) {
   if (idx === -1) return;
   if (!val) {
     const [t] = list.tasks.splice(idx, 1);
-    dbdTasks.push({ id: dbdIdCounter++, text: t.text, due: t.due || dbdTodayKey(),
+    const nid = dbdIdCounter++;
+    dbdTasks.push({ id: nid, text: t.text, due: t.due || dbdTodayKey(),
       done: t.done, ...(t.doneOn ? { doneOn: t.doneOn } : {}) });
+    taskLinkRepoint(taskLinkRef('list', taskId), taskLinkRef('dbd', nid));
   } else {
     const dest = listById(parseInt(val, 10));
     if (!dest || dest.isDefault || dest === list) { renderDbd(); return; }
@@ -1647,6 +1664,7 @@ function setListTaskDue(listId, taskId, value) {
     delete task.due;
     delete task.doneOn;
   }
+  taskLinkOnTaskDueChanged(taskLinkRef('list', taskId), value || '');
   renderTodos();
   renderDbd();
   saveToLocal();
@@ -1668,10 +1686,12 @@ function dbdRowHtml(entry, overdue) {
         </svg>
       </div>
       <input class="task-text task-text-${t.id} ${t.done ? 'done' : ''}" value="${escAttr(t.text)}" placeholder="Task…"
-        oninput="setTaskText(${list.id},${t.id},this.value)">
+        oninput="setTaskText(${list.id},${t.id},this.value)"
+        onblur="taskLinkFlushRename('list',${t.id})">
       ${tagSel}
       <input type="date" class="dbd-date-input" value="${escAttr(t.due)}"
         onchange="setListTaskDue(${list.id},${t.id},this.value)" title="Due date">
+      ${taskLinkChipHtml('list', t.id)}
       <button class="task-del" onclick="removeTask(${list.id},${t.id})">×</button>
     </div>`;
   }
@@ -1684,10 +1704,12 @@ function dbdRowHtml(entry, overdue) {
         </svg>
       </div>
       <input class="task-text ${t.done ? 'done' : ''}" value="${escAttr(t.text)}" placeholder="Task…"
-        oninput="setDbdText(${t.id}, this.value)">
+        oninput="setDbdText(${t.id}, this.value)"
+        onblur="taskLinkFlushRename('dbd',${t.id})">
       ${tagSel}
       <input type="date" class="dbd-date-input" value="${dueAttr}"
         onchange="setDbdDue(${t.id}, this.value)" title="Due date">
+      ${taskLinkChipHtml('dbd', t.id)}
       <button class="task-del" onclick="removeDbdTask(${t.id})">×</button>
     </div>`;
 }
@@ -1751,6 +1773,469 @@ function dbdCheckRollover() {
   ['d','m'].forEach(pfx => { const el = $(`dbdDate-${pfx}`); if (el) el.value = k; });
   renderDbd();
   renderTodos();   // Daily lists' "active today" can change at midnight too
+}
+
+/* ───────────────────────── TASK ↔ CALENDAR LINKS ─────────────────────────
+ * A dated task (Day-by-Day task, or a custom-list task with a due date) can
+ * be linked to ONE calendar event. The link lives on the EVENT
+ * (ev.linkTaskId for custom-list tasks, ev.linkDbdId for Day-by-Day tasks),
+ * so the task objects stay untouched and the existing task/dbd move & tag
+ * flows only need to re-point the reference.
+ *
+ * Rules:
+ *   • The task name is the source of truth — a linked event's title always
+ *     mirrors the task text (locally and, if the event is synced, in GCal).
+ *   • Linking sets the task's due date to the event's day (an undated list
+ *     task therefore surfaces in Day by Day). Changing the task's due date
+ *     moves the event; dragging the event to another day moves the task.
+ *   • Deleting either side only removes the link — the other side survives.
+ *   • The calendar only holds the visible 7-day window (calPruneDays), so
+ *     links can only target days in that window; an event that scrolls out
+ *     of the window is pruned like any other and the task shows as unlinked.
+ */
+// Chain icon on a linked calendar event; clock icon on the task-row chip.
+const LINK_SVG  = '<svg width="10" height="10" viewBox="0 0 14 14" fill="none"><path d="M5.8 8.2a2.4 2.4 0 0 1 0-3.4l1.5-1.5a2.4 2.4 0 0 1 3.4 3.4l-.8.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M8.2 5.8a2.4 2.4 0 0 1 0 3.4l-1.5 1.5a2.4 2.4 0 0 1-3.4-3.4l.8-.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+const CLOCK_SVG = '<svg width="11" height="11" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="4.6" stroke="currentColor" stroke-width="1.2"/><path d="M6 3.4V6l1.8 1.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+function taskLinkRef(kind, id) { return { kind, id }; }
+function taskLinkRefOfEvent(ev) {
+  if (!ev) return null;
+  if (ev.linkTaskId != null) return { kind: 'list', id: ev.linkTaskId };
+  if (ev.linkDbdId  != null) return { kind: 'dbd',  id: ev.linkDbdId };
+  return null;
+}
+function taskLinkSameRef(a, b) { return !!a && !!b && a.kind === b.kind && a.id === b.id; }
+function taskLinkSetOnEvent(ev, ref) {
+  delete ev.linkTaskId;
+  delete ev.linkDbdId;
+  if (!ref) return;
+  if (ref.kind === 'list') ev.linkTaskId = ref.id;
+  else ev.linkDbdId = ref.id;
+}
+
+/* Resolve a ref to its live task (+ owning list for list tasks). */
+function taskLinkResolveTask(ref) {
+  if (!ref) return null;
+  if (ref.kind === 'dbd') {
+    const t = dbdById(ref.id);
+    return t ? { task: t, list: null, kind: 'dbd' } : null;
+  }
+  for (const l of todoLists) {
+    if (l.isDefault) continue;
+    const t = l.tasks.find(x => x.id === ref.id);
+    if (t) return { task: t, list: l, kind: 'list' };
+  }
+  return null;
+}
+
+/* Find the event linked to a task: { ev, dateKey } or null. */
+function taskLinkGet(ref) {
+  if (!ref) return null;
+  for (const [dateKey, evs] of Object.entries(calEvents)) {
+    const ev = (evs || []).find(e => taskLinkSameRef(taskLinkRefOfEvent(e), ref));
+    if (ev) return { ev, dateKey };
+  }
+  return null;
+}
+
+/* Display title for any local event (linked → task text). */
+function taskLinkEventTitle(ev) {
+  const res = taskLinkResolveTask(taskLinkRefOfEvent(ev));
+  return res ? res.task.text : (ev.title || '');
+}
+function taskLinkEventDone(ev) {
+  const res = taskLinkResolveTask(taskLinkRefOfEvent(ev));
+  return !!(res && res.task.done);
+}
+
+/* Heal drift after loads / cloud merges: mirror task text onto linked
+ * events and drop links whose task no longer exists. Returns true if
+ * anything changed. */
+function taskLinkSyncTitles() {
+  let changed = false;
+  Object.values(calEvents).forEach(evs => (evs || []).forEach(ev => {
+    const ref = taskLinkRefOfEvent(ev);
+    if (!ref) return;
+    const res = taskLinkResolveTask(ref);
+    if (!res) { taskLinkSetOnEvent(ev, null); changed = true; return; }
+    if (ev.title !== res.task.text) { ev.title = res.task.text; changed = true; }
+  }));
+  return changed;
+}
+
+/* Remove every link that points at `ref` (the events keep their title). */
+function taskLinkClearAll(ref, exceptEv) {
+  let changed = false;
+  Object.values(calEvents).forEach(evs => (evs || []).forEach(ev => {
+    if (ev !== exceptEv && taskLinkSameRef(taskLinkRefOfEvent(ev), ref)) {
+      taskLinkSetOnEvent(ev, null);
+      changed = true;
+    }
+  }));
+  return changed;
+}
+
+/* A task changed identity (dbd ⇄ list via tagging): keep the link. */
+function taskLinkRepoint(oldRef, newRef) {
+  Object.values(calEvents).forEach(evs => (evs || []).forEach(ev => {
+    if (taskLinkSameRef(taskLinkRefOfEvent(ev), oldRef)) taskLinkSetOnEvent(ev, newRef);
+  }));
+}
+
+/* Task renamed while typing: update the event title + patch the grid in
+ * place (no re-render, so the input keeps focus). GCal is updated on blur. */
+function taskLinkOnTaskRenamed(ref, text) {
+  const hit = taskLinkGet(ref);
+  if (!hit) return;
+  hit.ev.title = text;
+  document.querySelectorAll(`.cal-event[data-ev-id="${hit.ev.id}"] .cal-event-title`)
+    .forEach(el => { el.textContent = text || '(no title)'; });
+  calSave();
+}
+async function taskLinkFlushRename(kind, id) {
+  const hit = taskLinkGet(taskLinkRef(kind, id));
+  if (!hit || !hit.ev.gcalId || !gcalIsConnected()) return;
+  await gcalUpdateEvent(hit.ev.gcalId, hit.ev.gcalCalId, hit.ev, hit.dateKey);
+  await gcalSyncAll();
+}
+
+/* Task due date changed → move the event with it (same time of day).
+ * Outside the calendar window the event can't live, so just unlink. */
+async function taskLinkOnTaskDueChanged(ref, newDue) {
+  const hit = taskLinkGet(ref);
+  if (!hit) return;
+  const { ev, dateKey } = hit;
+  if (!newDue) {
+    taskLinkSetOnEvent(ev, null);
+    calSave(); calRefresh();
+    showToast('Unlinked from calendar event');
+    return;
+  }
+  if (newDue === dateKey) return;
+  const inWindow = calDisplayDays().map(calDateKey).includes(newDue);
+  if (!inWindow) {
+    taskLinkSetOnEvent(ev, null);
+    calSave(); calRefresh();
+    showToast('Unlinked — the calendar only shows the next 7 days');
+    return;
+  }
+  calEvents[dateKey] = (calEvents[dateKey] || []).filter(e => e.id !== ev.id);
+  calEnsureDay(newDue);
+  calEvents[newDue].push({ ...ev, fromTemplate: false });
+  calSave();
+  calRefresh();
+  if (ev.gcalId && gcalIsConnected()) {
+    await gcalUpdateEvent(ev.gcalId, ev.gcalCalId, ev, newDue);
+    await gcalSyncAll();
+  }
+}
+
+/* Event dragged on the grid → keep the task's due date in step and refresh
+ * the time chips on task rows. */
+function taskLinkAfterEventMoved(ev, fromKey, toKey) {
+  const ref = taskLinkRefOfEvent(ev);
+  if (!ref) return;
+  const res = taskLinkResolveTask(ref);
+  if (res && toKey !== fromKey && res.task.due !== toKey) res.task.due = toKey;
+  renderTodos();
+  renderDbd();
+  saveToLocal();
+}
+
+/* Task checked / unchecked → repaint its event (done styling). */
+function taskLinkRepaint(ref) {
+  const hit = taskLinkGet(ref);
+  if (!hit) return;
+  const done = taskLinkEventDone(hit.ev);
+  document.querySelectorAll(`.cal-event[data-ev-id="${hit.ev.id}"]`)
+    .forEach(el => el.classList.toggle('cal-linked-done', done));
+  renderHome();
+}
+
+/* ── task-row chip ── */
+function taskLinkChipHtml(kind, id) {
+  const hit = taskLinkGet(taskLinkRef(kind, id));
+  if (hit) {
+    const { ev, dateKey } = hit;
+    return `<button class="task-cal-chip linked" style="color:${escAttr(ev.color)}"
+      onclick="taskLinkOpenEvent('${kind}',${id})"
+      title="Linked to a calendar event on ${escAttr(dbdLabelFor(dateKey))} — tap to edit">${CLOCK_SVG}<span>${calFmtTime(ev.start)}</span></button>`;
+  }
+  return `<button class="task-cal-chip" onclick="openTaskLinkModal('${kind}',${id})" title="Link to a calendar event">${CLOCK_SVG}</button>`;
+}
+function taskLinkHomeChipHtml(kind, id) {
+  const hit = taskLinkGet(taskLinkRef(kind, id));
+  if (!hit) return '';
+  return `<span class="home-dbd-cal" style="color:${escAttr(hit.ev.color)}">${CLOCK_SVG}${calFmtTime(hit.ev.start)}</span>`;
+}
+
+/* Open the linked event in the regular event editor. */
+function taskLinkOpenEvent(kind, id) {
+  const hit = taskLinkGet(taskLinkRef(kind, id));
+  if (!hit) { openTaskLinkModal(kind, id); return; }
+  openCalModal(hit.dateKey, hit.ev.id);
+}
+
+/* ── Link modal ── */
+let taskLinkModalRef = null;
+let taskLinkDay      = null;
+let taskLinkColor    = CAL_COLORS[0];
+
+function openTaskLinkModal(kind, id) {
+  const ref = taskLinkRef(kind, id);
+  const res = taskLinkResolveTask(ref);
+  if (!res) return;
+  taskLinkModalRef = ref;
+  const days = calDisplayDays().map(calDateKey);
+  taskLinkDay = (res.task.due && days.includes(res.task.due)) ? res.task.due : calDateKey(calToday());
+  taskLinkColor = res.list ? res.list.color : CAL_COLORS[0];
+  if (!CAL_COLORS.some(c => c.toLowerCase() === taskLinkColor.toLowerCase())) taskLinkColor = CAL_COLORS[0];
+
+  $('taskLinkSub').textContent = `“${res.task.text || 'Untitled task'}” — pick an event, or create one. The event takes the task's name.`;
+
+  // default new-event time: next whole hour today, or 09:00 on other days
+  const now = new Date();
+  const startM = taskLinkDay === calDateKey(calToday())
+    ? Math.min(23 * 60, (now.getHours() + 1) * 60) : 9 * 60;
+  $('taskLinkStart').value = calMinsToStr(startM);
+  $('taskLinkEnd').value   = calMinsToStr(Math.min(1439, startM + 60));
+
+  taskLinkRenderDays();
+  taskLinkRenderColors();
+  taskLinkRenderEvents();
+  $('taskLinkModal').classList.add('show');
+}
+
+function closeTaskLinkModal() {
+  $('taskLinkModal').classList.remove('show');
+  taskLinkModalRef = null;
+}
+
+function taskLinkRenderDays() {
+  const wrap = $('taskLinkDays');
+  wrap.innerHTML = '';
+  calDisplayDays().forEach(d => {
+    const key = calDateKey(d);
+    const btn = document.createElement('button');
+    btn.className = 'tl-day-btn' + (key === taskLinkDay ? ' active' : '');
+    btn.innerHTML = `<span class="tl-day-dow">${calFmtShort(d)}</span><span class="tl-day-num">${d.getDate()}</span>`;
+    btn.title = calFmtFull(d);
+    btn.onclick = () => {
+      taskLinkDay = key;
+      wrap.querySelectorAll('.tl-day-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      taskLinkRenderEvents();
+    };
+    wrap.appendChild(btn);
+  });
+}
+
+function taskLinkRenderColors() {
+  const el = $('taskLinkColors');
+  el.innerHTML = '';
+  CAL_COLORS.forEach(c => {
+    const dot = document.createElement('div');
+    dot.className = 'cal-color-dot' + (c.toLowerCase() === taskLinkColor.toLowerCase() ? ' selected' : '');
+    dot.style.background = c;
+    dot.onclick = () => {
+      taskLinkColor = c;
+      el.querySelectorAll('.cal-color-dot').forEach(d => d.classList.remove('selected'));
+      dot.classList.add('selected');
+    };
+    el.appendChild(dot);
+  });
+}
+
+function taskLinkRenderEvents() {
+  const wrap = $('taskLinkEvents');
+  wrap.innerHTML = '';
+  const dateKey = taskLinkDay;
+  calEnsureDay(dateKey);
+  const rows = [];
+
+  (calEvents[dateKey] || [])
+    .filter(e => e.type !== 'divider')
+    .sort((a, b) => calTimeToMins(a.start) - calTimeToMins(b.start))
+    .forEach(ev => {
+      const ref = taskLinkRefOfEvent(ev);
+      const mine = taskLinkSameRef(ref, taskLinkModalRef);
+      const other = ref && !mine ? taskLinkResolveTask(ref) : null;
+      rows.push({
+        title: taskLinkEventTitle(ev), color: ev.color, start: ev.start, end: ev.end,
+        badge: mine ? 'Linked' : (other ? `Linked to “${other.task.text || 'Untitled'}”` : (ev.gcalId ? 'Synced' : '')),
+        mine, disabled: !!other,
+        onclick: () => taskLinkLinkTo(dateKey, ev.id),
+      });
+    });
+
+  if (gcalIsConnected()) {
+    const mirrored = new Set((calEvents[dateKey] || []).map(e => e.gcalId).filter(Boolean));
+    (gcalEvents[dateKey] || [])
+      .filter(g => !g.allDay && !mirrored.has(g.gcalId))
+      .sort((a, b) => calTimeToMins(a.start) - calTimeToMins(b.start))
+      .forEach(g => rows.push({
+        title: g.title, color: g.color, start: g.start, end: g.end,
+        badge: g.calName, mine: false, disabled: false,
+        onclick: () => taskLinkLinkToGcal(dateKey, g),
+      }));
+  }
+
+  if (!rows.length) {
+    wrap.innerHTML = '<div class="tl-empty">No events on this day yet — create one below.</div>';
+    return;
+  }
+  rows.forEach(r => {
+    const row = document.createElement('button');
+    row.className = 'tl-event' + (r.mine ? ' mine' : '') + (r.disabled ? ' disabled' : '');
+    row.disabled = r.disabled;
+    row.style.setProperty('--evc', r.color);
+    row.innerHTML = `
+      <span class="tl-event-dot"></span>
+      <span class="tl-event-main">
+        <span class="tl-event-title">${escAttr(r.title || '(no title)')}</span>
+        <span class="tl-event-time">${calFmtTime(r.start)}–${calFmtTime(r.end)}</span>
+      </span>
+      ${r.badge ? `<span class="tl-event-badge">${escAttr(r.badge)}</span>` : ''}`;
+    if (!r.disabled) row.onclick = r.onclick;
+    wrap.appendChild(row);
+  });
+}
+
+/* Core: attach `ref` (default: modal task) to an existing local event. */
+async function taskLinkAttach(ref, dateKey, ev, { silent } = {}) {
+  const res = taskLinkResolveTask(ref);
+  if (!res || !ev) return false;
+  taskLinkClearAll(ref, ev);          // a task links to one event only
+  taskLinkSetOnEvent(ev, ref);
+  ev.title = res.task.text;
+  if (res.task.due !== dateKey) res.task.due = dateKey;   // undated list task → Day by Day
+  calSave();
+  calRefresh();
+  renderTodos();
+  renderDbd();
+  saveToLocal();
+  if (!silent) showToast('Linked to calendar event ✓');
+  if (ev.gcalId && gcalIsConnected()) {
+    await gcalUpdateEvent(ev.gcalId, ev.gcalCalId, ev, dateKey);
+    await gcalSyncAll();
+  }
+  return true;
+}
+
+async function taskLinkLinkTo(dateKey, evId) {
+  const ref = taskLinkModalRef;
+  const ev = (calEvents[dateKey] || []).find(e => e.id === evId);
+  closeTaskLinkModal();
+  await taskLinkAttach(ref, dateKey, ev);
+}
+
+/* Google-only event → mirror it locally (same as "Sync to app"), then link. */
+async function taskLinkLinkToGcal(dateKey, g) {
+  const ref = taskLinkModalRef;
+  closeTaskLinkModal();
+  calEnsureDay(dateKey);
+  const ev = {
+    id: calEventIdCtr++,
+    title: g.title, start: g.start, end: g.end,
+    color: taskLinkColor, type: 'event', fromTemplate: false,
+    gcalId: g.gcalId, gcalCalId: g.calId,
+  };
+  calEvents[dateKey].push(ev);
+  await taskLinkAttach(ref, dateKey, ev);
+}
+
+/* Create a brand-new event named after the task and link it. */
+async function taskLinkCreate() {
+  const ref = taskLinkModalRef;
+  const res = taskLinkResolveTask(ref);
+  if (!res) { closeTaskLinkModal(); return; }
+  const dateKey = taskLinkDay;
+  const start = $('taskLinkStart').value || '09:00';
+  let end = $('taskLinkEnd').value || '';
+  if (!end || calTimeToMins(end) <= calTimeToMins(start)) end = calMinsToStr(Math.min(1439, calTimeToMins(start) + 60));
+
+  calEnsureDay(dateKey);
+  const ev = {
+    id: calEventIdCtr++,
+    title: res.task.text, start, end,
+    color: taskLinkColor, type: 'event', fromTemplate: false,
+  };
+  calEvents[dateKey].push(ev);
+  closeTaskLinkModal();
+  await taskLinkAttach(ref, dateKey, ev, { silent: true });
+  showToast('Event created & linked ✓');
+
+  /* mirror saveCalEvent: new events go to the enabled Google Calendar */
+  if (gcalIsConnected()) {
+    const calId = gcalCalendars.find(c => c.enabled)?.id;
+    if (calId) {
+      const gcalId = await gcalPushEvent(ev, dateKey, calId);
+      if (gcalId) { ev.gcalId = gcalId; ev.gcalCalId = calId; calSave(); saveToLocal(); }
+      await gcalSyncAll();
+    }
+  }
+}
+
+/* ── event editor: "Link to task" picker ── */
+function taskLinkOptionValue(ref) { return ref ? `${ref.kind}:${ref.id}` : ''; }
+function taskLinkParseOption(v) {
+  if (!v) return null;
+  const [kind, id] = v.split(':');
+  return (kind === 'list' || kind === 'dbd') ? { kind, id: parseInt(id, 10) } : null;
+}
+
+function taskLinkRenderSelect(currentRef) {
+  const sel = $('calLinkSelect');
+  if (!sel) return;
+  const cur = taskLinkOptionValue(currentRef);
+  const opt = (ref, text) => {
+    const v = taskLinkOptionValue(ref);
+    const linkedElsewhere = !taskLinkSameRef(ref, currentRef) && !!taskLinkGet(ref);
+    return `<option value="${v}"${v === cur ? ' selected' : ''}>${escAttr(text || 'Untitled')}${linkedElsewhere ? ' (linked)' : ''}</option>`;
+  };
+  const keep = (t, ref) => !t.done || taskLinkSameRef(ref, currentRef);
+  let html = `<option value="">No task</option>`;
+  const dbd = dbdTasks.filter(t => keep(t, taskLinkRef('dbd', t.id)));
+  if (dbd.length) html += `<optgroup label="Day by Day">${dbd.map(t => opt(taskLinkRef('dbd', t.id), t.text)).join('')}</optgroup>`;
+  todoLists.filter(l => !l.isDefault).forEach(l => {
+    const ts = l.tasks.filter(t => keep(t, taskLinkRef('list', t.id)));
+    if (ts.length) html += `<optgroup label="${escAttr(l.title || 'Untitled list')}">${ts.map(t => opt(taskLinkRef('list', t.id), t.text)).join('')}</optgroup>`;
+  });
+  sel.innerHTML = html;
+  taskLinkApplySelectToTitle();
+}
+
+/* Picking a task locks the title to the task's name. */
+function taskLinkApplySelectToTitle() {
+  const sel = $('calLinkSelect');
+  const title = $('calEventTitle');
+  if (!sel || !title) return;
+  const res = taskLinkResolveTask(taskLinkParseOption(sel.value));
+  if (res) {
+    title.value = res.task.text;
+    title.readOnly = true;
+    title.classList.add('linked');
+    title.placeholder = 'Title follows the linked task';
+  } else {
+    title.readOnly = false;
+    title.classList.remove('linked');
+    title.placeholder = 'Event title';
+  }
+}
+
+/* Called from saveCalEvent once the event object exists. */
+function taskLinkApplyFromModal(ev, dateKey) {
+  const sel = $('calLinkSelect');
+  if (!sel) return;
+  const ref = taskLinkParseOption(sel.value);
+  const res = taskLinkResolveTask(ref);
+  if (!res) { taskLinkSetOnEvent(ev, null); return; }
+  taskLinkClearAll(ref, ev);
+  taskLinkSetOnEvent(ev, ref);
+  ev.title = res.task.text;
+  if (res.task.due !== dateKey) res.task.due = dateKey;
+  renderTodos();
+  renderDbd();
 }
 
 /* ── Daily-list day-of-week schedule ── */
@@ -2036,6 +2521,7 @@ function homeDbdRow(entry, tone) {
       </div>
       ${tagDot}
       <span class="home-task-text ${tagged ? `task-text-${t.id} ` : ''}${t.done ? 'done' : ''}">${escAttr(t.text)}</span>
+      ${taskLinkHomeChipHtml(tagged ? 'list' : 'dbd', t.id)}
       ${dateChip}
     </div>`;
 }
@@ -2134,7 +2620,7 @@ function homeCalHtml() {
     const goog  = (gcalIsConnected() ? (gcalEvents[dateKey] || []) : []).filter(e => !e.allDay);
     return [...local, ...goog].map(ev => {
       const s = calTimeToMins(ev.start) + offset;
-      return { title: ev.title, color: ev.color || '#5dcaa5',
+      return { title: taskLinkEventTitle(ev), color: ev.color || '#5dcaa5',
                s, e: Math.max(s + 1, calTimeToMins(ev.end) + offset) };
     });
   };
@@ -2421,6 +2907,7 @@ function calMakeEventEl(ev, dateKeyOrDow, isFmtMode) {
     el.appendChild(lbl);
   } else {
     el.className = 'cal-event';
+    el.dataset.evId = ev.id;
     const startM = calTimeToMins(ev.start);
     const endM   = calTimeToMins(ev.end);
     const durM   = Math.max(15, endM - startM);
@@ -2429,14 +2916,25 @@ function calMakeEventEl(ev, dateKeyOrDow, isFmtMode) {
     el.style.background = ev.color + '33';
     el.style.borderLeft = `3px solid ${ev.color}`;
     el.style.color = ev.color;
+    const linked = !isFmtMode && !!taskLinkRefOfEvent(ev);
     const t = document.createElement('div');
+    t.className = 'cal-event-title';
     t.style.cssText = 'font-weight:500;overflow:hidden;text-overflow:ellipsis';
-    t.textContent = ev.title || '(no title)';
+    t.textContent = (linked ? taskLinkEventTitle(ev) : ev.title) || '(no title)';
     const time = document.createElement('div');
     time.className = 'cal-event-time';
     time.textContent = `${calFmtTime(ev.start)}–${calFmtTime(ev.end)}`;
     el.appendChild(t);
     el.appendChild(time);
+    if (linked) {
+      el.classList.add('cal-linked');
+      if (taskLinkEventDone(ev)) el.classList.add('cal-linked-done');
+      const ico = document.createElement('span');
+      ico.className = 'cal-event-link-ico';
+      ico.title = 'Linked to a task';
+      ico.innerHTML = LINK_SVG;
+      el.appendChild(ico);
+    }
   }
   el.addEventListener('click', e => {
     e.stopPropagation();
@@ -2501,14 +2999,16 @@ function calMoveEvent(evId, fromKey, toKey, newStartMins) {
   const start = Math.max(0, Math.min(1440 - dur, newStartMins));
   calEvents[fromKey] = list.filter(e => e.id !== evId);
   calEnsureDay(toKey);
-  calEvents[toKey].push({
+  const moved = {
     ...ev,
     start: calMinsToStr(start),
     end:   calMinsToStr(start + dur),
     fromTemplate: toKey !== fromKey ? false : ev.fromTemplate,
-  });
+  };
+  calEvents[toKey].push(moved);
   calRefresh();
   calSave();
+  taskLinkAfterEventMoved(moved, fromKey, toKey);
 }
 
 function calMoveTemplate(tmplId, fromDow, toDow, newStartMins) {
@@ -2532,9 +3032,17 @@ function reseedTemplate(tmpl) {
     const key = calDateKey(day);
     const dow = day.getDay();
     if (!calEvents[key]) return;
+    // A template instance that's linked to a task keeps its link: it moves
+    // onto the reseeded instance, or survives as a detached event if the
+    // template no longer repeats on this day.
+    const linkedOld = calEvents[key].find(e => e.templateId === tmpl.id && taskLinkRefOfEvent(e));
     calEvents[key] = calEvents[key].filter(e => e.templateId !== tmpl.id);
     if (tmpl.repeatDays && tmpl.repeatDays.includes(dow)) {
-      calEvents[key].push({ ...tmpl, id: calEventIdCtr++, fromTemplate: true, templateId: tmpl.id });
+      const inst = { ...tmpl, id: calEventIdCtr++, fromTemplate: true, templateId: tmpl.id };
+      if (linkedOld) { taskLinkSetOnEvent(inst, taskLinkRefOfEvent(linkedOld)); inst.title = linkedOld.title; }
+      calEvents[key].push(inst);
+    } else if (linkedOld) {
+      calEvents[key].push({ ...linkedOld, fromTemplate: false, templateId: undefined });
     }
   });
 }
@@ -2798,6 +3306,7 @@ function calToggleWeekMode() {
 }
 
 function calRefresh() {
+  if (taskLinkSyncTitles()) calSave();
   if (calDesktopOpen) calRenderDesktop();
   if (document.querySelector('.mobile-app') && getComputedStyle($('mobileApp')).display !== 'none') {
     calRenderMobile();
@@ -2878,6 +3387,14 @@ function _initCalModal({ isFmt, existingEv, defaultStart }) {
       btn.onclick = () => btn.classList.toggle('active');
       dowRow.appendChild(btn);
     });
+  }
+
+  // 4b. task link picker (user events only — templates repeat, tasks don't)
+  const linkRow = $('calLinkRow');
+  if (linkRow) {
+    linkRow.classList.toggle('shown', !isFmt);
+    if (!isFmt) taskLinkRenderSelect(existingEv ? taskLinkRefOfEvent(existingEv) : null);
+    else { $('calLinkSelect').innerHTML = ''; taskLinkApplySelectToTitle(); }
   }
 
   // 5. title + buttons
@@ -2964,6 +3481,8 @@ async function saveCalEvent() {
           templateId:   old.templateId ?? undefined,
           gcalId:       old.gcalId ?? null,
           gcalCalId:    old.gcalCalId ?? null,
+          ...(old.linkTaskId != null ? { linkTaskId: old.linkTaskId } : {}),
+          ...(old.linkDbdId  != null ? { linkDbdId:  old.linkDbdId  } : {}),
         };
       }
     } else {
@@ -2971,6 +3490,14 @@ async function saveCalEvent() {
         id: calEventIdCtr++, title, start, end,
         color: calSelectedColor, type: calEditType,
       });
+    }
+    // Task link chosen in the picker (dividers can't be linked).
+    const savedEv = wasNew
+      ? calEvents[key][calEvents[key].length - 1]
+      : calEvents[key].find(e => e.id === calEditId);
+    if (savedEv) {
+      if (calEditType === 'divider') taskLinkSetOnEvent(savedEv, null);
+      else taskLinkApplyFromModal(savedEv, key);
     }
   }
 
@@ -3014,6 +3541,8 @@ async function deleteCalEvent() {
   calRefresh();
   calSave();
   saveToLocal();
+  renderTodos();   // linked tasks lose their chip
+  renderDbd();
 
   if (removedEv?.gcalId && removedEv?.gcalCalId && gcalIsConnected()) {
     await gcalDeleteEvent(removedEv.gcalId, removedEv.gcalCalId);
@@ -3418,6 +3947,8 @@ async function gcalDeleteFromDetail() {
   });
   calSave();
   saveToLocal();
+  renderTodos();
+  renderDbd();
 
   closeModal('gcalDetailModal');
   await gcalSyncAll();
@@ -4782,6 +5313,11 @@ function bindStatic() {
   $('calSendToGcalBtn')?.addEventListener('click', calSendToGcal);
   $('calTypeEvent')?.addEventListener('click', () => setCalEventType('event'));
   $('calTypeDivider')?.addEventListener('click', () => setCalEventType('divider'));
+  $('calLinkSelect')?.addEventListener('change', taskLinkApplySelectToTitle);
+
+  /* task ↔ calendar link modal */
+  $('taskLinkCancelBtn')?.addEventListener('click', closeTaskLinkModal);
+  $('taskLinkCreateBtn')?.addEventListener('click', taskLinkCreate);
 
   /* gcal modals */
   $('gcalDisconnectBtn')?.addEventListener('click', gcalDisconnect);
@@ -4799,6 +5335,7 @@ function bindStatic() {
     ov.addEventListener('click', e => {
       if (e.target !== ov) return;
       if (ov.id === 'calEventModal') closeCalModal();
+      else if (ov.id === 'taskLinkModal') closeTaskLinkModal();
       else ov.classList.remove('show');
     });
   });
@@ -4809,6 +5346,7 @@ function bindStatic() {
     const open = Array.from(document.querySelectorAll('.modal-overlay.show')).pop();
     if (!open) return;
     if (open.id === 'calEventModal') closeCalModal();
+    else if (open.id === 'taskLinkModal') closeTaskLinkModal();
     else open.classList.remove('show');
   });
 

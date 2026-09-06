@@ -1359,6 +1359,139 @@ body.format-mode .list-sched-row { display: flex; }
 .gcal-send-btn:disabled { opacity: 0.6; cursor: default; }
 
 /* ═══════════════════════════════════════════════════════
+   TASK ↔ CALENDAR LINKS
+   ═══════════════════════════════════════════════════════ */
+
+/* chip on task rows (list cards + Day by Day): icon only until linked,
+   then the event's color + start time */
+.task-cal-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; line-height: 1;
+  font-family: var(--font-mono);
+  color: var(--ink-3);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 7px;
+  flex-shrink: 0;
+  cursor: pointer;
+  white-space: nowrap;
+  opacity: 0.5;
+  transition: opacity 0.15s, border-color 0.15s, background 0.15s;
+  touch-action: manipulation;
+}
+.task-row:hover .task-cal-chip { opacity: 1; }
+.task-cal-chip:hover { border-color: currentColor; }
+.task-cal-chip.linked {
+  opacity: 1;
+  border-color: currentColor;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.dbd-overdue-row .task-cal-chip:not(.linked) { color: var(--danger); border-color: var(--danger-dim); }
+@media (hover: none) { .task-cal-chip { opacity: 0.8; } }
+/* Day by Day rows are dense on phones — keep just the icon there */
+@media (max-width: 640px) {
+  .dbd-row .task-cal-chip.linked span { display: none; }
+  .dbd-row .task-cal-chip { padding: 4px 6px; }
+}
+
+/* Home "Today's Tasks" rows: read-only time badge */
+.home-dbd-cal {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 10.5px; font-weight: 600;
+  font-family: var(--font-mono);
+  padding: 2px 7px; border-radius: 9px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  flex-shrink: 0;
+}
+.home-tone-future .home-dbd-cal { opacity: 0.9; }
+
+/* linked events on the grid */
+.cal-event.cal-linked { padding-right: 16px; }
+.cal-event-link-ico {
+  position: absolute; top: 3px; right: 4px;
+  display: flex; opacity: 0.75;
+}
+.cal-event.cal-linked-done { opacity: 0.55; }
+.cal-event.cal-linked-done .cal-event-title { text-decoration: line-through; }
+.cal-event.cal-linked-done .cal-event-title::before { content: '✓ '; }
+
+/* event editor: task picker + locked title */
+.cal-link-row { display: none; }
+.cal-link-row.shown { display: flex; }
+.cal-link-select {
+  flex: 1; min-width: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--ink);
+  color-scheme: var(--scheme);
+  cursor: pointer;
+}
+.cal-event-input.linked {
+  color: var(--ink-2);
+  background: var(--bg-hover);
+  border-style: dashed;
+  cursor: default;
+}
+
+/* link modal */
+.tl-days { display: flex; gap: 5px; }
+.tl-day-btn {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 6px 0;
+  border: 1px solid var(--border-mid);
+  border-radius: var(--radius-md);
+  color: var(--ink-3);
+  transition: all 0.15s;
+  touch-action: manipulation;
+}
+.tl-day-dow { font-size: 9px; font-weight: 700; letter-spacing: 0.06em; }
+.tl-day-num { font-size: 14px; font-weight: 600; font-family: var(--font-mono); }
+.tl-day-btn:hover { border-color: var(--border-strong); color: var(--ink-2); }
+.tl-day-btn.active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.tl-events {
+  display: flex; flex-direction: column; gap: 5px;
+  max-height: 34vh; overflow-y: auto;
+  margin-top: -6px;
+}
+.tl-empty { font-size: 12px; color: var(--ink-3); padding: 6px 2px; }
+.tl-event {
+  display: flex; align-items: center; gap: 9px;
+  width: 100%; text-align: left;
+  padding: 8px 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--evc);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  transition: border-color 0.15s, background 0.15s;
+  touch-action: manipulation;
+}
+.tl-event:hover:not(:disabled) { border-color: var(--evc); background: color-mix(in srgb, var(--evc) 10%, var(--bg-surface)); }
+.tl-event.mine { border-color: var(--evc); background: color-mix(in srgb, var(--evc) 14%, var(--bg-surface)); }
+.tl-event.disabled { opacity: 0.45; cursor: not-allowed; }
+.tl-event-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--evc); flex-shrink: 0; }
+.tl-event-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tl-event-title { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-event-time { font-size: 10.5px; color: var(--ink-3); font-family: var(--font-mono); }
+.tl-event-badge {
+  font-size: 9.5px; font-weight: 600;
+  padding: 2px 7px; border-radius: 9px;
+  color: var(--evc);
+  background: color-mix(in srgb, var(--evc) 14%, transparent);
+  max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex-shrink: 0;
+}
+.tl-event.mine .tl-event-badge { background: var(--evc); color: #fff; }
+
+/* ═══════════════════════════════════════════════════════
    GOOGLE CALENDAR
    ═══════════════════════════════════════════════════════ */
 .gcal-connect-btn {

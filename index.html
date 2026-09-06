@@ -233,6 +233,10 @@
   <div class="modal-box">
     <div class="modal-title" id="calEventModalTitle">Add event</div>
     <input class="cal-event-input" id="calEventTitle" type="text" placeholder="Event title" autocomplete="off">
+    <div class="cal-event-row cal-link-row" id="calLinkRow">
+      <label class="cal-event-label" for="calLinkSelect">Task</label>
+      <select class="cal-event-input cal-link-select" id="calLinkSelect" title="Link this event to a task — the event takes the task's name"></select>
+    </div>
     <div class="cal-event-row">
       <div class="cal-event-field">
         <label class="cal-event-label" for="calEventStart">Start</label>
@@ -261,6 +265,37 @@
     </div>
     <button class="cal-delete-btn" id="calEventDeleteBtn">Delete event</button>
     <button class="gcal-send-btn" id="calSendToGcalBtn">Send to Google Calendar</button>
+  </div>
+</div>
+
+<!-- ════════ TASK ↔ CALENDAR LINK MODAL ════════ -->
+<div class="modal-overlay" id="taskLinkModal">
+  <div class="modal-box">
+    <button class="modal-x" data-close="taskLinkModal" title="Close">×</button>
+    <div class="modal-title">Link to calendar</div>
+    <div class="modal-sub" id="taskLinkSub"></div>
+    <div class="tl-days" id="taskLinkDays"></div>
+    <span class="cal-event-label">Existing events</span>
+    <div class="tl-events" id="taskLinkEvents"></div>
+    <div class="modal-divider">or create a new event</div>
+    <div class="cal-event-row">
+      <div class="cal-event-field">
+        <label class="cal-event-label" for="taskLinkStart">Start</label>
+        <input class="cal-event-input cal-time-input" id="taskLinkStart" type="time">
+      </div>
+      <div class="cal-event-field">
+        <label class="cal-event-label" for="taskLinkEnd">End</label>
+        <input class="cal-event-input cal-time-input" id="taskLinkEnd" type="time">
+      </div>
+    </div>
+    <div class="cal-event-row">
+      <span class="cal-event-label">Color</span>
+      <div class="cal-color-swatches" id="taskLinkColors"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="modal-cancel" id="taskLinkCancelBtn">Cancel</button>
+      <button class="modal-primary" id="taskLinkCreateBtn">Create event &amp; link</button>
+    </div>
   </div>
 </div>
 
