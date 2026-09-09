@@ -341,6 +341,35 @@
     <div class="modal-sub" id="syncStatusLine">Not configured.</div>
     <button class="gcal-connect-btn" id="syncConnectBtn" style="display:none">Sign in with Google</button>
 
+    <div class="settings-section-label">Email Digest</div>
+    <div id="digestSettings">
+      <div class="settings-view-row">
+        <span class="settings-view-name">Show digest on Home</span>
+        <label class="gcal-toggle">
+          <input type="checkbox" id="digestEnabledToggle">
+          <span class="gcal-toggle-track"></span>
+        </label>
+      </div>
+      <div class="dg-fields" id="digestFields">
+        <div class="modal-sub" id="digestGmailLine">Not connected.</div>
+        <button class="gcal-connect-btn" id="digestGmailBtn">Connect Gmail</button>
+
+        <div class="dg-field-label">Ollama on this device</div>
+        <div class="theme-inline">
+          <input class="theme-text" id="digestEngineUrl" type="url" placeholder="http://localhost:11434" autocomplete="off" spellcheck="false">
+          <button class="modal-primary" id="digestEngineTestBtn">Test</button>
+        </div>
+        <select class="theme-select" id="digestModelSelect" aria-label="Model"></select>
+        <div class="theme-bg-status" id="digestEngineStatus"></div>
+
+        <div class="theme-bg-actions">
+          <button class="modal-file-btn" id="digestRunSettingsBtn">Run digest now</button>
+          <button class="modal-file-btn" id="digestSampleBtn">Load sample</button>
+          <button class="modal-file-btn" id="digestClearBtn" style="display:none">Clear digest</button>
+        </div>
+      </div>
+    </div>
+
     <div class="settings-section-label">Help</div>
     <div class="modal-sub">Walk through every section again, one step at a time.</div>
     <button class="modal-file-btn" id="tourReplayBtn">Take the tour</button>
