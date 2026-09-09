@@ -3,7 +3,7 @@
    Sections: CONFIG · STATE · UTIL · PERSISTENCE · TIMERS ·
    WAKEUP · TODOS · DRAG ENGINE · FORMAT MODE · DATA ·
    TASK↔CALENDAR LINKS · TABS · CALENDAR · GOOGLE CALENDAR · CLOUD SYNC ·
-   THEME · EMAIL DIGEST · BINDINGS · INIT
+   THEME · BINDINGS · INIT
    ═══════════════════════════════════════════════════════ */
 
 /* ───────────────────────── CONFIG ───────────────────────── */
@@ -41,17 +41,6 @@ const SYNC_CLIENT_ID   = GCAL_CLIENT_ID;
 const SYNC_REDIRECT    = GCAL_REDIRECT;
 const SYNC_STATE_TAG   = 'worky-sync';
 const SYNC_META_LS_KEY = 'focus-sync-meta';
-
-/* ── Email Digest (demo) ──
- * Gmail read-only via the same OAuth client; `state` tag routes the
- * redirect. The token and the Ollama engine settings are device-local. */
-const GMAIL_SCOPES              = 'https://www.googleapis.com/auth/gmail.readonly';
-const GMAIL_API                 = 'https://gmail.googleapis.com/gmail/v1';
-const GMAIL_LS_KEY              = 'focus-gmail-token';
-const DIGEST_STATE_TAG          = 'worky-gmail';
-const DIGEST_ENGINE_LS_KEY      = 'focus-digest-engine';
-const DIGEST_UI_LS_KEY          = 'focus-digest-ui';
-const DIGEST_ENGINE_DEFAULT_URL = 'http://localhost:11434';
 
 /* ───────────────────────── STATE ───────────────────────── */
 let TIMER_DEFAULTS = [
@@ -246,7 +235,6 @@ function calPxToMins(px) { return Math.round((px/CAL_HOUR_PX)*60/15)*15; }
  *   calEvent: id→i title→ti start→s end→e color→c type→tp
  *     fromTemplate→ft templateId→tid repeatDays→rd gcalId→gi gcalCalId→gc
  *     linkTaskId→tk linkDbdId→dk   (task ↔ event link, see TASK↔CALENDAR LINKS)
- *   digest: enabled→en last→l {at, md, n, m, s}   (see EMAIL DIGEST)
  */
 function compressState(st) {
   const cTimer = t => {
@@ -300,7 +288,6 @@ function compressState(st) {
     bgc: st.purchaseIdCounter || 1,
     vw: viewsOffList(st.views),
     th: compressTheme(st.theme),
-    dg: compressDigest(st.digest),
     cal: { ce: cEvents, ct: (st.calendar.calTemplates||[]).map(cCalEv), cec: st.calendar.calEventIdCtr },
   };
 }
@@ -346,7 +333,6 @@ function decompressState(c) {
     purchaseIdCounter: c.bgc || 1,
     views: normalizeViews(c.vw),
     theme: decompressTheme(c.th),
-    digest: decompressDigest(c.dg),
     calendar: { calEvents: dEvents, calTemplates: (c.cal.ct||[]).map(dCalEv), calEventIdCtr: c.cal.cec || 1 },
   };
 }
@@ -395,7 +381,6 @@ function gatherState() {
     purchaseIdCounter,
     views: { ...views },
     theme: { ...themeGet() },
-    digest: digestRecord(),
     calendar: { calEvents, calTemplates, calEventIdCtr },
   };
 }
@@ -424,7 +409,6 @@ function applyState(state) {
   purchaseIdCounter = st.purchaseIdCounter ?? purchaseIdCounter;
   views = normalizeViews(st.views);
   theme = normalizeTheme(st.theme);
-  digest = normalizeDigest(st.digest);
   applyTheme();
   budgetRollover();
   if (st.calendar) {
@@ -479,7 +463,6 @@ function loadFromLocal() {
     purchaseIdCounter = state.purchaseIdCounter ?? purchaseIdCounter;
     views = normalizeViews(state.views);
     theme = normalizeTheme(state.theme);
-    digest = normalizeDigest(state.digest);
     if (state.calendar) {
       calEvents     = state.calendar.calEvents     || {};
       calTemplates  = state.calendar.calTemplates  || [];
@@ -2429,7 +2412,6 @@ function renderHome() {
   if (!dc && !mc) return;
   const html =
     homeHeroHtml() +
-    homeDigestHtml() +
     homeDbdHtml() +
     homeStarredListsHtml(true) +   // starred Daily lists
     homeTimersHtml() +
@@ -2792,7 +2774,6 @@ function renderSettings() {
       : 'Not connected.';
   }
   gcalUpdateBtn();
-  digestRenderSettings();
 }
 
 function setViewEnabled(key, on) {
@@ -3643,7 +3624,6 @@ function gcalHandleRedirect() {
   if (!hash.includes('access_token')) return;
   const params = new URLSearchParams(hash);
   if (params.get('state') === SYNC_STATE_TAG) return;   // handled by syncHandleRedirect
-  if (params.get('state') === DIGEST_STATE_TAG) return; // handled by gmailHandleRedirect
   const token = params.get('access_token');
   const expiresIn = parseInt(params.get('expires_in') || '3600');
   if (!token) return;
@@ -5264,775 +5244,10 @@ function bindTheme() {
   $('thBgRemove')?.addEventListener('click', themeRemoveBg);
 }
 
-/* ═══════════════════════════════════════════════════════
-   EMAIL DIGEST (demo)
-   Reads the last day of Gmail in the browser, summarizes it with a local
-   Ollama model, and shows the result as a Home card. The result
-   (`digest.last`) lives in synced state, so once a laptop has run it the
-   phone shows the same digest through the normal cloud-sync path. The
-   Gmail token and the engine settings are device-local.
-   ═══════════════════════════════════════════════════════ */
-
-const DIGEST_SECTIONS = [
-  { key: 'tldr',       title: '📰 Tech News (TLDR)',        budget: 14000 },
-  { key: 'bytebytego', title: '🏗️ ByteByteGo',              budget: 12000 },
-  { key: 'newsletter', title: '📮 Other Newsletters',       budget: 8000  },
-  { key: 'jobs',       title: '💼 Job Application Updates', budget: 5000  },
-  { key: 'misc',       title: '📬 Miscellaneous',           budget: 4000  },
-];
-const DIGEST_CHUNK_CHARS    = 16000;   // email text fed to one model call
-const DIGEST_OVERVIEW_CHARS = 18000;   // assembled digest fed to the overview call
-const DIGEST_FETCH_PARALLEL = 6;
-
-const DIGEST_JOB_RX = /\b(application|applied|applying|interview|assessment|hackerrank|codesignal|codility|online assessment|OA|recruit|recruiter|recruiting|talent|candidate|candidacy|offer letter|next steps|position|hiring|greenhouse|lever\.co|ashbyhq|ashby|workday|myworkday|icims|smartrecruiters|jobvite|taleo|we regret|unfortunately|move forward|not moving forward)\b/i;
-const DIGEST_NEWSLETTER_RX = /(newsletter|substack|medium\.com|digest|weekly|roundup|beehiiv|mailchimp|convertkit|buttondown|ghost\.io)/i;
-const DIGEST_PROMO_RX = /(\d+% off|sale ends|flash sale|limited time|coupon|promo code|last chance|deal of the day|free shipping)/i;
-
-const DIGEST_RULES = `You write one section of a daily email digest for a busy engineer reading on a phone.
-Formatting rules:
-- Bullets and short tables over paragraphs. No paragraph longer than 2 sentences.
-- Bold key terms, companies, and deadlines.
-- Keep every link the email provides, as markdown links.
-- Concise, scannable, zero fluff. Never invent facts that are not in the emails.
-- Output plain markdown for this section only. No section heading, no preamble, no closing remarks.`;
-
-const DIGEST_SECTION_PROMPTS = {
-  tldr: `These are TLDR newsletter emails. Break each edition into its major stories.
-One bullet per story: **bolded headline** + 1–2 sentence summary, with the article link when available.
-If more than one edition arrived (TLDR, TLDR AI, ...), group by edition using a bold sub-header line.`,
-  bytebytego: `These are ByteByteGo newsletter emails. Give a high-level summary of the main topic.
-Structure as three bold sub-headers: **Major concepts**, **How it works** (step-by-step, or an ASCII diagram inside a code block), **Why it matters**.
-Short bullets under each, not paragraphs. Include links when available.`,
-  newsletter: `These are newsletters other than TLDR and ByteByteGo (Substack, Medium digests, company or industry roundups).
-For each newsletter: **newsletter name** as a bold sub-header, then 1–3 bullets covering its key points, with article links when available.
-Skip anything purely promotional with no real content.`,
-  jobs: `These emails relate to job applications: rejections, assessment invites, interview scheduling, recruiter outreach, offer updates.
-Put anything time-sensitive (assessments with deadlines, interview confirmations) at the top, each line starting with ⚠️.
-Then a markdown table with columns: Company | Role | Status | Action needed | Deadline. Use — when a cell is unknown.`,
-  misc: `These are emails that are not newsletters or job updates: personal mail, bills and receipts, account notices, calendar mail.
-One line each: **sender** — what it is — whether action is needed. Skip routine promotional noise entirely.`,
-};
-
-const DIGEST_OVERVIEW_PROMPT = `Below is today's assembled email digest. Write two short markdown blocks and nothing else.
-First block, headed exactly "## 🔝 Top of the inbox": 2–3 lines covering how many emails were processed, anything urgent, and the single most important item.
-Second block, headed exactly "## ✅ Action items": a checklist (lines starting with "- [ ] ") of every email that needs a reply or a task from me, each with the deadline if there is one. If there are none, write a single line "Nothing needs a reply today."
-Use only facts from the digest. No preamble, no closing remarks.`;
-
-/* ── state (synced) ── */
-let digest = null;
-
-function normalizeDigest(v) {
-  const out = { enabled: false, last: null };
-  if (!v || typeof v !== 'object') return out;
-  out.enabled = !!v.enabled;
-  const l = v.last;
-  if (l && typeof l === 'object' && typeof l.markdown === 'string' && l.markdown.trim()) {
-    out.last = {
-      at: Number(l.at) || 0,
-      markdown: l.markdown.slice(0, 120000),
-      count: Math.max(0, Number(l.count) || 0),
-      model: typeof l.model === 'string' ? l.model.slice(0, 80) : '',
-      source: typeof l.source === 'string' ? l.source.slice(0, 20) : '',
-    };
-  }
-  return out;
-}
-function digestGet() { if (!digest) digest = normalizeDigest(null); return digest; }
-function digestRecord() {
-  const d = digestGet();
-  return { enabled: d.enabled, last: d.last ? { ...d.last } : null };
-}
-function compressDigest(d) {
-  const n = normalizeDigest(d);
-  const o = { en: n.enabled ? 1 : 0 };
-  if (n.last) o.l = { at: n.last.at, md: n.last.markdown, n: n.last.count, m: n.last.model, s: n.last.source };
-  return o;
-}
-function decompressDigest(c) {
-  if (!c || typeof c !== 'object') return normalizeDigest(null);
-  return normalizeDigest({
-    enabled: !!c.en,
-    last: c.l ? { at: c.l.at, markdown: c.l.md, count: c.l.n, model: c.l.m, source: c.l.s } : null,
-  });
-}
-
-/* ── device-local: Gmail token + engine settings ── */
-let gmailToken = null;
-let digestEngine = null;
-let digestCollapsed = false;   // device-local UI state
-let digestRun = null;          // { phase, done, total, note, error } while running / after a failure
-let digestAbort = null;
-
-function digestEngineGet() {
-  if (digestEngine) return digestEngine;
-  let saved = null;
-  try { saved = JSON.parse(localStorage.getItem(DIGEST_ENGINE_LS_KEY)); } catch(e) {}
-  digestEngine = {
-    url:   (saved && typeof saved.url === 'string' && saved.url.trim()) ? saved.url.trim().replace(/\/+$/, '') : DIGEST_ENGINE_DEFAULT_URL,
-    model: (saved && typeof saved.model === 'string') ? saved.model.trim() : '',
-    numCtx: (saved && Number(saved.numCtx) >= 4096) ? Number(saved.numCtx) : 12288,
-    maxEmails: (saved && Number(saved.maxEmails) >= 5) ? Number(saved.maxEmails) : 80,
-    hours: (saved && Number(saved.hours) >= 1) ? Number(saved.hours) : 24,
-  };
-  return digestEngine;
-}
-function digestEngineSave(patch) {
-  const e = Object.assign(digestEngineGet(), patch || {});
-  try { localStorage.setItem(DIGEST_ENGINE_LS_KEY, JSON.stringify(e)); } catch(err) {}
-  return e;
-}
-function digestUiLoad() {
-  try { digestCollapsed = !!JSON.parse(localStorage.getItem(DIGEST_UI_LS_KEY))?.collapsed; } catch(e) {}
-}
-function digestToggleCollapsed() {
-  digestCollapsed = !digestCollapsed;
-  try { localStorage.setItem(DIGEST_UI_LS_KEY, JSON.stringify({ collapsed: digestCollapsed })); } catch(e) {}
-  renderHome();
-}
-
-function gmailSaveToken(t) {
-  gmailToken = t;
-  try {
-    if (t) localStorage.setItem(GMAIL_LS_KEY, JSON.stringify(t));
-    else localStorage.removeItem(GMAIL_LS_KEY);
-  } catch(e) {}
-}
-function gmailLoadToken() {
-  try {
-    const raw = localStorage.getItem(GMAIL_LS_KEY);
-    if (!raw) return;
-    const t = JSON.parse(raw);
-    if (t && t.expires_at && Date.now() < t.expires_at) gmailToken = t;
-    else localStorage.removeItem(GMAIL_LS_KEY);
-  } catch(e) {}
-}
-function gmailIsConnected() { return !!(gmailToken && Date.now() < gmailToken.expires_at); }
-
-/* Same OAuth client + redirect as Calendar and Cloud Sync; the state tag
- * routes this redirect to gmailHandleRedirect. Full-page redirect (like
- * sync sign-in) so it also works inside the iOS PWA. */
-function gmailConnect() {
-  const params = new URLSearchParams({
-    client_id:     GCAL_CLIENT_ID,
-    redirect_uri:  GCAL_REDIRECT,
-    response_type: 'token',
-    scope:         GMAIL_SCOPES,
-    prompt:        'select_account',
-    include_granted_scopes: 'true',
-    state:         DIGEST_STATE_TAG,
-  });
-  window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
-}
-function gmailHandleRedirect() {
-  const hash = window.location.hash.slice(1);
-  if (!hash.includes('access_token')) return;
-  const params = new URLSearchParams(hash);
-  if (params.get('state') !== DIGEST_STATE_TAG) return;   // calendar / sync — not ours
-  const token = params.get('access_token');
-  const expiresIn = parseInt(params.get('expires_in') || '3600');
-  history.replaceState(null, '', window.location.pathname);
-  if (!token) return;
-  gmailSaveToken({ access_token: token, expires_at: Date.now() + expiresIn * 1000 });
-  if (!digestGet().enabled) { digestGet().enabled = true; saveToLocal(); }
-  showToast('Gmail connected ✓');
-  gmailFetchProfile().then(() => { renderSettings(); renderHome(); });
-  digestShowHome();
-  renderHome();
-}
-function gmailDisconnect() {
-  gmailSaveToken(null);
-  renderSettings();
-  renderHome();
-  showToast('Gmail disconnected');
-}
-async function gmailFetchProfile() {
-  if (!gmailIsConnected()) return;
-  try {
-    const r = await fetch(`${GMAIL_API}/users/me/profile`, { headers: gmailHeaders() });
-    if (r.status === 401) { gmailSaveToken(null); return; }
-    if (!r.ok) return;
-    const p = await r.json();
-    if (p && p.emailAddress) gmailSaveToken({ ...gmailToken, email: p.emailAddress });
-  } catch(e) {}
-}
-function gmailHeaders() { return { Authorization: `Bearer ${gmailToken.access_token}` }; }
-
-/* ── Gmail: list + fetch ── */
-async function gmailFetchRecent(opts, signal) {
-  const q = `newer_than:${opts.hours >= 48 ? Math.round(opts.hours / 24) + 'd' : opts.hours + 'h'} -in:spam -in:trash`;
-  const ids = [];
-  let pageToken = '';
-  while (ids.length < opts.maxEmails) {
-    const url = `${GMAIL_API}/users/me/messages?q=${encodeURIComponent(q)}&maxResults=${Math.min(100, opts.maxEmails - ids.length)}${pageToken ? '&pageToken=' + pageToken : ''}`;
-    const r = await fetch(url, { headers: gmailHeaders(), signal });
-    if (r.status === 401) throw new DigestError('Gmail session expired — connect Gmail again in Settings.', 'auth');
-    if (!r.ok) throw new DigestError(`Gmail list failed (${r.status}).`);
-    const j = await r.json();
-    (j.messages || []).forEach(m => ids.push(m.id));
-    pageToken = j.nextPageToken || '';
-    if (!pageToken) break;
-  }
-  const emails = new Array(ids.length);
-  let next = 0, done = 0;
-  const worker = async () => {
-    while (next < ids.length) {
-      const i = next++;
-      try {
-        const r = await fetch(`${GMAIL_API}/users/me/messages/${ids[i]}?format=full`, { headers: gmailHeaders(), signal });
-        if (r.status === 401) throw new DigestError('Gmail session expired — connect Gmail again in Settings.', 'auth');
-        if (r.ok) emails[i] = gmailParseMessage(await r.json());
-      } catch(e) {
-        if (e instanceof DigestError || (e && e.name === 'AbortError')) throw e;
-        /* one bad message is skipped, not fatal */
-      }
-      done++;
-      digestProgress('fetching', done, ids.length);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(DIGEST_FETCH_PARALLEL, ids.length) }, worker));
-  return emails.filter(Boolean).sort((a, b) => b.date - a.date);
-}
-
-function gmailHeader(msg, name) {
-  const h = (msg.payload && msg.payload.headers || []).find(x => x.name && x.name.toLowerCase() === name.toLowerCase());
-  return h ? String(h.value || '') : '';
-}
-function gmailDecodeBody(data) {
-  if (!data) return '';
-  try {
-    const bin = atob(String(data).replace(/-/g, '+').replace(/_/g, '/'));
-    const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
-    return new TextDecoder('utf-8').decode(bytes);
-  } catch(e) { return ''; }
-}
-/* Prefer text/plain; fall back to text/html rendered to text (links kept). */
-function gmailBodyText(payload) {
-  let plain = '', html = '';
-  const walk = p => {
-    if (!p) return;
-    const mime = (p.mimeType || '').toLowerCase();
-    if (mime === 'text/plain' && p.body && p.body.data && !plain) plain = gmailDecodeBody(p.body.data);
-    else if (mime === 'text/html' && p.body && p.body.data && !html) html = gmailDecodeBody(p.body.data);
-    (p.parts || []).forEach(walk);
-  };
-  walk(payload);
-  const text = plain.trim() ? plain : digestHtmlToText(html);
-  return digestCleanText(text);
-}
-function digestHtmlToText(html) {
-  if (!html) return '';
-  try {
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    doc.querySelectorAll('script,style,head,title,noscript').forEach(n => n.remove());
-    doc.querySelectorAll('a[href]').forEach(a => {
-      const href = a.getAttribute('href') || '';
-      const txt = (a.textContent || '').trim();
-      if (/^https?:\/\//i.test(href) && href.length <= 300 && txt && !/^https?:\/\//i.test(txt)) {
-        a.textContent = `${txt} (${href})`;
-      }
-    });
-    doc.querySelectorAll('br').forEach(n => n.replaceWith('\n'));
-    doc.querySelectorAll('p,div,li,tr,h1,h2,h3,h4,h5,h6,blockquote,pre,table').forEach(n => {
-      n.prepend('\n'); n.append('\n');
-    });
-    return doc.body ? doc.body.textContent || '' : '';
-  } catch(e) {
-    return html.replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/gi, '').replace(/<[^>]+>/g, ' ');
-  }
-}
-function digestCleanText(t) {
-  return String(t || '')
-    .replace(/\u00a0/g, ' ')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/[ \t]{2,}/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-function gmailParseMessage(msg) {
-  const from = gmailHeader(msg, 'From');
-  const subject = gmailHeader(msg, 'Subject') || '(no subject)';
-  const listId = gmailHeader(msg, 'List-Id');
-  const date = Number(msg.internalDate) || Date.parse(gmailHeader(msg, 'Date')) || Date.now();
-  const text = gmailBodyText(msg.payload) || (msg.snippet || '');
-  const email = { id: msg.id, from, subject, date, listId, text };
-  email.section = digestClassify(email);
-  return email;
-}
-
-/* Cheap sender/subject routing; the model only summarizes within a section. */
-function digestClassify(e) {
-  const from = (e.from || '').toLowerCase();
-  const subj = (e.subject || '');
-  const meta = `${from} ${subj}`;
-  if (from.includes('tldrnewsletter') || /^\s*tldr\b/i.test(subj)) return 'tldr';
-  if (from.includes('bytebytego') || /bytebytego/i.test(subj)) return 'bytebytego';
-  if (DIGEST_JOB_RX.test(meta) || DIGEST_JOB_RX.test((e.text || '').slice(0, 600))) return 'jobs';
-  if (DIGEST_PROMO_RX.test(subj)) return 'skip';
-  if (DIGEST_NEWSLETTER_RX.test(meta) || e.listId) return 'newsletter';
-  return 'misc';
-}
-
-/* ── Ollama ── */
-class DigestError extends Error { constructor(msg, kind) { super(msg); this.kind = kind || 'engine'; } }
-
-async function ollamaChat(system, user, opts, signal) {
-  const eng = digestEngineGet();
-  let r;
-  try {
-    r = await fetch(`${eng.url}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal,
-      body: JSON.stringify({
-        model: eng.model,
-        stream: false,
-        messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-        options: { temperature: 0.2, num_ctx: eng.numCtx, num_predict: opts.numPredict || 1200 },
-      }),
-    });
-  } catch(e) {
-    if (e && e.name === 'AbortError') throw e;
-    throw new DigestError(`Can't reach Ollama at ${eng.url}. Is it running? On GitHub Pages it also needs OLLAMA_ORIGINS=https://homiejhan.github.io.`, 'engine');
-  }
-  if (!r.ok) {
-    let detail = '';
-    try { detail = (await r.json()).error || ''; } catch(e) {}
-    throw new DigestError(`Ollama error ${r.status}${detail ? ': ' + detail : ''}`, 'engine');
-  }
-  const j = await r.json();
-  return String((j.message && j.message.content) || '').trim();
-}
-async function ollamaListModels(url) {
-  const base = (url || digestEngineGet().url).replace(/\/+$/, '');
-  const r = await fetch(`${base}/api/tags`);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const j = await r.json();
-  return (j.models || []).map(m => m.name).filter(Boolean);
-}
-
-/* ── pipeline ── */
-function digestProgress(phase, done, total, note) {
-  digestRun = { phase, done, total, note: note || '', error: null };
-  digestPaintProgress();
-}
-function digestChunk(emails, perEmailBudget) {
-  const chunks = [];
-  let cur = [], size = 0;
-  emails.forEach(e => {
-    const text = (e.text || '').slice(0, perEmailBudget);
-    const len = text.length + 200;
-    if (cur.length && size + len > DIGEST_CHUNK_CHARS) { chunks.push(cur); cur = []; size = 0; }
-    cur.push({ ...e, text });
-    size += len;
-  });
-  if (cur.length) chunks.push(cur);
-  return chunks;
-}
-function digestEmailBlock(e, idx) {
-  const when = new Date(e.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  return `### Email ${idx + 1}\nFrom: ${e.from}\nSubject: ${e.subject}\nDate: ${when}\n\n${e.text || '(empty)'}`;
-}
-function digestSplitOverview(md) {
-  const i = md.search(/^##\s*✅/m);
-  if (i < 0) return { top: md.trim(), actions: '' };
-  return { top: md.slice(0, i).trim(), actions: md.slice(i).trim() };
-}
-
-async function digestBuild(emails, signal) {
-  const kept = emails.filter(e => e.section !== 'skip');
-  const bySection = {};
-  DIGEST_SECTIONS.forEach(s => { bySection[s.key] = kept.filter(e => e.section === s.key); });
-  const calls = DIGEST_SECTIONS.reduce((n, s) => n + digestChunk(bySection[s.key], s.budget).length, 0) + 1;
-  let doneCalls = 0;
-  const sections = [];
-  for (const s of DIGEST_SECTIONS) {
-    const list = bySection[s.key];
-    let body = '';
-    if (!list.length) body = '_Nothing today_';
-    else {
-      const parts = [];
-      for (const chunk of digestChunk(list, s.budget)) {
-        digestProgress('summarizing', doneCalls, calls, s.title.replace(/^\S+\s/, ''));
-        const user = chunk.map(digestEmailBlock).join('\n\n---\n\n');
-        const out = await ollamaChat(`${DIGEST_RULES}\n\nSection: ${s.title}\n${DIGEST_SECTION_PROMPTS[s.key]}`, user, { numPredict: 1400 }, signal);
-        parts.push(out || '_The model returned nothing for these emails._');
-        doneCalls++;
-      }
-      body = parts.join('\n\n');
-    }
-    sections.push({ ...s, count: list.length, body });
-  }
-  const assembled = sections.map(s => `## ${s.title}\n${s.body}`).join('\n\n');
-  digestProgress('overview', doneCalls, calls, 'Top of the inbox');
-  const stats = `Emails processed: ${emails.length} (${emails.length - kept.length} promotional skipped). Per section: ` +
-    sections.map(s => `${s.title.replace(/^\S+\s/, '')} ${s.count}`).join(', ') + '.';
-  let overview = '';
-  try {
-    overview = await ollamaChat(DIGEST_OVERVIEW_PROMPT, `${stats}\n\n${assembled.slice(0, DIGEST_OVERVIEW_CHARS)}`, { numPredict: 700 }, signal);
-  } catch(e) { if (e && e.name === 'AbortError') throw e; overview = ''; }
-  const { top, actions } = digestSplitOverview(overview);
-  const head = top && /^##/m.test(top) ? top : `## 🔝 Top of the inbox\n${top || stats}`;
-  return [head, assembled, actions].filter(Boolean).join('\n\n');
-}
-
-async function digestRunNow() {
-  if (digestRun && digestAbort) return;   // already running
-  const eng = digestEngineGet();
-  if (!gmailIsConnected()) { digestRun = { phase: 'error', error: 'Connect Gmail in Settings first.', kind: 'auth' }; digestPaintProgress(); return; }
-  if (!eng.model) { digestRun = { phase: 'error', error: 'Pick an Ollama model in Settings → Email Digest.', kind: 'engine' }; digestPaintProgress(); return; }
-  digestAbort = new AbortController();
-  const signal = digestAbort.signal;
-  try {
-    digestProgress('fetching', 0, 0);
-    const emails = await gmailFetchRecent(eng, signal);
-    if (!emails.length) throw new DigestError(`No emails in the last ${eng.hours}h.`, 'empty');
-    const markdown = await digestBuild(emails, signal);
-    digestGet().last = { at: Date.now(), markdown, count: emails.length, model: eng.model, source: 'laptop' };
-    digestRun = null;
-    digestCollapsed = false;
-    saveToLocal();
-    renderHome();
-    showToast('Email digest ready ✓');
-  } catch(e) {
-    if (e && e.name === 'AbortError') { digestRun = null; }
-    else {
-      console.warn('Digest failed:', e);
-      digestRun = { phase: 'error', error: e && e.message ? e.message : String(e), kind: e && e.kind };
-      if (e && e.kind === 'auth') gmailSaveToken(null);
-    }
-    renderHome();
-  } finally {
-    digestAbort = null;
-  }
-}
-function digestCancel() {
-  if (digestAbort) digestAbort.abort();
-  digestRun = null;
-  digestAbort = null;
-  renderHome();
-}
-function digestDismissError() { digestRun = null; renderHome(); }
-
-/* ── sample digest: shows the card without Gmail or Ollama ── */
-function digestLoadSample() {
-  digestGet().enabled = true;
-  digestGet().last = { at: Date.now(), markdown: DIGEST_SAMPLE_MD, count: 23, model: 'sample', source: 'sample' };
-  digestRun = null;
-  digestCollapsed = false;
-  saveToLocal();
-  renderSettings();
-  renderHome();
-  digestShowHome();
-  showToast('Sample digest loaded');
-}
-function digestClearLast() {
-  digestGet().last = null;
-  saveToLocal();
-  renderSettings();
-  renderHome();
-}
-
-/* ── markdown → safe HTML (headings, lists, tables, code, links, bold) ── */
-function digestEsc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
-function digestInline(s) {
-  let t = digestEsc(s);
-  const codes = [];
-  t = t.replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
-  t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, txt, url) => `<a href="${url}" target="_blank" rel="noopener">${txt}</a>`);
-  t = t.replace(/(^|[\s(])((https?:\/\/)[^\s<)]+)/g, (_, pre, url) => `${pre}<a href="${url}" target="_blank" rel="noopener">${url.length > 60 ? url.slice(0, 57) + '…' : url}</a>`);
-  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  t = t.replace(/(^|[\s(])_([^_]+)_(?=[\s.,;:!?)]|$)/g, '$1<em>$2</em>');
-  t = t.replace(/(^|[\s(])\*([^*]+)\*(?=[\s.,;:!?)]|$)/g, '$1<em>$2</em>');
-  t = t.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[+i]}</code>`);
-  return t;
-}
-function digestRenderMd(md) {
-  const lines = String(md || '').replace(/\r\n?/g, '\n').split('\n');
-  const out = [];
-  let i = 0;
-  const isTableSep = l => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l);
-  const splitRow = l => l.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
-  while (i < lines.length) {
-    const line = lines[i];
-    if (!line.trim()) { i++; continue; }
-    let m;
-    if ((m = line.match(/^```/))) {
-      const buf = []; i++;
-      while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
-      i++;
-      out.push(`<pre><code>${digestEsc(buf.join('\n'))}</code></pre>`);
-      continue;
-    }
-    if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
-      const lvl = Math.max(2, Math.min(6, m[1].length));   // h1/h2 both render as h2 inside the card
-      out.push(`<h${lvl}>${digestInline(m[2].trim())}</h${lvl}>`); i++; continue;
-    }
-    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) { out.push('<hr>'); i++; continue; }
-    if (line.includes('|') && i + 1 < lines.length && isTableSep(lines[i + 1])) {
-      const head = splitRow(line); i += 2;
-      const rows = [];
-      while (i < lines.length && lines[i].includes('|') && lines[i].trim()) { rows.push(splitRow(lines[i])); i++; }
-      out.push('<table><thead><tr>' + head.map(c => `<th>${digestInline(c)}</th>`).join('') + '</tr></thead><tbody>' +
-        rows.map(r => '<tr>' + head.map((_, k) => `<td>${digestInline(r[k] || '')}</td>`).join('') + '</tr>').join('') + '</tbody></table>');
-      continue;
-    }
-    if (/^\s*([-*+]|\d+[.)])\s+/.test(line)) {
-      const ordered = /^\s*\d+[.)]\s+/.test(line);
-      const items = [];
-      while (i < lines.length && /^\s*([-*+]|\d+[.)])\s+/.test(lines[i])) {
-        let txt = lines[i].replace(/^\s*([-*+]|\d+[.)])\s+/, '');
-        i++;
-        while (i < lines.length && /^\s{2,}\S/.test(lines[i]) && !/^\s*([-*+]|\d+[.)])\s+/.test(lines[i])) txt += ' ' + lines[i++].trim();
-        const task = txt.match(/^\[( |x|X)\]\s+(.*)$/);
-        if (task) items.push(`<li class="dg-task ${task[1] !== ' ' ? 'done' : ''}"><span class="dg-box"></span>${digestInline(task[2])}</li>`);
-        else items.push(`<li>${digestInline(txt)}</li>`);
-      }
-      out.push(`<${ordered ? 'ol' : 'ul'}>${items.join('')}</${ordered ? 'ol' : 'ul'}>`);
-      continue;
-    }
-    if (/^\s*>\s?/.test(line)) {
-      const buf = [];
-      while (i < lines.length && /^\s*>\s?/.test(lines[i])) buf.push(lines[i++].replace(/^\s*>\s?/, ''));
-      out.push(`<blockquote>${digestInline(buf.join(' '))}</blockquote>`);
-      continue;
-    }
-    const buf = [];
-    while (i < lines.length && lines[i].trim() && !/^(#{1,6}\s|```|\s*([-*+]|\d+[.)])\s+|\s*>)/.test(lines[i]) && !(lines[i].includes('|') && i + 1 < lines.length && isTableSep(lines[i + 1]))) buf.push(lines[i++].trim());
-    out.push(`<p>${digestInline(buf.join(' '))}</p>`);
-  }
-  return out.join('');
-}
-
-function digestShowHome() {
-  if (window.innerWidth <= 768) goTab('home', true); else homeToggleDesktop(true);
-}
-
-/* ── Home card ── */
-function digestMetaLine(last) {
-  const when = new Date(last.at);
-  const sameDay = when.toDateString() === new Date().toDateString();
-  const t = when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  const d = when.toLocaleDateString([], { month: 'short', day: 'numeric' });
-  const bits = [sameDay ? `Today ${t}` : `${d} ${t}`];
-  if (last.count) bits.push(`${last.count} emails`);
-  if (last.source === 'sample') bits.push('sample data');
-  else if (last.model) bits.push(last.model);
-  return bits.join(' \u00b7 ');
-}
-function digestProgressHtml() {
-  const r = digestRun;
-  if (!r) return '';
-  if (r.phase === 'error') {
-    const fix = r.kind === 'auth'
-      ? `<button class="dg-btn" onclick="gmailConnect()">Connect Gmail</button>`
-      : `<button class="dg-btn" onclick="openSettings()">Open Settings</button>`;
-    return `
-      <div class="dg-status error">
-        <div class="dg-status-text">${digestEsc(r.error)}</div>
-        <div class="dg-status-actions">${fix}<button class="dg-btn ghost" onclick="digestDismissError()">Dismiss</button></div>
-      </div>`;
-  }
-  const label = r.phase === 'fetching'
-    ? (r.total ? `Reading email ${r.done} of ${r.total}` : 'Finding recent email')
-    : r.phase === 'overview' ? 'Writing the overview'
-    : `Summarizing ${r.note}`;
-  const sub = r.phase === 'fetching' ? '' : `${r.done} of ${r.total} model calls done`;
-  const pct = r.total ? Math.round((r.done / r.total) * 100) : 0;
-  return `
-    <div class="dg-status">
-      <div class="dg-status-row">
-        <span class="dg-spinner"></span>
-        <div class="dg-status-text">${digestEsc(label)}${sub ? `<span class="dg-status-sub">${digestEsc(sub)}</span>` : ''}</div>
-        <button class="dg-btn ghost" onclick="digestCancel()">Cancel</button>
-      </div>
-      <div class="dg-track"><div class="dg-fill" style="width:${pct}%"></div></div>
-    </div>`;
-}
-function digestPaintProgress() {
-  const els = document.querySelectorAll('.dg-progress');
-  if (!els.length) { renderHome(); return; }
-  const html = digestProgressHtml();
-  els.forEach(el => { el.innerHTML = html; });
-}
-function homeDigestHtml() {
-  const d = digestGet();
-  if (!d.enabled) return '';
-  const running = !!(digestRun && digestRun.phase !== 'error');
-  const last = d.last;
-  const canRun = gmailIsConnected() && !!digestEngineGet().model;
-  const runBtn = running ? '' : `<button class="dg-btn" onclick="digestRunNow()" title="${canRun ? 'Read the last day of Gmail and summarize it' : 'Needs Gmail and an Ollama model (Settings)'}">Run digest</button>`;
-  const chevron = last ? `<button class="dg-chev ${digestCollapsed ? 'closed' : ''}" onclick="digestToggleCollapsed()" title="${digestCollapsed ? 'Expand' : 'Collapse'}" aria-label="Toggle digest">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>` : '';
-  let body;
-  if (last && !digestCollapsed) body = `<div class="dg-md">${digestRenderMd(last.markdown)}</div>`;
-  else if (last) body = '';
-  else if (running) body = '';
-  else if (!gmailIsConnected()) body = `
-      <div class="dg-empty">
-        <div class="dg-empty-text">Connect Gmail and Worky will read the last day of mail, sort it into news, newsletters, job updates and everything else, and write a two-minute summary here.</div>
-        <div class="dg-status-actions">
-          <button class="dg-btn" onclick="gmailConnect()">Connect Gmail</button>
-          <button class="dg-btn ghost" onclick="digestLoadSample()">See a sample</button>
-        </div>
-      </div>`;
-  else if (!digestEngineGet().model) body = `
-      <div class="dg-empty">
-        <div class="dg-empty-text">Gmail is connected. Pick the Ollama model that will write the summary in Settings → Email Digest, then run it.</div>
-        <div class="dg-status-actions">
-          <button class="dg-btn" onclick="openSettings()">Open Settings</button>
-          <button class="dg-btn ghost" onclick="digestLoadSample()">See a sample</button>
-        </div>
-      </div>`;
-  else body = `
-      <div class="dg-empty">
-        <div class="dg-empty-text">Ready. Running reads your last ${digestEngineGet().hours} hours of Gmail and takes a few minutes on a laptop model.</div>
-      </div>`;
-  return `
-    <section class="home-section dg-section">
-      <div class="home-card dg-card">
-        <div class="dg-head">
-          <div class="dg-title-wrap">
-            <div class="dg-title">Email digest</div>
-            ${last ? `<div class="dg-meta">${digestEsc(digestMetaLine(last))}</div>` : ''}
-          </div>
-          <div class="dg-actions">${runBtn}${chevron}</div>
-        </div>
-        <div class="dg-progress">${digestProgressHtml()}</div>
-        ${body}
-      </div>
-    </section>`;
-}
-
-/* ── Settings section ── */
-function digestRenderSettings() {
-  const wrap = $('digestSettings');
-  if (!wrap) return;
-  const d = digestGet();
-  const eng = digestEngineGet();
-  const tog = $('digestEnabledToggle');
-  if (tog) tog.checked = d.enabled;
-  const fields = $('digestFields');
-  if (fields) fields.style.display = d.enabled ? '' : 'none';
-  const gline = $('digestGmailLine');
-  const gbtn = $('digestGmailBtn');
-  if (gline) gline.textContent = gmailIsConnected()
-    ? `Connected${gmailToken.email ? ' as ' + gmailToken.email : ''}. Read-only; the token stays on this device and expires after about an hour.`
-    : 'Not connected. Uses the same Google sign-in as Calendar, read-only.';
-  if (gbtn) {
-    gbtn.textContent = gmailIsConnected() ? 'Disconnect Gmail' : 'Connect Gmail';
-    gbtn.classList.toggle('connected', gmailIsConnected());
-  }
-  const url = $('digestEngineUrl');
-  if (url && document.activeElement !== url) url.value = eng.url;
-  const sel = $('digestModelSelect');
-  if (sel && !sel.options.length) {
-    sel.innerHTML = eng.model ? `<option value="${escAttr(eng.model)}">${escAttr(eng.model)}</option>` : '<option value="">Test the connection to list models</option>';
-    sel.value = eng.model;
-  }
-  const clr = $('digestClearBtn');
-  if (clr) clr.style.display = d.last ? '' : 'none';
-}
-async function digestTestEngine() {
-  const status = $('digestEngineStatus');
-  const sel = $('digestModelSelect');
-  const url = ($('digestEngineUrl')?.value || '').trim().replace(/\/+$/, '') || DIGEST_ENGINE_DEFAULT_URL;
-  digestEngineSave({ url });
-  if (status) status.textContent = 'Checking…';
-  try {
-    const models = await ollamaListModels(url);
-    if (!models.length) { if (status) status.textContent = 'Ollama answered but has no models. Run: ollama pull <model>'; return; }
-    const cur = digestEngineGet().model;
-    const pick = models.includes(cur) ? cur : models[0];
-    if (sel) {
-      sel.innerHTML = models.map(m => `<option value="${escAttr(m)}">${escAttr(m)}</option>`).join('');
-      sel.value = pick;
-    }
-    digestEngineSave({ model: pick });
-    if (status) status.textContent = `Connected — ${models.length} model${models.length === 1 ? '' : 's'} available.`;
-    renderHome();
-  } catch(e) {
-    if (status) status.textContent = `Can't reach ${url}. Start Ollama, and on GitHub Pages set OLLAMA_ORIGINS=https://homiejhan.github.io.`;
-  }
-}
-function bindDigest() {
-  $('digestEnabledToggle')?.addEventListener('change', e => {
-    digestGet().enabled = !!e.target.checked;
-    saveToLocal();
-    digestRenderSettings();
-    renderHome();
-  });
-  $('digestGmailBtn')?.addEventListener('click', () => { if (gmailIsConnected()) gmailDisconnect(); else gmailConnect(); });
-  $('digestEngineUrl')?.addEventListener('change', e => digestEngineSave({ url: (e.target.value || '').trim().replace(/\/+$/, '') || DIGEST_ENGINE_DEFAULT_URL }));
-  $('digestEngineTestBtn')?.addEventListener('click', digestTestEngine);
-  $('digestModelSelect')?.addEventListener('change', e => { digestEngineSave({ model: e.target.value }); renderHome(); });
-  $('digestSampleBtn')?.addEventListener('click', () => { closeModal('settingsModal'); digestLoadSample(); });
-  $('digestClearBtn')?.addEventListener('click', digestClearLast);
-  $('digestRunSettingsBtn')?.addEventListener('click', () => { closeModal('settingsModal'); digestShowHome(); digestRunNow(); });
-}
-
-const DIGEST_SAMPLE_MD = `## 🔝 Top of the inbox
-23 emails since yesterday morning. One thing is urgent: the **Northwind Labs** online assessment closes **tomorrow at 5pm**. Everything else can wait until lunch.
-
-## 📰 Tech News (TLDR)
-**TLDR**
-- **Postgres 18 ships async I/O** — the new io_uring backend cuts sequential scan latency by up to 3× on NVMe; opt-in via \`io_method\`. [Read](https://example.com/pg18-async)
-- **Bun adds a built-in S3 client** — zero-dependency uploads and presigned URLs land in 1.3. [Read](https://example.com/bun-s3)
-- **GitHub Actions gets ARM runners for free tier** — public repos can now target \`ubuntu-24.04-arm\`. [Read](https://example.com/gha-arm)
-
-**TLDR AI**
-- **Small models, big context** — a 3B model trained with ring attention matches 70B baselines on 128k-token retrieval. [Paper](https://example.com/ring-3b)
-- **Ollama 0.12 adds tool streaming** — function-call chunks now arrive as they're generated. [Notes](https://example.com/ollama-012)
-
-## 🏗️ ByteByteGo
-**Major concepts**
-- How **rate limiters** are built at scale: token bucket vs sliding window log.
-- Why the limiter must live at the edge, not inside each service.
-
-**How it works**
-\`\`\`
-client ──▶ API gateway ──▶ rate limiter (Redis) ──▶ service
-                              │
-                              └─▶ 429 + Retry-After
-\`\`\`
-- Each key stores a bucket \`{tokens, lastRefill}\`; a Lua script refills and decrements atomically.
-- Buckets are sharded by user id so one hot key can't saturate a node.
-
-**Why it matters**
-- A single Redis round trip per request keeps p99 under 2ms while protecting every downstream service. [Full issue](https://example.com/bbg-rate-limits)
-
-## 📮 Other Newsletters
-**Pragmatic Engineer**
-- Inside a 4-person team's migration off Kafka to Postgres queues, and why it worked for them. [Read](https://example.com/pe-kafka)
-- Hiring survey: take-home tasks are down 30% year over year.
-
-**Medium Daily Digest**
-- "What I learned running a PWA for 1,000 days" — mostly about service-worker cache busting.
-
-## 💼 Job Application Updates
-⚠️ **Northwind Labs** — online assessment invite, closes **tomorrow 5:00pm CT**.
-
-| Company | Role | Status | Action needed | Deadline |
-|---|---|---|---|---|
-| **Northwind Labs** | Software Engineer II | Assessment invite | Complete HackerRank (90 min) | Tomorrow 5pm |
-| **Fabrikam** | Backend Engineer | Recruiter screen scheduled | Confirm Thursday 10am | Wed |
-| **Contoso** | Full-stack Developer | Not moving forward | — | — |
-
-## 📬 Miscellaneous
-- **Austin Energy** — August statement, $84.12 due Sep 19 — autopay is on, no action.
-- **Dr. Patel's office** — appointment reminder for Sep 12, 9:30am — reply YES to confirm.
-- **Google Calendar** — invitation: "Study group" Saturday 2pm — accept or decline.
-
-## ✅ Action items
-- [ ] Finish the Northwind Labs assessment before tomorrow 5pm
-- [ ] Confirm the Fabrikam recruiter screen for Thursday 10am
-- [ ] Reply YES to Dr. Patel's reminder
-- [ ] Respond to the Saturday study group invite`;
-
 /* ───────────────────────── STATIC BINDINGS ───────────────────────── */
 function bindStatic() {
   bindTheme();
   bindTour();
-  bindDigest();
   /* wakeup */
   $('wakeupRow-d')?.addEventListener('click', toggleWakeup);
   $('wakeupRow-m')?.addEventListener('click', toggleWakeup);
@@ -6548,12 +5763,6 @@ function bindTour() {
   /* cloud sync */
   syncInit();
   syncHandleRedirect();
-
-  /* email digest */
-  gmailLoadToken();
-  digestUiLoad();
-  gmailHandleRedirect();
-  if (gmailIsConnected() && !gmailToken.email) gmailFetchProfile();
 
   /* gcal */
   gcalLoadToken();
