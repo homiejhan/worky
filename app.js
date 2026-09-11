@@ -4674,7 +4674,7 @@ function syncRenderChoiceInfo() {
   const when = syncPendingRemote.updatedAt
     ? new Date(syncPendingRemote.updatedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
     : 'unknown time';
-  info.textContent = `This device's data differs from your cloud copy (last updated ${when}). Which one should Worky keep?`;
+  info.textContent = `This device's data differs from your cloud copy (last updated ${when}). Which one should Focus keep?`;
 }
 function syncOpenChoiceModal() {
   syncRenderChoiceInfo();
@@ -5527,7 +5527,7 @@ function applyStarterProfile() {
   /* day by day */
   dbdIdCounter = 1;
   dbdTasks = [
-    { id: dbdIdCounter++, text: 'Take a look around Worky',            due: today,             done: false },
+    { id: dbdIdCounter++, text: 'Take a look around Focus',            due: today,             done: false },
     { id: dbdIdCounter++, text: 'Rename the timers to match your day', due: starterDateKey(1), done: false },
     { id: dbdIdCounter++, text: 'Open Formats and save your setup',    due: starterDateKey(2), done: false },
   ];

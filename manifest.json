@@ -1,6 +1,6 @@
 {
-  "name": "Worky — your day, one page",
-  "short_name": "Worky",
+  "name": "Focus — your day, one page",
+  "short_name": "Focus",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
