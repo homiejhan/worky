@@ -492,6 +492,19 @@ function calLoad() {
 /* ───────────────────────── TIMERS ───────────────────────── */
 function timerById(id) { return timers.find(x => x.id === id); }
 
+/* Fraction of the timer's default budget still remaining (0–1). */
+function timerPct(t) {
+  const idx = timers.findIndex(x => x.id === t.id);
+  const def = TIMER_DEFAULTS[idx];
+  const total = def && def.seconds > 0 ? def.seconds : (t.secondsAtStart || t.seconds || 0);
+  if (!total) return 0;
+  return Math.max(0, Math.min(1, getRemaining(t) / total));
+}
+function timerPaintProgress(t) {
+  const w = (timerPct(t) * 100).toFixed(1) + '%';
+  document.querySelectorAll(`.tfill-${t.id}`).forEach(el => { el.style.width = w; });
+}
+
 function timerCardHTML(t, pfx) {
   return `
     <div class="timer-header">
@@ -515,7 +528,11 @@ function timerCardHTML(t, pfx) {
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 1.5L8.5 8.5M8.5 1.5L1.5 8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
       </button>
     </div>
-    <div class="timer-sub tsub-${t.id}">${t.running ? 'running' : 'paused'} · click time to edit</div>`;
+    <div class="timer-progress"><div class="timer-progress-fill tfill-${t.id}" style="width:${(timerPct(t) * 100).toFixed(1)}%"></div></div>
+    <div class="timer-sub tsub-${t.id}">${timerSubText(t)}</div>`;
+}
+function timerSubText(t) {
+  return t.running ? 'Running' : 'Paused · tap the time to edit';
 }
 
 function renderTimers() {
@@ -525,7 +542,8 @@ function renderTimers() {
     stack.innerHTML = '';
     timers.forEach(t => {
       const card = document.createElement('div');
-      card.className = 'timer-card';
+      card.className = 'timer-card tcard-' + t.id + (t.running ? ' running' : '');
+      card.style.setProperty('--tc', t.color);
       card.innerHTML = timerCardHTML(t, pfx);
       stack.appendChild(card);
     });
@@ -545,6 +563,7 @@ function setTimerLabel(id, value) {
 }
 
 function changeTimerColor(id, color) {
+  document.querySelectorAll(`.tcard-${id}`).forEach(el => el.style.setProperty('--tc', color));
   const t = timerById(id);
   if (!t) return;
   t.color = color;
@@ -579,9 +598,9 @@ function updateTimerUI(id) {
     btn.innerHTML = t.running ? pauseIcon() : playIcon();
     btn.classList.toggle('running', t.running);
   });
-  document.querySelectorAll(`.tsub-${id}`).forEach(el => {
-    el.textContent = (t.running ? 'running' : 'paused') + ' · click time to edit';
-  });
+  document.querySelectorAll(`.tsub-${id}`).forEach(el => { el.textContent = timerSubText(t); });
+  document.querySelectorAll(`.tcard-${id}`).forEach(el => el.classList.toggle('running', t.running));
+  timerPaintProgress(t);
 }
 
 function startEditTimer(id, pfx) {
@@ -616,6 +635,7 @@ function commitEditTimer(id, pfx) {
     el.style.display = 'block';
     el.textContent = fmt(t.seconds);
   });
+  timerPaintProgress(t);
   saveToLocal();
 }
 
@@ -642,6 +662,7 @@ function tickAll() {
     if (!t.running) return;
     const rem = getRemaining(t);
     document.querySelectorAll(`.tdisp-${t.id}`).forEach(el => el.textContent = fmt(rem));
+    timerPaintProgress(t);
     if (rem <= 0) { t.seconds = 0; t.running = false; updateTimerUI(t.id); }
   });
   if (wokenUp) updateTimerSummary();
@@ -700,6 +721,7 @@ function buildCard(list, pfx) {
   card.className = 'todo-card' + (listDraggable ? ' list-reorderable' : '') + (list.starred ? ' starred' : '');
   card.dataset.listId = list.id;
   card.dataset.isDefault = list.isDefault ? '1' : '0';
+  card.style.setProperty('--lc', list.color);
 
   const handleHtml = listDraggable
     ? '<div class="list-drag-handle" title="Drag to reorder">' + GRIP_SVG + '</div>'
@@ -998,6 +1020,7 @@ function removeTodoList(id) {
 }
 
 function changeTodoColor(id, color) {
+  document.querySelectorAll(`.todo-card[data-list-id="${id}"]`).forEach(el => el.style.setProperty('--lc', color));
   const list = listById(id);
   if (!list) return;
   list.color = color;
@@ -1442,7 +1465,7 @@ function enterFormatMode() {
   formatMode = true;
   document.body.classList.add('format-mode');
   const btn = $('fmtBtn');
-  if (btn) { btn.textContent = '✓ Done'; btn.classList.add('active'); }
+  if (btn) { btn.textContent = 'Done'; btn.classList.add('active'); }
 
   renderTimers();
   renderTodos();
@@ -2392,6 +2415,16 @@ let homeDesktopOpen = false;
 const HOME_CHECK_SVG = `<svg width="9" height="9" viewBox="0 0 9 9" fill="none">
   <path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
+/* Keep the sidebar nav in step with whichever desktop panel is showing. */
+function desktopNavSync() {
+  const listsTab = $('listsDesktopNavTab');
+  if (listsTab) listsTab.classList.toggle('active', !homeDesktopOpen && !calDesktopOpen && !budgetDesktopOpen);
+}
+function showDesktopLists() {
+  if (calDesktopOpen) calToggleDesktop();
+  if (budgetDesktopOpen) budgetToggleDesktop(false);
+  homeToggleDesktop(false);
+}
 function homeToggleDesktop(force) {
   const want = (typeof force === 'boolean') ? force : !homeDesktopOpen;
   if (want && calDesktopOpen) calToggleDesktop();   // close calendar overlay first
@@ -2404,6 +2437,7 @@ function homeToggleDesktop(force) {
   if (tab)   tab.classList.toggle('active', homeDesktopOpen);
   if (rp)    rp.style.display = homeDesktopOpen ? 'none' : '';
   if (homeDesktopOpen) renderHome();
+  desktopNavSync();
 }
 
 function renderHome() {
@@ -2483,6 +2517,14 @@ function homeUpdateProgressDom() {
 }
 
 /* ── hero ── */
+function homeGreeting() {
+  const h = new Date().getHours();
+  if (h < 5)  return 'Still up?';
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  if (h < 21) return 'Good evening';
+  return 'Good night';
+}
 function homeHeroHtml() {
   const dateStr = new Date().toLocaleDateString(undefined,
     { weekday: 'long', month: 'long', day: 'numeric' });
@@ -2490,7 +2532,7 @@ function homeHeroHtml() {
     <div class="home-hero">
       <div class="home-hero-top">
         <div class="home-hero-text">
-          <div class="home-welcome">Welcome</div>
+          <div class="home-welcome">${homeGreeting()}</div>
           <div class="home-date">${dateStr}</div>
         </div>
         <div class="home-balance" onclick="openBudgetTab()" title="Open Budget">
@@ -2538,8 +2580,8 @@ function homeDbdHtml() {
   const emptyToday = (!overdue.length && !today.length)
     ? '<div class="home-muted-note">Nothing due today.</div>' : '';
   return `
-    <section class="home-section">
-      <div class="home-section-title">Today\u2019s Tasks</div>
+    <section class="home-section home-sec-today">
+      <div class="home-section-title">Today\u2019s tasks</div>
       <div class="home-card">
         ${overdue.map(e => homeDbdRow(e, 'overdue')).join('')}
         ${today.map(e => homeDbdRow(e, 'today')).join('')}
@@ -2576,9 +2618,9 @@ function homeListCard(list) {
 function homeStarredListsHtml(daily) {
   const lists = todoLists.filter(l => !!l.isDefault === daily && l.starred);
   if (!lists.length) return '';
-  const title = daily ? 'Starred Daily' : 'Starred Lists';
+  const title = daily ? 'Starred daily' : 'Starred lists';
   return `
-    <section class="home-section">
+    <section class="home-section ${daily ? 'home-sec-daily' : 'home-sec-lists'}">
       <div class="home-section-title">${title}</div>
       <div class="home-lists-grid">${lists.map(homeListCard).join('')}</div>
     </section>`;
@@ -2595,7 +2637,7 @@ function homeTimersHtml() {
       <span class="home-timer-time tdisp-${t.id}">${fmt(getRemaining(t))}</span>
     </div>`).join('');
   return `
-    <section class="home-section">
+    <section class="home-section home-sec-timers">
       <div class="home-section-title">Timers</div>
       <div class="home-timer-row">${chips}</div>
     </section>`;
@@ -2652,8 +2694,8 @@ function homeCalHtml() {
 
   const empty = `<div class="home-muted-note">Nothing on the calendar until ${homeCalTime(winEnd)}.</div>`;
   return `
-    <section class="home-section">
-      <div class="home-section-title">Next 4 Hours</div>
+    <section class="home-section home-sec-cal">
+      <div class="home-section-title">Next 4 hours</div>
       <div class="home-card home-cal-card">${items || empty}</div>
     </section>`;
 }
@@ -2692,6 +2734,8 @@ function applyViewVisibility() {
   });
   if (!viewEnabled('calendar') && calDesktopOpen)   calToggleDesktop();
   if (!viewEnabled('budget')   && budgetDesktopOpen) budgetToggleDesktop(false);
+  const listsTab = $('listsDesktopNavTab');
+  if (listsTab) listsTab.style.display = (viewEnabled('daily') || viewEnabled('lists')) ? '' : 'none';
   if (!viewEnabled(currentView)) currentView = 'home';
   setSwipePanelWidths();
   renderHome();
@@ -3165,7 +3209,7 @@ function calRenderDesktop() {
 
   gridEl.style.height = CAL_TOTAL_PX + 'px';
   const sc = $('calScrollArea');
-  setTimeout(() => { if (sc) sc.scrollTop = 7 * CAL_HOUR_PX; }, 50);
+  setTimeout(() => { if (sc) sc.scrollTop = 7 * CAL_HOUR_PX - 14; }, 50);
 }
 
 function calRenderDesktopFmt() {
@@ -3203,7 +3247,7 @@ function calRenderDesktopFmt() {
 
   gridEl.style.height = CAL_TOTAL_PX + 'px';
   const sc = $('calScrollArea');
-  setTimeout(() => { if (sc) sc.scrollTop = 7 * CAL_HOUR_PX; }, 50);
+  setTimeout(() => { if (sc) sc.scrollTop = 7 * CAL_HOUR_PX - 14; }, 50);
 }
 
 /* ── mobile render ── */
@@ -3239,7 +3283,7 @@ function calRenderMobile() {
   body.appendChild(timeCol);
   body.appendChild(dayCol);
   gridEl.appendChild(body);
-  setTimeout(() => { gridEl.scrollTop = 7 * CAL_HOUR_PX; }, 50);
+  setTimeout(() => { gridEl.scrollTop = 7 * CAL_HOUR_PX - 14; }, 50);
 }
 
 function calRenderMobileFmt() {
@@ -3270,7 +3314,7 @@ function calRenderMobileFmt() {
   body.appendChild(timeCol);
   body.appendChild(dayCol);
   gridEl.appendChild(body);
-  setTimeout(() => { gridEl.scrollTop = 7 * CAL_HOUR_PX; }, 50);
+  setTimeout(() => { gridEl.scrollTop = 7 * CAL_HOUR_PX - 14; }, 50);
 }
 
 function calNavDay(dir) {
@@ -3296,6 +3340,7 @@ function calToggleDesktop() {
   if (rp)      rp.style.display = calDesktopOpen ? 'none' : '';
   if (weekBtn) weekBtn.classList.toggle('shown', calDesktopOpen);
   if (calDesktopOpen) calRenderDesktop();
+  desktopNavSync();
 }
 
 function calToggleWeekMode() {
@@ -3994,11 +4039,11 @@ function gcalUpdateBtn() {
   const btn = $('gcalConnectBtn');
   if (!btn) return;
   if (gcalIsConnected()) {
-    btn.textContent = '⚡ Google Cal';
+    btn.textContent = 'Manage Google Calendars';
     btn.classList.add('connected');
     btn.onclick = gcalOpenModal;
   } else {
-    btn.textContent = '+ Google Cal';
+    btn.textContent = 'Connect Google Calendar';
     btn.classList.remove('connected');
     btn.onclick = gcalConnect;
   }
@@ -4104,6 +4149,7 @@ function budgetToggleDesktop(force) {
   if (tab)   tab.classList.toggle('active', budgetDesktopOpen);
   if (rp)    rp.style.display = budgetDesktopOpen ? 'none' : '';
   if (budgetDesktopOpen) renderBudget();
+  desktopNavSync();
 }
 
 /* ── UI ──
@@ -4825,13 +4871,15 @@ const THEME_BG_MAX_EDGE = 1920;      // uploaded images are downscaled to this
 const THEME_BG_MAX_B64  = 2.5e6;     // and refused above ~2.5 MB encoded
 
 const THEME_PRESETS = [
-  { id: 'midnight', name: 'Midnight', bg: '#0b0c0e', surface: '#121317', ink: '#eceded', ink2: '#9ca1ab', ink3: '#5c6370', accent: '#5dcaa5', danger: '#e05555', font: 'DM Sans',        radius: 10 },
-  { id: 'daylight', name: 'Daylight', bg: '#f2f3f5', surface: '#ffffff', ink: '#15171b', ink2: '#5a6070', ink3: '#9aa1ad', accent: '#2a63c6', danger: '#cf3d3d', font: 'DM Sans',        radius: 10 },
-  { id: 'forest',   name: 'Forest',   bg: '#0d1712', surface: '#132019', ink: '#e4efe7', ink2: '#93a89b', ink3: '#54685c', accent: '#d9b34c', danger: '#e26a5a', font: 'Manrope',        radius: 12 },
-  { id: 'ocean',    name: 'Ocean',    bg: '#091120', surface: '#0f1a2e', ink: '#e2ebf7', ink2: '#93a3bd', ink3: '#54637d', accent: '#5aa9ff', danger: '#ef6262', font: 'Inter',          radius: 8  },
-  { id: 'ember',    name: 'Ember',    bg: '#15100d', surface: '#1e1712', ink: '#f3eae0', ink2: '#b39d8a', ink3: '#6f5f52', accent: '#f0894a', danger: '#e05555', font: 'Nunito',         radius: 14 },
-  { id: 'lavender', name: 'Lavender', bg: '#13111c', surface: '#1b1828', ink: '#ebe8f5', ink2: '#a29dbd', ink3: '#625d7c', accent: '#b49cff', danger: '#f0668a', font: 'Space Grotesk',  radius: 12 },
-  { id: 'rose',     name: 'Rosé',     bg: '#fbf3f5', surface: '#ffffff', ink: '#2b1f25', ink2: '#6f5d65', ink3: '#a8979f', accent: '#c94d7a', danger: '#c8403a', font: 'Lora',           radius: 14 },
+  { id: 'midnight', name: 'Midnight', bg: '#0d0f15', surface: '#151823', ink: '#eef0f4', ink2: '#9aa3b2', ink3: '#5f6878', accent: '#5dcaa5', danger: '#e05555', font: 'DM Sans',        radius: 12 },
+  { id: 'daylight', name: 'Daylight', bg: '#f3f4f8', surface: '#ffffff', ink: '#15171b', ink2: '#5a6070', ink3: '#9aa1ad', accent: '#2f6fe0', danger: '#cf3d3d', font: 'DM Sans',        radius: 12 },
+  { id: 'forest',   name: 'Forest',   bg: '#0c1611', surface: '#132019', ink: '#e4efe7', ink2: '#93a89b', ink3: '#54685c', accent: '#e0b84f', danger: '#e26a5a', font: 'Manrope',        radius: 14 },
+  { id: 'ocean',    name: 'Ocean',    bg: '#081020', surface: '#0f1a2e', ink: '#e2ebf7', ink2: '#93a3bd', ink3: '#54637d', accent: '#5aa9ff', danger: '#ef6262', font: 'Inter',          radius: 10 },
+  { id: 'ember',    name: 'Ember',    bg: '#16100d', surface: '#1e1712', ink: '#f3eae0', ink2: '#b39d8a', ink3: '#6f5f52', accent: '#f0894a', danger: '#e05555', font: 'Nunito',         radius: 16 },
+  { id: 'lavender', name: 'Lavender', bg: '#13111c', surface: '#1b1828', ink: '#ebe8f5', ink2: '#a29dbd', ink3: '#625d7c', accent: '#b49cff', danger: '#f0668a', font: 'Space Grotesk',  radius: 14 },
+  { id: 'sunset',   name: 'Sunset',   bg: '#170f14', surface: '#20151c', ink: '#f6e9ee', ink2: '#b8a0ab', ink3: '#725e68', accent: '#ff7a8a', danger: '#e05555', font: 'DM Sans',        radius: 16 },
+  { id: 'rose',     name: 'Rosé',     bg: '#fbf3f5', surface: '#ffffff', ink: '#2b1f25', ink2: '#6f5d65', ink3: '#a8979f', accent: '#c94d7a', danger: '#c8403a', font: 'Lora',           radius: 16 },
+  { id: 'sky',      name: 'Sky',      bg: '#eef4fb', surface: '#ffffff', ink: '#14202e', ink2: '#57677a', ink3: '#93a2b3', accent: '#1f8fd8', danger: '#d4463f', font: 'Manrope',        radius: 14 },
 ];
 
 /* Curated Google Fonts; anything else typed in is fetched by name. */
@@ -4893,6 +4941,13 @@ function normalizeTheme(v) {
   out.bgDim   = themeNum(v.bgDim, 0, 90, 40);
   out.bgBlur  = themeNum(v.bgBlur, 0, 24, 0);
   out.bgGlass = themeNum(v.bgGlass, 0, 80, 35);
+  /* A named preset always means "the preset's palette" — any edit flips the
+   * record to 'custom' — so re-derive it here. That lets a refreshed preset
+   * reach devices that saved the old values. */
+  if (out.preset !== 'custom') {
+    THEME_COLOR_FIELDS.forEach(f => { out[f.key] = base[f.key]; });
+    out.font = base.font; out.radius = base.radius;
+  }
   return out;
 }
 
@@ -4933,6 +4988,26 @@ function themeLuma(h) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 function themeRgbStr(h) { return themeHexToRgb(h).join(','); }
+/* Rotate a hex colour's hue by `deg` (keeps saturation/lightness) — used to
+ * derive the two companion accents that colour the ambient wash. */
+function themeRotate(hex, deg) {
+  let [r, g, b] = themeHexToRgb(hex).map(x => x / 255);
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, sat = 0; const l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    sat = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h /= 6;
+  }
+  h = (h + deg / 360 + 1) % 1;
+  sat = Math.min(1, Math.max(0.42, sat));          // keep companions vivid
+  const f = (p, q, t) => { t = (t + 1) % 1; if (t < 1/6) return p + (q - p) * 6 * t; if (t < 1/2) return q; if (t < 2/3) return p + (q - p) * (2/3 - t) * 6; return p; };
+  const q = l < 0.5 ? l * (1 + sat) : l + sat - l * sat, pp = 2 * l - q;
+  return themeRgbToHex([f(pp, q, h + 1/3), f(pp, q, h), f(pp, q, h - 1/3)].map(x => x * 255));
+}
 function themeRgba(h, a) { return `rgba(${themeRgbStr(h)},${a})`; }
 
 function themeFontStack(name) {
@@ -4983,7 +5058,9 @@ function applyTheme() {
   const hover    = themeMix(t.surface, t.ink, light ? 0.075 : 0.09);
 
   root.setProperty('--bg-solid',    t.bg);
-  root.setProperty('--bg-base',     glass ? themeRgba(t.bg, 1 - glass) : t.bg);
+  /* No image → panels are transparent so the ambient wash paints the canvas
+   * (html/body still hold --bg-solid, so nothing ever shows through to white). */
+  root.setProperty('--bg-base',     hasImg ? themeRgba(t.bg, 1 - glass) : 'transparent');
   root.setProperty('--bg-surface',  glass ? themeRgba(t.surface, 1 - glass * 0.85) : t.surface);
   root.setProperty('--bg-elevated', glass ? themeRgba(elevated, 1 - glass * 0.45) : elevated);
   root.setProperty('--bg-hover',    hover);
@@ -4999,10 +5076,19 @@ function applyTheme() {
   root.setProperty('--accent',     t.accent);
   root.setProperty('--accent-rgb', themeRgbStr(t.accent));
   root.setProperty('--accent-dim', themeRgba(t.accent, light ? 0.12 : 0.14));
+  const acc2 = themeRotate(t.accent, 120), acc3 = themeRotate(t.accent, 240);
+  root.setProperty('--accent-2',     acc2);
+  root.setProperty('--accent-2-rgb', themeRgbStr(acc2));
+  root.setProperty('--accent-3',     acc3);
+  root.setProperty('--accent-3-rgb', themeRgbStr(acc3));
+  root.setProperty('--on-accent',    themeLuma(t.accent) > 0.62 ? themeMix(t.bg, '#000000', light ? 0.85 : 0.9) : '#ffffff');
+  root.setProperty('--ambient-alpha', light ? '0.75' : '1');
+  root.setProperty('--star', light ? '#c8921a' : '#E8B341');
   root.setProperty('--danger',     t.danger);
   root.setProperty('--danger-rgb', themeRgbStr(t.danger));
   root.setProperty('--danger-dim', themeRgba(t.danger, 0.12));
-  root.setProperty('--shadow-pop',   light ? '0 8px 32px rgba(0,0,0,0.18)' : '0 8px 32px rgba(0,0,0,0.5)');
+  root.setProperty('--shadow-pop',   light ? '0 18px 48px rgba(0,0,0,0.16), 0 2px 8px rgba(0,0,0,0.06)' : '0 18px 48px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3)');
+  root.setProperty('--shadow-card',  light ? '0 1px 2px rgba(0,0,0,0.05), 0 6px 18px rgba(0,0,0,0.04)' : '0 1px 2px rgba(0,0,0,0.18)');
   root.setProperty('--shadow-ghost', light ? '0 12px 32px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.12)'
                                            : '0 12px 32px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.4)');
   root.setProperty('--scheme', light ? 'light' : 'dark');
@@ -5039,7 +5125,7 @@ function themeApplyPreset(id) {
 /* Field edit from the editor. Palette/type edits detach from the preset. */
 function themeSet(key, value) {
   const t = themeGet();
-  const next = normalizeTheme({ ...t, [key]: value, preset: t.preset });
+  const next = normalizeTheme({ ...t, [key]: value, preset: 'custom' });   // 'custom' so the edit isn't re-derived away
   if (!(key in next)) return;
   const paletteKey = THEME_COLOR_FIELDS.some(f => f.key === key) || key === 'font' || key === 'radius';
   t[key] = next[key];
@@ -5254,7 +5340,8 @@ function bindStatic() {
 
   /* calendar nav */
   $('calDesktopNavTab')?.addEventListener('click', calToggleDesktop);
-  $('homeDesktopNavTab')?.addEventListener('click', () => homeToggleDesktop());
+  $('homeDesktopNavTab')?.addEventListener('click', () => homeToggleDesktop(true));
+  $('listsDesktopNavTab')?.addEventListener('click', showDesktopLists);
   $('settingsBtn')?.addEventListener('click', openSettings);
   $('settingsViewList')?.addEventListener('change', e => {
     const key = e.target?.dataset?.viewtoggle;
@@ -5280,7 +5367,18 @@ function bindStatic() {
   $('addListBtn-d')?.addEventListener('click', addTodoList);
   $('addListBtn-m')?.addEventListener('click', addTodoList);
 
-  /* data bar */
+  /* data bar — on phones Export / Import / Reset live behind the ⋯ button */
+  const dataBar = $('dataBar'), moreBtn = $('moreBtn');
+  const setMore = open => {
+    if (!dataBar) return;
+    dataBar.classList.toggle('open', open);
+    if (moreBtn) moreBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
+  moreBtn?.addEventListener('click', e => { e.stopPropagation(); setMore(!dataBar.classList.contains('open')); });
+  document.addEventListener('click', e => {
+    if (dataBar?.classList.contains('open') && !e.target.closest('#dataMore')) setMore(false);
+  });
+  $('dataMore')?.addEventListener('click', e => { if (e.target.closest('button')) setMore(false); });
   $('fmtBtn')?.addEventListener('click', toggleFormatMode);
   $('exportBtn')?.addEventListener('click', openExportModal);
   $('importBtn')?.addEventListener('click', openImportModal);
@@ -5471,39 +5569,58 @@ function applyStarterProfile() {
  * A spotlight (one element with a huge box-shadow) plus a card. Each step
  * names the view it lives in; the tour switches to that view on whichever
  * layout is active, then measures the target after the DOM settles. */
+const TOUR_ICONS = {
+  home:     '<svg viewBox="0 0 16 16" fill="none"><path d="M2.5 7.2L8 2.6l5.5 4.6v5.6a1 1 0 0 1-1 1H9.8V9.6H6.2v4.2H3.5a1 1 0 0 1-1-1V7.2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
+  timers:   '<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8.5" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M8 5.5v3l2 1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.2 1.8h3.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  daily:    '<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3.2" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  dbd:      '<svg viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 6.5h12" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 10l1.7 1.7L10.5 8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  lists:    '<svg viewBox="0 0 16 16" fill="none"><path d="M5.5 4h8M5.5 8h8M5.5 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="2.6" cy="4" r="1.1" fill="currentColor"/><circle cx="2.6" cy="8" r="1.1" fill="currentColor"/><circle cx="2.6" cy="12" r="1.1" fill="currentColor"/></svg>',
+  calendar: '<svg viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 6.5h12" stroke="currentColor" stroke-width="1.5"/><path d="M5 1.5v3M11 1.5v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  budget:   '<svg viewBox="0 0 16 16" fill="none"><rect x="1.5" y="4" width="13" height="9.5" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M1.5 7h13" stroke="currentColor" stroke-width="1.5"/><circle cx="11" cy="10.4" r="1.1" fill="currentColor"/></svg>',
+  formats:  '<svg viewBox="0 0 16 16" fill="none"><path d="M3 12.5l1-3.5L11.2 1.8a1.4 1.4 0 0 1 2 2L6 11l-3 1.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M9.5 3.5l3 3" stroke="currentColor" stroke-width="1.5"/></svg>',
+  settings: '<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.2" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  data:     '<svg viewBox="0 0 16 16" fill="none"><ellipse cx="8" cy="4" rx="5.5" ry="2.2" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 4v8c0 1.2 2.5 2.2 5.5 2.2s5.5-1 5.5-2.2V4" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 8c0 1.2 2.5 2.2 5.5 2.2s5.5-1 5.5-2.2" stroke="currentColor" stroke-width="1.5"/></svg>',
+  finish:   '<svg viewBox="0 0 16 16" fill="none"><path d="M8 1.8l1.8 3.7 4 .6-2.9 2.8.7 4L8 11l-3.6 1.9.7-4L2.2 6.1l4-.6L8 1.8z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
+};
+const TOUR_HUES = {
+  home: 'var(--accent)', timers: 'var(--hue-timers)', daily: 'var(--hue-daily)', dbd: 'var(--hue-lists)',
+  lists: 'var(--hue-lists)', calendar: 'var(--hue-calendar)', budget: 'var(--hue-budget)',
+  formats: 'var(--accent)', settings: 'var(--accent-2)', data: 'var(--accent-3)', finish: 'var(--accent)',
+};
+
 const TOUR_STEPS = [
   { key: 'home', view: 'home', title: 'Home',
-    body: 'Your day on one page: today\'s progress, what\'s due, timers, the next few hours of your calendar and any list you\'ve starred. Everything here is pulled from the other sections — tap a task to check it off right from Home.',
+    body: 'Your whole day on one page: progress so far, what\'s due, timers, the next few hours of your calendar and any list you\'ve starred. Everything here is live — tap a task to check it off without leaving Home.',
     target: { d: '#homeContainer-d .home-hero', m: '#homeContainer-m .home-hero' } },
   { key: 'timers', view: 'timers', title: 'Timers',
-    body: 'Countdown budgets for the things you want to spend time on. Tap a timer to start or pause it, tap the time to edit it, and mark "Woke up" to start the day. Timers reset to their defaults with Reset.',
+    body: 'Time budgets for what you want to spend the day on. Press play to start one, tap the time to edit it, and the bar shows how much is left. Mark "Woke up" to see when you\'ll finish everything.',
     target: { d: '#timersSection-d', m: ['#wakeupRow-m', '#timerStack-m'] } },
   { key: 'daily', view: 'daily', title: 'Daily',
-    body: 'Lists that repeat every day. Star a list to pin it on Home, or open its schedule to show it only on certain days — "Weekend reset" only appears on Saturdays and Sundays. A task named after another Daily list (like "Morning routine" inside Health) checks itself off when that list is complete.',
+    body: 'Routines that reset every day. Star a list to pin it on Home. In Formats you can give a list a schedule — "Weekend reset" only shows up on Saturdays and Sundays. A task named after a Daily list ("Morning routine" inside Health) checks itself off when that list is done.',
     target: { d: '#dailySection-d', m: '#defaultContainer-m' } },
   { key: 'dbd', view: 'lists', title: 'Day by Day',
-    body: 'One-off tasks with a date. Overdue ones turn red and stay until you clear them. Use the Tag menu on a task to file it under one of your lists; it keeps its date and still shows up here.',
+    body: 'One-off tasks with a date. Overdue ones turn red and wait until you clear them. Use the tag menu to file a task under one of your lists — it keeps its date and still shows up here.',
     target: { d: ['#dbdAddRow-d', '#dbdContainer-d'], m: ['#dbdAddRow-m', '#dbdContainer-m'] } },
   { key: 'lists', view: 'lists', title: 'Lists',
-    body: 'Your own lists for anything: groceries, projects, someday. Give a task a date and it appears in Day by Day too. Star a list to see it on Home, and drag lists and tasks to reorder them.',
+    body: 'Lists for anything: groceries, projects, someday. Give a task a date and it appears in Day by Day too. Star a list to see it on Home, and drag lists or tasks to reorder them.',
     target: { d: '#todoContainer-d', m: '#todoContainer-m' } },
   { key: 'calendar', view: 'calendar', title: 'Calendar',
-    body: 'Tap an empty slot to add an event, drag to move one. Dividers mark a moment without a duration. The color chips filter what you see. In Formats, events you add repeat weekly as templates. Connect Google Calendar in Settings to see and send events.',
+    body: 'Tap an empty slot to add an event, drag to move one. Dividers mark a moment with no duration. The colour dots filter what you see. Connect Google Calendar in Settings to see and send events.',
     target: { d: '#calDesktopPanel', m: '#mobileCalPanel' } },
   { key: 'budget', view: 'budget', title: 'Budget',
     body: 'A daily envelope. Set a daily amount and a starting balance, log purchases as you go, and whatever is left rolls over at midnight. Home shows today\'s balance at a glance.',
     target: { d: '#budgetContainer-d .budget-wrap', m: '#budgetContainer-m .budget-wrap' } },
   { key: 'formats', title: 'Formats',
-    body: 'Formats is where you edit your defaults: which timers exist and how long they run, which Daily lists there are, and the weekly calendar templates. Press Done to save. Reset returns timers and Daily tasks to whatever you set here.',
+    body: 'Formats is where you edit your defaults: which timers exist and how long they run, which Daily lists there are, and the weekly calendar templates. Press Done to save. Reset returns the day to whatever you set here.',
     target: { d: '#fmtBtn', m: '#fmtBtn' } },
   { key: 'settings', title: 'Settings',
-    body: 'Hide sections you don\'t use, pick a theme or build your own, connect Google Calendar, and sign in to sync everything across your devices. You can replay this tour from here too.',
+    body: 'Hide sections you don\'t use, pick a theme or build your own, connect Google Calendar, and sign in to sync across your devices. You can replay this tour from here too.',
     target: { d: '#settingsBtn', m: '#settingsBtn' } },
   { key: 'data', title: 'Your data',
     body: 'Everything lives on this device unless you turn on cloud sync. Export saves a copy you can import anywhere; Reset starts a fresh day without touching your lists.',
-    target: { d: ['#exportBtn', '#resetAllBtn'], m: ['#exportBtn', '#resetAllBtn'] } },
+    target: { d: ['#exportBtn', '#resetAllBtn'], m: '#moreBtn' } },
   { key: 'finish', view: 'home', title: 'That\'s the tour',
-    body: 'This starter setup is just a starting point. Rename the timers, replace the lists, clear the calendar, or wipe it all from Settings → Clear storage. Have a good day.',
+    body: 'The starter setup is only a starting point. Rename the timers, replace the lists, clear the calendar, or wipe it all from Settings → Clear storage. Have a good day.',
     target: null },
 ];
 
@@ -5614,17 +5731,29 @@ function tourTargets(step) {
 function tourShowStep() {
   const step = tourSteps[tourIdx];
   if (!step) { tourEnd(); return; }
+  $('dataBar')?.classList.remove('open');
   tourGoView(step.view);
 
   const total = tourSteps.length;
   const prog = $('tourProgress');
-  if (prog) prog.innerHTML = tourSteps.map((_, i) => `<i class="${i <= tourIdx ? 'on' : ''}"></i>`).join('');
+  if (prog) prog.innerHTML = tourSteps.map((_, i) => `<i class="${i <= tourIdx ? 'on' : ''}${i === tourIdx ? ' cur' : ''}"></i>`).join('');
+  const hue = TOUR_HUES[step.key] || 'var(--accent)';
+  const card = $('tourCard'); if (card) card.style.setProperty('--sc', hue);
+  /* resolve the hue to a hex so the button/icon ink stays readable on light fills (yellows) */
+  let hueHex = hue;
+  const m = /^var\((--[\w-]+)\)$/.exec(hue);
+  if (m) hueHex = getComputedStyle(document.documentElement).getPropertyValue(m[1]).trim();
+  const scInk = themeIsHex(hueHex) && themeLuma(hueHex) > 0.55 ? '#1f1700' : '#ffffff';
+  if (card) card.style.setProperty('--sc-ink', scInk);
+  const spot = $('tourSpot'); if (spot) spot.style.setProperty('--sc', hue);
+  const ico  = $('tourIcon');  if (ico)  ico.innerHTML = TOUR_ICONS[step.key] || '';
   const title = $('tourTitle'); if (title) title.textContent = step.title;
   const body  = $('tourBody');  if (body)  body.textContent  = step.body;
-  const count = $('tourCount'); if (count) count.textContent = `${tourIdx + 1} of ${total}`;
+  const count = $('tourCount'); if (count) count.textContent = `Step ${tourIdx + 1} of ${total}`;
   const back  = $('tourBackBtn'); if (back) back.style.visibility = tourIdx === 0 ? 'hidden' : '';
   const next  = $('tourNextBtn'); if (next) next.textContent = tourIdx === total - 1 ? 'Finish' : 'Next';
   const skip  = $('tourSkipBtn'); if (skip) skip.style.visibility = tourIdx === total - 1 ? 'hidden' : '';
+  if (card) { card.style.animation = 'none'; void card.offsetWidth; card.style.animation = ''; }
 
   /* let the view switch / render settle, then bring the target into view and measure */
   clearTimeout(_tourTimer);

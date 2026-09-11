@@ -1,11 +1,11 @@
 {
-  "name": "Focus — Productivity Dashboard",
-  "short_name": "Focus",
+  "name": "Worky — your day, one page",
+  "short_name": "Worky",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#111111",
-  "theme_color": "#111111",
+  "background_color": "#0d0f15",
+  "theme_color": "#0d0f15",
   "icons": [
     {
       "src": "icon-180.png",

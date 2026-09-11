@@ -2,32 +2,44 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Focus — Productivity Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Worky — your day, one page</title>
 
   <!-- PWA / offline support -->
   <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#0b0c0e">
+  <meta name="theme-color" content="#0d0f15">
   <!-- iOS home-screen app -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Focus">
+  <meta name="apple-mobile-web-app-title" content="Worky">
   <link rel="apple-touch-icon" href="icon-180.png">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=Lora:ital,wght@1,400;1,500&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:ital,opsz,wght,SOFT@0,9..144,400..700,100;1,9..144,400..700,100&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <!-- Theme background image layer (painted beneath every panel) -->
 <div class="theme-bg" id="themeBg" aria-hidden="true"></div>
+<!-- Ambient colour wash: three slow-drifting blobs derived from the accent -->
+<div class="ambient" id="ambient" aria-hidden="true">
+  <i class="ambient-blob ambient-a"></i>
+  <i class="ambient-blob ambient-b"></i>
+  <i class="ambient-blob ambient-c"></i>
+</div>
 
 <!-- ════════ DESKTOP LAYOUT ════════ -->
 <div class="desktop-app" id="desktopApp">
 
   <aside class="left-panel" id="leftPanel">
+    <div class="brand brand-desktop">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">Worky</span>
+    </div>
+
     <div class="wakeup-row" id="wakeupRow-d">
       <div class="wakeup-box" id="wakeupBox-d">
         <svg class="wakeup-check" width="10" height="10" viewBox="0 0 10 10" fill="none">
@@ -35,34 +47,41 @@
         </svg>
       </div>
       <span class="wakeup-label">Woke up</span>
+      <span class="wakeup-hint">Starts the day’s clock</span>
     </div>
 
-    <button class="cal-nav-tab" id="homeDesktopNavTab">
-      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-        <path d="M1.5 5.5L6 1.5L10.5 5.5V10.5H7.5V7.5H4.5V10.5H1.5V5.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
-      </svg>
-      Home
-    </button>
-    <button class="cal-nav-tab" id="calDesktopNavTab" data-view="calendar">
-      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-        <rect x="1" y="2" width="10" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2"/>
-        <path d="M1 5h10" stroke="currentColor" stroke-width="1.2"/>
-        <path d="M4 1v2M8 1v2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-      </svg>
-      Calendar
-    </button>
-    <button class="cal-nav-tab" id="budgetDesktopNavTab" data-view="budget">
-      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-        <rect x="1" y="2.5" width="10" height="7.5" rx="1.5" stroke="currentColor" stroke-width="1.2"/>
-        <path d="M1 5h10" stroke="currentColor" stroke-width="1.2"/>
-        <circle cx="8.5" cy="7.5" r="0.9" fill="currentColor"/>
-      </svg>
-      Budget
-    </button>
+    <nav class="side-nav" aria-label="Sections">
+      <button class="cal-nav-tab nav-home" id="homeDesktopNavTab">
+        <span class="nav-ico" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2.5 7.2L8 2.6l5.5 4.6v5.6a1 1 0 0 1-1 1H9.8V9.6H6.2v4.2H3.5a1 1 0 0 1-1-1V7.2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+        </span>
+        Home
+      </button>
+      <button class="cal-nav-tab nav-lists" id="listsDesktopNavTab">
+        <span class="nav-ico" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M5.5 4h8M5.5 8h8M5.5 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="2.6" cy="4" r="1.1" fill="currentColor"/><circle cx="2.6" cy="8" r="1.1" fill="currentColor"/><circle cx="2.6" cy="12" r="1.1" fill="currentColor"/></svg>
+        </span>
+        Lists
+      </button>
+      <button class="cal-nav-tab nav-calendar" id="calDesktopNavTab" data-view="calendar">
+        <span class="nav-ico" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 6.5h12" stroke="currentColor" stroke-width="1.5"/><path d="M5 1.5v3M11 1.5v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </span>
+        Calendar
+      </button>
+      <button class="cal-nav-tab nav-budget" id="budgetDesktopNavTab" data-view="budget">
+        <span class="nav-ico" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="4" width="13" height="9.5" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M1.5 7h13" stroke="currentColor" stroke-width="1.5"/><circle cx="11" cy="10.4" r="1.1" fill="currentColor"/></svg>
+        </span>
+        Budget
+      </button>
+    </nav>
     <button class="cal-week-mode-btn" id="calWeekModeBtn">Sun – Sat</button>
 
     <div class="left-timers" id="timersSection-d" data-view="timers">
-      <div class="section-label">Timers</div>
+      <div class="section-label section-label-timers">
+        <span class="section-dot"></span>Timers
+      </div>
       <div class="timer-stack" id="timerStack-d"></div>
       <div class="timer-summary" id="timerSummary-d"></div>
       <button class="fmt-add-timer" id="addTimerBtn-d">
@@ -75,50 +94,73 @@
   </aside>
 
   <main class="right-panel" id="rightPanel">
-    <div id="dailySection-d" data-view="daily">
+    <div class="page-head">
+      <h1 class="page-title">Lists</h1>
+      <p class="page-sub">Daily routines, dated tasks, and everything else.</p>
+    </div>
+
+    <div id="dailySection-d" data-view="daily" class="page-block">
       <div class="panel-header">
-        <span class="section-label">Daily</span>
+        <span class="section-label section-label-daily"><span class="section-dot"></span>Daily</span>
         <button class="fmt-add-daily" id="addDailyBtn">+ Add list</button>
       </div>
       <div class="lists-grid" id="defaultContainer-d"></div>
       <hr class="section-divider">
     </div>
 
-    <div id="listsSection-d" data-view="lists">
-    <div class="panel-header">
-      <span class="section-label">My lists</span>
-    </div>
-    <div class="dbd-section-header">
-      <span class="section-sublabel">Day by Day</span>
-    </div>
-    <div class="dbd-add-row" id="dbdAddRow-d">
-      <input class="dbd-new-text" id="dbdText-d" placeholder="New task…"
-        onkeydown="if(event.key==='Enter'){event.preventDefault();addDbdTask('d');}">
-      <input type="date" class="dbd-new-date" id="dbdDate-d">
-      <button class="add-btn dbd-add-btn" id="dbdAddBtn-d">+ Add</button>
-    </div>
-    <div class="dbd-stack" id="dbdContainer-d"></div>
+    <div id="listsSection-d" data-view="lists" class="page-block">
+      <div class="panel-header">
+        <span class="section-label section-label-lists"><span class="section-dot"></span>My lists</span>
+      </div>
+      <div class="dbd-section-header">
+        <span class="section-sublabel">Day by Day</span>
+      </div>
+      <div class="dbd-add-row" id="dbdAddRow-d">
+        <input class="dbd-new-text" id="dbdText-d" placeholder="New task…"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();addDbdTask('d');}">
+        <input type="date" class="dbd-new-date" id="dbdDate-d">
+        <button class="add-btn dbd-add-btn" id="dbdAddBtn-d">+ Add</button>
+      </div>
+      <div class="dbd-stack" id="dbdContainer-d"></div>
 
-    <div class="dbd-section-header">
-      <span class="section-sublabel">Lists</span>
-      <button class="add-btn" id="addListBtn-d">+ New list</button>
-    </div>
-    <div class="lists-grid" id="todoContainer-d">
-      <div class="empty-state" id="emptyState-d">No lists yet.<br>Click "+ New list" to get started.</div>
-    </div>
+      <div class="dbd-section-header">
+        <span class="section-sublabel">Lists</span>
+        <button class="add-btn" id="addListBtn-d">+ New list</button>
+      </div>
+      <div class="lists-grid" id="todoContainer-d">
+        <div class="empty-state" id="emptyState-d">No lists yet.<br>Click “+ New list” to get started.</div>
+      </div>
     </div>
   </main>
 </div>
 
 <!-- ════════ MOBILE LAYOUT ════════ -->
 <div class="mobile-app" id="mobileApp">
-  <nav class="tab-bar">
-    <button class="tab-btn active" id="tab-0" data-view="home">Home</button>
-    <button class="tab-btn" id="tab-1" data-view="timers">Timers</button>
-    <button class="tab-btn" id="tab-2" data-view="daily">Daily</button>
-    <button class="tab-btn" id="tab-3" data-view="lists">My Lists</button>
-    <button class="tab-btn" id="tab-4" data-view="calendar">Calendar</button>
-    <button class="tab-btn" id="tab-5" data-view="budget">Budget</button>
+  <nav class="tab-bar" aria-label="Sections">
+    <button class="tab-btn tab-home active" id="tab-0" data-view="home">
+      <span class="tab-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M2.5 7.2L8 2.6l5.5 4.6v5.6a1 1 0 0 1-1 1H9.8V9.6H6.2v4.2H3.5a1 1 0 0 1-1-1V7.2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></span>
+      <span class="tab-lbl">Home</span>
+    </button>
+    <button class="tab-btn tab-timers" id="tab-1" data-view="timers">
+      <span class="tab-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8.5" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M8 5.5v3l2 1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.2 1.8h3.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+      <span class="tab-lbl">Timers</span>
+    </button>
+    <button class="tab-btn tab-daily" id="tab-2" data-view="daily">
+      <span class="tab-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3.2" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+      <span class="tab-lbl">Daily</span>
+    </button>
+    <button class="tab-btn tab-lists" id="tab-3" data-view="lists">
+      <span class="tab-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M5.5 4h8M5.5 8h8M5.5 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="2.6" cy="4" r="1.1" fill="currentColor"/><circle cx="2.6" cy="8" r="1.1" fill="currentColor"/><circle cx="2.6" cy="12" r="1.1" fill="currentColor"/></svg></span>
+      <span class="tab-lbl">Lists</span>
+    </button>
+    <button class="tab-btn tab-calendar" id="tab-4" data-view="calendar">
+      <span class="tab-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 6.5h12" stroke="currentColor" stroke-width="1.5"/><path d="M5 1.5v3M11 1.5v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+      <span class="tab-lbl">Calendar</span>
+    </button>
+    <button class="tab-btn tab-budget" id="tab-5" data-view="budget">
+      <span class="tab-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="4" width="13" height="9.5" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M1.5 7h13" stroke="currentColor" stroke-width="1.5"/><circle cx="11" cy="10.4" r="1.1" fill="currentColor"/></svg></span>
+      <span class="tab-lbl">Budget</span>
+    </button>
   </nav>
 
   <div class="swipe-container" id="swipeContainer">
@@ -131,6 +173,10 @@
 
       <!-- Tab 1: Timers -->
       <section class="swipe-panel" id="mobileTimerPanel" data-view="timers">
+        <div class="page-head page-head-timers">
+          <h1 class="page-title">Timers</h1>
+          <p class="page-sub">Time budgets for the things that matter today.</p>
+        </div>
         <div class="wakeup-row" id="wakeupRow-m">
           <div class="wakeup-box" id="wakeupBox-m">
             <svg class="wakeup-check" width="10" height="10" viewBox="0 0 10 10" fill="none">
@@ -138,8 +184,8 @@
             </svg>
           </div>
           <span class="wakeup-label">Woke up</span>
+          <span class="wakeup-hint">Starts the day’s clock</span>
         </div>
-        <div class="section-label">Timers</div>
         <div class="timer-stack" id="timerStack-m"></div>
         <div class="timer-summary" id="timerSummary-m"></div>
         <button class="fmt-add-timer" id="addTimerBtn-m">
@@ -150,17 +196,22 @@
 
       <!-- Tab 2: Daily -->
       <section class="swipe-panel" data-view="daily">
+        <div class="page-head page-head-daily">
+          <h1 class="page-title">Daily</h1>
+          <p class="page-sub">Routines that come back every day.</p>
+        </div>
         <div class="panel-header">
-          <span class="section-label">Daily</span>
+          <span class="section-label section-label-daily"><span class="section-dot"></span>Lists</span>
           <button class="fmt-add-daily" id="addDailyBtn-m">+ Add list</button>
         </div>
-        <div id="defaultContainer-m"></div>
+        <div id="defaultContainer-m" class="lists-stack"></div>
       </section>
 
       <!-- Tab 3: My Lists -->
       <section class="swipe-panel" data-view="lists">
-        <div class="panel-header">
-          <span class="section-label">My lists</span>
+        <div class="page-head page-head-lists">
+          <h1 class="page-title">My lists</h1>
+          <p class="page-sub">Dated tasks first, then everything else.</p>
         </div>
         <div class="dbd-section-header">
           <span class="section-sublabel">Day by Day</span>
@@ -177,17 +228,21 @@
           <span class="section-sublabel">Lists</span>
           <button class="add-btn" id="addListBtn-m">+ New list</button>
         </div>
-        <div id="todoContainer-m">
-          <div class="empty-state" id="emptyState-m">No lists yet.<br>Tap "+ New list" to get started.</div>
+        <div id="todoContainer-m" class="lists-stack">
+          <div class="empty-state" id="emptyState-m">No lists yet.<br>Tap “+ New list” to get started.</div>
         </div>
       </section>
 
       <!-- Tab 4: Calendar -->
       <section class="swipe-panel cal-swipe-panel" id="mobileCalPanel" data-view="calendar">
         <div class="cal-mobile-header">
-          <button class="cal-nav-btn" id="calNavPrev">&#8249;</button>
+          <button class="cal-nav-btn" id="calNavPrev" aria-label="Previous day">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
           <div class="cal-day-title" id="calDayTitle"></div>
-          <button class="cal-nav-btn" id="calNavNext">&#8250;</button>
+          <button class="cal-nav-btn" id="calNavNext" aria-label="Next day">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
         </div>
         <div class="cal-color-filter cal-color-filter-mobile" id="calColorFilter-m"></div>
         <div class="cal-grid-wrap" id="calMobileGrid"></div>
@@ -202,16 +257,17 @@
   </div>
 </div>
 
-<!-- ════════ DESKTOP CALENDAR PANEL ════════ -->
+<!-- ════════ DESKTOP HOME PANEL ════════ -->
 <div class="home-desktop-panel" id="homeDesktopPanel">
   <div class="home-col" id="homeContainer-d"></div>
 </div>
 
 <!-- ════════ DESKTOP BUDGET PANEL ════════ -->
 <div class="home-desktop-panel" id="budgetDesktopPanel">
-  <div class="home-col" id="budgetContainer-d"></div>
+  <div class="home-col budget-col" id="budgetContainer-d"></div>
 </div>
 
+<!-- ════════ DESKTOP CALENDAR PANEL ════════ -->
 <div class="cal-desktop-panel" id="calDesktopPanel">
   <div class="cal-desktop-header">
     <div class="cal-desktop-title" id="calDesktopTitle"></div>
@@ -299,21 +355,39 @@
   </div>
 </div>
 
-<!-- ════════ DATA BAR ════════ -->
-<footer class="data-bar">
+<!-- ════════ TOOLBAR (desktop: bottom of the sidebar · mobile: top bar) ════════ -->
+<footer class="data-bar" id="dataBar">
+  <div class="brand brand-mobile">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-name">Worky</span>
+  </div>
   <button class="fmt-btn" id="fmtBtn">Formats</button>
   <button class="data-btn icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"
         d="M9.74 5.06L9.97 2.21A10.00 10.00 0 0 1 14.03 2.21L14.26 5.06A7.30 7.30 0 0 1 15.31 5.50L15.31 5.50L17.49 3.64A10.00 10.00 0 0 1 20.36 6.51L18.50 8.69A7.30 7.30 0 0 1 18.94 9.74L18.94 9.74L21.79 9.97A10.00 10.00 0 0 1 21.79 14.03L18.94 14.26A7.30 7.30 0 0 1 18.50 15.31L18.50 15.31L20.36 17.49A10.00 10.00 0 0 1 17.49 20.36L15.31 18.50A7.30 7.30 0 0 1 14.26 18.94L14.26 18.94L14.03 21.79A10.00 10.00 0 0 1 9.97 21.79L9.74 18.94A7.30 7.30 0 0 1 8.69 18.50L8.69 18.50L6.51 20.36A10.00 10.00 0 0 1 3.64 17.49L5.50 15.31A7.30 7.30 0 0 1 5.06 14.26L5.06 14.26L2.21 14.03A10.00 10.00 0 0 1 2.21 9.97L5.06 9.74A7.30 7.30 0 0 1 5.50 8.69L5.50 8.69L3.64 6.51A10.00 10.00 0 0 1 6.51 3.64L8.69 5.50A7.30 7.30 0 0 1 9.74 5.06ZM12 8.4a3.6 3.6 0 1 0 0 7.2a3.6 3.6 0 1 0 0-7.2z"/>
     </svg>
   </button>
-  <span class="fmt-banner">Format mode — editing defaults</span>
+  <span class="fmt-banner">Editing defaults</span>
   <div class="data-spacer"></div>
-  <button class="data-btn" id="exportBtn">Export</button>
-  <button class="data-btn accent" id="importBtn">Import</button>
-  <input type="file" id="fileInput" accept=".json" style="display:none">
-  <button class="data-btn danger" id="resetAllBtn">Reset</button>
+  <div class="data-more" id="dataMore">
+    <button class="data-btn" id="exportBtn" title="Export data">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2.5v8M4.8 7.3L8 10.5l3.2-3.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 12.5h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      <span class="lbl">Export data</span>
+    </button>
+    <button class="data-btn accent" id="importBtn" title="Import data">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 10.5v-8M4.8 5.7L8 2.5l3.2 3.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 12.5h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      <span class="lbl">Import data</span>
+    </button>
+    <input type="file" id="fileInput" accept=".json" style="display:none">
+    <button class="data-btn danger" id="resetAllBtn" title="Reset the day">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2.5 8a5.5 5.5 0 1 0 1.8-4.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M2.5 2.5v3.8h3.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="lbl">Reset the day</span>
+    </button>
+  </div>
+  <button class="data-btn icon-btn more-btn" id="moreBtn" title="More" aria-label="More actions" aria-expanded="false">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="3.5" cy="8" r="1.4" fill="currentColor"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><circle cx="12.5" cy="8" r="1.4" fill="currentColor"/></svg>
+  </button>
 </footer>
 
 <!-- ════════ SETTINGS MODAL ════════ -->
@@ -322,7 +396,7 @@
     <button class="modal-x" data-close="settingsModal" title="Close">×</button>
     <div class="modal-title">Settings</div>
 
-    <div class="settings-section-label">Views</div>
+    <div class="settings-section-label">Sections</div>
     <div class="modal-sub">Choose which sections appear. Home is always on.</div>
     <div class="settings-view-list" id="settingsViewList"></div>
 
@@ -335,9 +409,9 @@
 
     <div class="settings-section-label">Google Calendar</div>
     <div class="modal-sub" id="gcalStatusLine">Not connected.</div>
-    <button class="gcal-connect-btn" id="gcalConnectBtn">+ Google Cal</button>
+    <button class="gcal-connect-btn" id="gcalConnectBtn">Connect Google Calendar</button>
 
-    <div class="settings-section-label">Cloud Sync</div>
+    <div class="settings-section-label">Cloud sync</div>
     <div class="modal-sub" id="syncStatusLine">Not configured.</div>
     <button class="gcal-connect-btn" id="syncConnectBtn" style="display:none">Sign in with Google</button>
 
@@ -356,7 +430,7 @@
   <div class="modal-box">
     <button class="modal-x" data-close="exportModal" title="Close">×</button>
     <div class="modal-title">Export data</div>
-    <div class="modal-sub">Copy your data to clipboard or download it as a file.</div>
+    <div class="modal-sub">Copy your data to the clipboard or download it as a file.</div>
     <textarea class="modal-textarea" id="exportTextarea" readonly></textarea>
     <div class="modal-actions">
       <button class="modal-primary" id="exportCopyBtn">Copy to clipboard</button>
@@ -371,8 +445,8 @@
   <div class="modal-box">
     <button class="modal-x" data-close="importModal" title="Close">×</button>
     <div class="modal-title">Import data</div>
-    <div class="modal-sub">Paste exported data below, or load from a file.</div>
-    <textarea class="modal-textarea" id="importTextarea" placeholder="Paste your data here..."></textarea>
+    <div class="modal-sub">Paste exported data below, or load it from a file.</div>
+    <textarea class="modal-textarea" id="importTextarea" placeholder="Paste your data here…"></textarea>
     <div class="modal-actions">
       <button class="modal-primary" id="importTextBtn">Import</button>
     </div>
@@ -384,8 +458,8 @@
 <!-- ════════ CONFIRM RESET ════════ -->
 <div class="modal-overlay" id="confirmOverlay">
   <div class="modal-box confirm-box">
-    <div class="modal-title">Reset everything?</div>
-    <div class="modal-sub">Timers reset to defaults and daily tasks unchecked. Your custom lists are untouched.</div>
+    <div class="modal-title">Reset the day?</div>
+    <div class="modal-sub">Timers go back to their defaults and Daily tasks are unchecked. Your lists stay exactly as they are.</div>
     <div class="modal-actions">
       <button class="modal-cancel" id="confirmCancelBtn">Cancel</button>
       <button class="modal-danger" id="confirmResetBtn">Reset</button>
@@ -411,14 +485,22 @@
 
 <!-- ════════ WELCOME (first run) ════════ -->
 <div class="modal-overlay" id="tourWelcomeModal">
-  <div class="modal-box">
-    <div class="modal-title">Welcome to Worky</div>
-    <div class="modal-sub">This is a starter day: a few timers, two daily routines, a grocery list, a week of calendar templates and a small budget, so nothing starts empty. Rename, rearrange or delete any of it.</div>
+  <div class="modal-box welcome-box">
+    <div class="welcome-art" aria-hidden="true">
+      <span class="welcome-orb"></span>
+      <span class="welcome-chip wc-timers">Timers</span>
+      <span class="welcome-chip wc-daily">Daily</span>
+      <span class="welcome-chip wc-lists">Lists</span>
+      <span class="welcome-chip wc-calendar">Calendar</span>
+      <span class="welcome-chip wc-budget">Budget</span>
+    </div>
+    <div class="welcome-title">Welcome to Worky</div>
+    <div class="welcome-sub">Your day on one page. We set up a starter day — a few timers, two routines, a grocery list, a week of calendar templates and a small budget — so nothing starts empty. Rename, rearrange or delete any of it.</div>
     <div class="modal-actions">
-      <button class="modal-cancel" id="tourSkipWelcomeBtn">Skip</button>
+      <button class="modal-cancel" id="tourSkipWelcomeBtn">Skip for now</button>
       <button class="modal-primary" id="tourStartBtn">Show me around</button>
     </div>
-    <div class="tour-welcome-note">The tour takes about a minute. You can replay it from Settings.</div>
+    <div class="tour-welcome-note">About a minute. You can replay it any time from Settings.</div>
   </div>
 </div>
 
@@ -428,8 +510,11 @@
   <div class="tour-card" id="tourCard" role="dialog" aria-live="polite">
     <div class="tour-progress" id="tourProgress"></div>
     <div class="tour-head">
-      <div class="tour-title" id="tourTitle"></div>
-      <div class="tour-count" id="tourCount"></div>
+      <span class="tour-ico" id="tourIcon" aria-hidden="true"></span>
+      <div class="tour-head-text">
+        <div class="tour-title" id="tourTitle"></div>
+        <div class="tour-count" id="tourCount"></div>
+      </div>
     </div>
     <div class="tour-body" id="tourBody"></div>
     <div class="tour-nav">
@@ -445,10 +530,10 @@
 <div class="modal-overlay" id="syncChoiceModal">
   <div class="modal-box">
     <button class="modal-x" data-close="syncChoiceModal" title="Close">×</button>
-    <div class="modal-title">Cloud Sync</div>
+    <div class="modal-title">Cloud sync</div>
     <div class="modal-sub" id="syncChoiceInfo">This device's data differs from your cloud copy. Which one should Worky keep?</div>
-    <button class="modal-file-btn" id="syncImportBtn">⬇ Import from cloud<br><span style="opacity:.65;font-size:.85em">Replace this device's data with the cloud copy</span></button>
-    <button class="modal-file-btn" id="syncExportBtn">⬆ Export to cloud<br><span style="opacity:.65;font-size:.85em">Replace the cloud copy with this device's data</span></button>
+    <button class="modal-file-btn choice-btn" id="syncImportBtn"><strong>Import from cloud</strong><span>Replace this device's data with the cloud copy</span></button>
+    <button class="modal-file-btn choice-btn" id="syncExportBtn"><strong>Export to cloud</strong><span>Replace the cloud copy with this device's data</span></button>
   </div>
 </div>
 
@@ -458,7 +543,7 @@
     <button class="modal-x" data-close="gcalModal" title="Close">×</button>
     <div class="modal-title">Google Calendars</div>
     <div class="gcal-section-label">Visible calendars</div>
-    <div class="modal-sub">Toggle which calendars show in Focus.</div>
+    <div class="modal-sub">Toggle which calendars show in Worky.</div>
     <div class="gcal-cal-list" id="gcalCalList"></div>
     <div class="modal-actions">
       <button class="modal-cancel gcal-disconnect" id="gcalDisconnectBtn">Disconnect</button>
@@ -478,11 +563,11 @@
     </div>
     <div class="modal-actions">
       <a id="gcalDetailLink" target="_blank" rel="noopener" class="gcal-open-link">
-        <button class="modal-primary" style="width:100%">Open in GCal ↗</button>
+        <button class="modal-primary" style="width:100%">Open in Google Calendar</button>
       </a>
     </div>
     <button class="cal-delete-btn" id="gcalDetailDeleteBtn">Delete from Google Calendar</button>
-    <button class="gcal-send-btn" id="gcalSyncToAppBtn">Sync to app</button>
+    <button class="gcal-send-btn" id="gcalSyncToAppBtn">Copy into Worky</button>
   </div>
 </div>
 
