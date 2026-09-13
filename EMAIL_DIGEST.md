@@ -44,8 +44,22 @@ that would let other people use this (a hosted engine, refresh tokens) come late
    promotions (skipped), newsletters (`List-Id` or newsletter words), everything else.
 3. One `/api/chat` call per section (chunked at ~16k chars of email text), using the
    section rules from the original digest spec. Empty sections say *Nothing today*.
-4. One more call writes **Top of the inbox** and the **Action items** checklist.
-5. The markdown is saved to `digest.last` (synced), rendered on Home, and a toast fires.
+4. One more call writes **Top of the inbox** and an action-items checklist.
+5. A final structured-output call (`format: json`, reasoning field first) turns the digest
+   into **Suggested tasks** — `{title, why, due, section}` — given today's date so
+   "Friday" becomes a real date. The client re-validates every field (dedupe, blank titles,
+   past dates → today, >100 days out → no date). If the JSON is unusable the checklist from
+   step 4 becomes the tasks instead, so the card never comes back empty.
+6. The markdown and the tasks are saved to `digest.last` (synced), rendered on Home, and a
+   toast fires.
+
+## Suggested tasks → your dashboard
+
+The card shows the tasks above the summary, each with its own **Add** (plus **Add all**).
+Add creates a normal Day by Day task with the suggested due date (today if none), so it
+shows up in *Today's tasks* on Home and in the Lists tab exactly like something you typed.
+Each suggestion remembers which task it became (`added`), so it reads *Added ✓* on every
+signed-in device; deleting that task makes the suggestion offerable again.
 
 Progress shows on the card; Cancel aborts. Errors stay on the card with the fix
 (Connect Gmail / Open Settings) until dismissed; the previous digest stays visible.
@@ -54,7 +68,7 @@ Progress shows on the card; Cancel aborts. Errors stay on the card with the fix
 
 | Thing | Where | Synced |
 |---|---|---|
-| `digest.enabled`, `digest.last {at, markdown, count, model, source}` | app state (`dg` compressed) | yes |
+| `digest.enabled`, `digest.last {at, markdown, tasks[], count, model, source}` | app state (`dg` compressed, tasks as `tk`) | yes |
 | Gmail token | `localStorage focus-gmail-token` | no |
 | Ollama URL, model, window | `localStorage focus-digest-engine` | no |
 | Card collapsed | `localStorage focus-digest-ui` | no |

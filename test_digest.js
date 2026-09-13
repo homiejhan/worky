@@ -30,8 +30,24 @@ function boot({ storage, url, fetchImpl } = {}) {
 }
 const b64url = s => Buffer.from(s, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const jsonRes = (obj, status = 200) => ({ ok: status < 300, status, json: async () => obj });
+const dbd = w => w.eval('dbdTasks');
 const savedDigest = w => JSON.parse(w.localStorage.getItem('focus-app-state')).digest;
 const token = () => JSON.stringify({ access_token: 'tok', expires_at: Date.now() + 3600e3, email: 'me@example.com' });
+
+console.log('\n── 0. Sample digest carries suggested tasks ──');
+{
+  const { w, d } = boot();
+  w.digestLoadSample();
+  const last = w.digestGet().last;
+  eq(last.tasks.length, 4, 'sample has 4 suggested tasks');
+  ok(last.tasks.every(t => /^\d{4}-\d{2}-\d{2}$/.test(t.due)), 'sample relative dates resolved to real dates');
+  eq(d.querySelectorAll('#homeContainer-d .dg-todo-add').length, 4, 'sample card shows 4 Add buttons');
+  eq(w.digestNormalizeDue('2099-01-01'), '', 'far-future dates dropped');
+  eq(w.digestNormalizeDue('tomorrow'), (() => { const x = new Date(); x.setDate(x.getDate()+1); return w.digestDateKey(x); })(), 'tomorrow resolves');
+  eq(w.digestNormalizeDue('whenever'), '', 'unparseable → empty');
+  eq(w.digestParseTasks('not json'), null, 'parse returns null on garbage');
+  eq(w.digestParseTasks('{"tasks":"nope"}'), null, 'parse returns null when tasks is not an array');
+}
 
 console.log('\n── 1. Default boot: digest off, nothing on Home, state carries the record ──');
 {
@@ -67,11 +83,12 @@ console.log('\n── 3. Sample digest renders every section, tables, code, task
   w.digestLoadSample();
   const md = d.querySelector('#homeContainer-d .dg-md');
   ok(md, 'markdown body rendered');
-  eq(md.querySelectorAll('h2').length, 7, 'seven h2 headings (overview + 5 sections + actions)');
+  eq(md.querySelectorAll('h2').length, 6, 'six h2 headings (overview + 5 sections; actions became suggested tasks)');
   ok(md.querySelector('table'), 'job table rendered');
   eq(md.querySelectorAll('table tbody tr').length, 3, 'three job rows');
   ok(md.querySelector('pre code'), 'ASCII diagram in code block');
-  eq(md.querySelectorAll('li.dg-task').length, 4, 'four checklist items');
+  eq(md.querySelectorAll('li.dg-task').length, 0, 'no checklist items in the markdown any more');
+  eq(d.querySelectorAll('#homeContainer-d .dg-todo').length, 4, 'four suggested-task rows instead');
   ok(md.querySelector('a[href="https://example.com/pg18-async"]'), 'markdown link rendered');
   eq(md.querySelector('a').getAttribute('target'), '_blank', 'links open in a new tab');
   ok(d.querySelector('.dg-meta').textContent.includes('sample data'), 'meta line says sample data');
@@ -159,6 +176,12 @@ console.log('\n── 8. Full pipeline against a fake Gmail + fake Ollama ──
       const sys = body.messages[0].content;
       const user = body.messages[1].content;
       if (sys.startsWith('Below is today')) return jsonRes({ message: { content: '## 🔝 Top of the inbox\nTwo things matter.\n\n## ✅ Action items\n- [ ] Finish the Northwind assessment by Friday' } });
+      if (sys.startsWith('You turn a daily email digest')) {
+        ok(body.format === 'json', 'tasks call asks Ollama for JSON');
+        ok(/^Today is \d{4}-\d{2}-\d{2} \(\w+\)\./.test(user), 'tasks call is given today\'s date');
+        ok(user.includes('- [ ] Finish the Northwind assessment by Friday'), 'tasks call sees the overview checklist');
+        return jsonRes({ message: { content: '```json\n{"reasoning":"Northwind needs the assessment; Mom needs a reply.","tasks":[{"title":"Finish the Northwind assessment","why":"Due Friday.","due":"friday","section":"jobs"},{"title":"Reply to Mom about Sunday dinner","why":"Dinner Sunday at 6.","due":"1999-01-01","section":"misc"},{"title":"Finish the Northwind assessment","why":"dupe","due":"","section":"jobs"},{"title":"","why":"blank","due":"","section":"misc"}]}\n```' } });
+      }
       if (sys.includes('Section: 📰')) { ok(user.includes('Read more (https://example.com/pg)') && !user.includes('.x{}'), 'html email became text with links kept, styles dropped'); return jsonRes({ message: { content: '- **Postgres 18 ships** — async I/O. [Read](https://example.com/pg)' } }); }
       if (sys.includes('Section: 💼')) return jsonRes({ message: { content: '⚠️ **Northwind** assessment due Friday\n\n| Company | Role | Status | Action needed | Deadline |\n|---|---|---|---|---|\n| **Northwind** | — | Assessment | Complete it | Friday |' } });
       if (sys.includes('Section: 📬')) return jsonRes({ message: { content: '- **Mom** — dinner Sunday at 6 — reply needed' } });
@@ -182,19 +205,73 @@ console.log('\n── 8. Full pipeline against a fake Gmail + fake Ollama ──
     ok(d.querySelector('.dg-spinner'), 'spinner shows while running');
     await run;
     const chat = calls.filter(c => c.url.endsWith('/api/chat'));
-    eq(chat.length, 4, 'three section calls (tldr, jobs, misc) + one overview — promo skipped, empty sections skipped');
+    eq(chat.length, 5, 'three section calls (tldr, jobs, misc) + overview + tasks — promo skipped, empty sections skipped');
     ok(chat.every(c => JSON.parse(c.opts.body).model === 'qwen2.5:14b'), 'model passed to every call');
     ok(calls.some(c => c.url.includes('newer_than%3A24h')), 'gmail query uses the 24h window');
     ok(calls.filter(c => /messages\/\w+\?format=full/.test(c.url)).every(c => c.opts.headers.Authorization === 'Bearer tok'), 'bearer token sent');
     const last = savedDigest(w).last;
     ok(last && last.markdown.includes('## 📰 Tech News (TLDR)') && last.markdown.includes('## 🏗️ ByteByteGo\n_Nothing today_'), 'assembled digest keeps every section, empty ones say Nothing today');
     ok(last.markdown.startsWith('## 🔝 Top of the inbox'), 'overview first');
-    ok(last.markdown.trim().endsWith('- [ ] Finish the Northwind assessment by Friday'), 'action items last');
+    ok(!last.markdown.includes('## ✅'), 'checklist no longer lives in the markdown (it became suggested tasks)');
+    eq(last.tasks.length, 2, 'tasks parsed from fenced JSON, duplicate and blank dropped');
+    eq(last.tasks[0].title, 'Finish the Northwind assessment', 'first task kept in model order');
+    ok(/^\d{4}-\d{2}-\d{2}$/.test(last.tasks[0].due) && new Date(last.tasks[0].due + 'T00:00:00').getDay() === 5, '"friday" resolved to the next Friday');
+    eq(last.tasks[1].due, w.dbdTodayKey(), 'a past due date is clamped to today');
+    eq(last.tasks[1].section, 'misc', 'section preserved');
+    eq(d.querySelectorAll('#homeContainer-d .dg-todo').length, 2, 'card lists the suggested tasks');
+    eq(d.querySelectorAll('#homeContainer-d .dg-todo-add').length, 2, 'each has its own Add button');
+    ok(d.querySelector('#homeContainer-d .dg-todo-addall'), 'Add all offered when more than one remains');
+
+    /* add one */
+    const dbdBefore = dbd(w).length;
+    d.querySelector('#homeContainer-d .dg-todo[data-dgt="1"] .dg-todo-add').click();
+    eq(dbd(w).length, dbdBefore + 1, 'Add creates one Day by Day task');
+    const made = dbd(w)[dbd(w).length - 1];
+    eq(made.text, 'Finish the Northwind assessment', 'task text = suggestion title');
+    eq(made.due, last.tasks[0].due, 'task due = suggestion due');
+    eq(made.done, false, 'not done');
+    eq(savedDigest(w).last.tasks[0].added, made.id, 'suggestion remembers which dbd task it became (synced)');
+    eq(d.querySelectorAll('#homeContainer-d .dg-todo-add').length, 1, 'that Add button becomes Added ✓');
+    ok(d.querySelector('#homeContainer-d .dg-todo[data-dgt="1"].added'), 'row marked added');
+    eq(d.querySelector('#homeContainer-d .dg-todo-addall'), null, 'Add all hidden with one left');
+    eq(w.digestAddTask(1), false, 'adding the same suggestion twice is a no-op');
+    eq(dbd(w).length, dbdBefore + 1, 'still one task');
+
+    /* delete the dbd task → suggestion is offerable again */
+    w.removeDbdTask(made.id);
+    w.renderHome();
+    eq(d.querySelectorAll('#homeContainer-d .dg-todo-add').length, 2, 'removing the created task re-enables Add');
+
+    /* add all */
+    w.digestAddAllTasks();
+    eq(dbd(w).length, dbdBefore + 2, 'Add all adds every remaining suggestion');
+    eq(d.querySelectorAll('#homeContainer-d .dg-todo-add').length, 0, 'no Add buttons left');
+    ok(d.querySelector('#homeContainer-d .dg-todos-count').textContent.includes('all added'), 'count reads all added');
+
+    /* state round trip keeps tasks and their added links */
+    const raw = w.localStorage.getItem('focus-app-state');
+    const { w: w2, d: d2 } = boot({ storage: { 'focus-app-state': raw } });
+    const t2 = w2.digestGet().last.tasks;
+    eq(t2.length, 2, 'tasks survive reload');
+    ok(t2.every(x => x.added && w2.dbdById(x.added)), 'added links survive reload and still resolve');
+    eq(d2.querySelectorAll('#homeContainer-d .dg-todo.added').length, 2, 'reloaded card shows both as added');
     eq(last.count, 4, 'count = emails processed');
     eq(last.model, 'qwen2.5:14b', 'model recorded');
     eq(last.source, 'laptop', 'source recorded');
     ok(d.querySelector('#homeContainer-d .dg-md table'), 'card shows the rendered result');
     eq(d.querySelector('.dg-spinner'), null, 'spinner gone');
+
+    /* tasks call breaks (garbage output) → checklist fallback, digest still succeeds */
+    w.fetch = async (url, o = {}) => {
+      if (url.endsWith('/api/chat') && JSON.parse(o.body).messages[0].content.startsWith('You turn a daily')) return jsonRes({ message: { content: 'sorry, no json here' } });
+      return fetchImpl(url, o);
+    };
+    await w.digestRunNow();
+    const fb = savedDigest(w).last.tasks;
+    eq(fb.length, 1, 'fallback: tasks parsed from the overview checklist');
+    eq(fb[0].title, 'Finish the Northwind assessment by Friday', 'fallback title = checklist line');
+    eq(fb[0].due, '', 'fallback has no due date');
+    w.fetch = fetchImpl;
 
     /* engine unreachable → readable error with a Settings shortcut */
     w.fetch = async (url) => { if (url.includes('/users/me/messages')) return fetchImpl(url, { headers: {} }); throw new TypeError('Failed to fetch'); };
