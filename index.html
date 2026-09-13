@@ -362,6 +362,10 @@
     <span class="brand-name">Focus</span>
   </div>
   <button class="fmt-btn" id="fmtBtn">Formats</button>
+  <button class="data-btn fmt-tpl-btn" id="fmtTplBtn" title="Load a template">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1.2" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="2" width="5" height="5" rx="1.2" stroke="currentColor" stroke-width="1.5"/><rect x="2" y="9" width="5" height="5" rx="1.2" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="9" width="5" height="5" rx="1.2" stroke="currentColor" stroke-width="1.5"/></svg>
+    <span class="lbl">Templates</span>
+  </button>
   <button class="data-btn icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"
@@ -480,6 +484,20 @@
       <button class="modal-primary" id="scheduleSaveBtn">Save</button>
     </div>
     <button class="modal-file-btn" id="scheduleEveryDayBtn">Select all — show every day</button>
+  </div>
+</div>
+
+<!-- ════════ FORMAT TEMPLATES ════════ -->
+<div class="modal-overlay" id="fmtTemplateModal">
+  <div class="modal-box fmt-tpl-box">
+    <button class="modal-x" data-close="fmtTemplateModal" title="Close">×</button>
+    <div class="modal-title">Templates</div>
+    <div class="modal-sub">Pick a starting point. It replaces your timers, Daily lists, and weekly calendar templates — then edit anything before pressing Done. Custom lists, Day by Day, and budget are untouched.</div>
+    <label class="fmt-tpl-toggle">
+      <input type="checkbox" id="fmtTemplateTheme" checked>
+      <span>Also switch to the matching theme</span>
+    </label>
+    <div class="fmt-tpl-grid" id="fmtTemplateGrid"></div>
   </div>
 </div>
 
