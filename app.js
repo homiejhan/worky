@@ -5733,6 +5733,8 @@ const DIGEST_SECTIONS = [
 const DIGEST_CHUNK_CHARS    = 16000;   // email text fed to one model call
 const DIGEST_OVERVIEW_CHARS = 18000;   // assembled digest fed to the overview call
 const DIGEST_FETCH_PARALLEL = 6;
+const DIGEST_WINDOW_QUERY   = 'newer_than:1d -in:spam -in:trash';   // every email from the past 24 hours
+const DIGEST_MAX_EMAILS     = 400;     // safety ceiling only; a normal day is far below it
 
 const DIGEST_JOB_RX = /\b(application|applied|applying|interview|assessment|hackerrank|codesignal|codility|online assessment|OA|recruit|recruiter|recruiting|talent|candidate|candidacy|offer letter|next steps|position|hiring|greenhouse|lever\.co|ashbyhq|ashby|workday|myworkday|icims|smartrecruiters|jobvite|taleo|we regret|unfortunately|move forward|not moving forward)\b/i;
 const DIGEST_NEWSLETTER_RX = /(newsletter|substack|medium\.com|digest|weekly|roundup|beehiiv|mailchimp|convertkit|buttondown|ghost\.io)/i;
@@ -5789,8 +5791,20 @@ Rules:
 /* ── state (synced) ── */
 let digest = null;
 
+/* digest = {
+ *   enabled, last {at, markdown, count, model, source},
+ *   suggestions [ {id, title, why, due, section, status, at, dbdId} ],   pool, survives runs
+ *   sugIdCounter,
+ *   schedule { enabled, times ['HH:MM'] },  lastScheduled 'YYYY-MM-DD HH:MM'
+ * } — all synced. The suggestion pool only shrinks when the user accepts
+ * (Add) or rejects (Dismiss) an item; a new run just merges in what it
+ * hasn't suggested before. */
+const DIGEST_SUG_STATUSES = ['pending', 'added', 'dismissed'];
+const DIGEST_SUG_MEMORY_MS = 14 * 86400000;   // how long accepted/dismissed titles block re-suggestion
+const DIGEST_SUG_MAX = 120;
+
 function normalizeDigest(v) {
-  const out = { enabled: false, last: null };
+  const out = { enabled: false, last: null, suggestions: [], sugIdCounter: 1, schedule: { enabled: false, times: [] }, lastScheduled: '' };
   if (!v || typeof v !== 'object') return out;
   out.enabled = !!v.enabled;
   const l = v.last;
@@ -5802,9 +5816,76 @@ function normalizeDigest(v) {
       model: typeof l.model === 'string' ? l.model.slice(0, 80) : '',
       source: typeof l.source === 'string' ? l.source.slice(0, 20) : '',
     };
-    if (Array.isArray(l.tasks)) out.last.tasks = digestNormalizeTasks(l.tasks);
   }
+  out.sugIdCounter = Math.max(1, Number(v.sugIdCounter) || 1);
+  if (Array.isArray(v.suggestions)) {
+    out.suggestions = digestNormalizeSuggestions(v.suggestions);
+  } else if (l && Array.isArray(l.tasks)) {
+    /* migration: pre-pool digests kept tasks on `last` */
+    out.suggestions = digestNormalizeSuggestions(digestNormalizeTasks(l.tasks).map(t => ({
+      id: t.id, title: t.title, why: t.why, due: t.due, section: t.section,
+      status: t.added ? 'added' : 'pending', at: out.last ? out.last.at : 0, dbdId: t.added || 0,
+    })));
+  }
+  out.suggestions.forEach(x => { if (x.id >= out.sugIdCounter) out.sugIdCounter = x.id + 1; });
+  const sc = v.schedule;
+  if (sc && typeof sc === 'object') {
+    out.schedule.enabled = !!sc.enabled;
+    out.schedule.times = Array.from(new Set((Array.isArray(sc.times) ? sc.times : [])
+      .map(t => String(t || '').trim()).filter(t => /^([01]\d|2[0-3]):[0-5]\d$/.test(t)))).sort().slice(0, 6);
+  }
+  out.lastScheduled = typeof v.lastScheduled === 'string' ? v.lastScheduled.slice(0, 16) : '';
   return out;
+}
+function digestNormalizeSuggestions(arr) {
+  const out = [];
+  const ids = new Set();
+  (Array.isArray(arr) ? arr : []).forEach(x => {
+    if (!x || typeof x !== 'object') return;
+    const title = String(x.title || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+    const id = Number(x.id);
+    if (!title || !(id > 0) || ids.has(id)) return;
+    ids.add(id);
+    out.push({
+      id,
+      title,
+      why: String(x.why || '').replace(/\s+/g, ' ').trim().slice(0, 200),
+      due: /^\d{4}-\d{2}-\d{2}$/.test(String(x.due || '')) ? String(x.due) : '',
+      section: ['jobs', 'newsletter', 'misc'].includes(x.section) ? x.section : 'misc',
+      status: DIGEST_SUG_STATUSES.includes(x.status) ? x.status : 'pending',
+      at: Number(x.at) || 0,
+      dbdId: Number(x.dbdId) > 0 ? Number(x.dbdId) : 0,
+    });
+  });
+  return out.slice(0, DIGEST_SUG_MAX);
+}
+/* "Confirm the Fabrikam recruiter screen!" and "confirm fabrikam recruiter screen" are the same suggestion */
+function digestSugKey(title) {
+  return String(title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+/* Merge a run's tasks into the pool: anything with a title the pool already
+ * holds (pending, added, or recently dismissed) is skipped, the rest become
+ * pending. Old accepted/dismissed entries fall out of the memory window. */
+function digestMergeSuggestions(tasks, at) {
+  const d = digestGet();
+  const now = at || Date.now();
+  d.suggestions = d.suggestions.filter(x => x.status === 'pending' || (now - x.at) < DIGEST_SUG_MEMORY_MS);
+  const keys = new Set(d.suggestions.map(x => digestSugKey(x.title)));
+  let added = 0;
+  (tasks || []).forEach(t => {
+    const key = digestSugKey(t.title);
+    if (!key || keys.has(key)) return;
+    keys.add(key);
+    d.suggestions.push({ id: d.sugIdCounter++, title: t.title, why: t.why || '', due: t.due || '', section: t.section || 'misc', status: 'pending', at: now, dbdId: 0 });
+    added++;
+  });
+  if (d.suggestions.length > DIGEST_SUG_MAX) {
+    /* drop the oldest non-pending first, then the oldest pending */
+    const keep = d.suggestions.filter(x => x.status === 'pending');
+    const rest = d.suggestions.filter(x => x.status !== 'pending').sort((a, b) => b.at - a.at);
+    d.suggestions = keep.concat(rest).slice(0, DIGEST_SUG_MAX).sort((a, b) => a.id - b.id);
+  }
+  return added;
 }
 /* Suggested tasks: { id, title, why, due:'YYYY-MM-DD'|'', section, added:<dbd id>|0 } */
 /* `resolve` = the tasks come fresh from the model or the sample: relative
@@ -5859,15 +5940,23 @@ function digestNormalizeDue(v) {
 function digestGet() { if (!digest) digest = normalizeDigest(null); return digest; }
 function digestRecord() {
   const d = digestGet();
-  return { enabled: d.enabled, last: d.last ? { ...d.last } : null };
+  return {
+    enabled: d.enabled,
+    last: d.last ? { ...d.last } : null,
+    suggestions: d.suggestions.map(x => ({ ...x })),
+    sugIdCounter: d.sugIdCounter,
+    schedule: { enabled: d.schedule.enabled, times: d.schedule.times.slice() },
+    lastScheduled: d.lastScheduled,
+  };
 }
 function compressDigest(d) {
   const n = normalizeDigest(d);
   const o = { en: n.enabled ? 1 : 0 };
-  if (n.last) {
-    o.l = { at: n.last.at, md: n.last.markdown, n: n.last.count, m: n.last.model, s: n.last.source };
-    if (n.last.tasks) o.l.tk = n.last.tasks.map(t => { const c = { i: t.id, t: t.title, w: t.why, d: t.due, s: t.section }; if (t.added) c.a = t.added; return c; });
-  }
+  if (n.last) o.l = { at: n.last.at, md: n.last.markdown, n: n.last.count, m: n.last.model, s: n.last.source };
+  if (n.suggestions.length) o.sg = n.suggestions.map(x => { const c = { i: x.id, t: x.title, w: x.why, d: x.due, s: x.section, st: x.status, at: x.at }; if (x.dbdId) c.a = x.dbdId; return c; });
+  if (n.sugIdCounter > 1) o.sn = n.sugIdCounter;
+  if (n.schedule.enabled || n.schedule.times.length) o.sc = { en: n.schedule.enabled ? 1 : 0, t: n.schedule.times };
+  if (n.lastScheduled) o.ls = n.lastScheduled;
   return o;
 }
 function decompressDigest(c) {
@@ -5876,6 +5965,10 @@ function decompressDigest(c) {
     enabled: !!c.en,
     last: c.l ? { at: c.l.at, markdown: c.l.md, count: c.l.n, model: c.l.m, source: c.l.s,
                   tasks: Array.isArray(c.l.tk) ? c.l.tk.map(t => ({ id: t.i, title: t.t, why: t.w, due: t.d, section: t.s, added: t.a })) : undefined } : null,
+    suggestions: Array.isArray(c.sg) ? c.sg.map(x => ({ id: x.i, title: x.t, why: x.w, due: x.d, section: x.s, status: x.st, at: x.at, dbdId: x.a })) : undefined,
+    sugIdCounter: c.sn,
+    schedule: c.sc ? { enabled: !!c.sc.en, times: c.sc.t } : undefined,
+    lastScheduled: c.ls,
   });
 }
 
@@ -5894,8 +5987,7 @@ function digestEngineGet() {
     url:   (saved && typeof saved.url === 'string' && saved.url.trim()) ? saved.url.trim().replace(/\/+$/, '') : DIGEST_ENGINE_DEFAULT_URL,
     model: (saved && typeof saved.model === 'string') ? saved.model.trim() : '',
     numCtx: (saved && Number(saved.numCtx) >= 4096) ? Number(saved.numCtx) : 12288,
-    maxEmails: (saved && Number(saved.maxEmails) >= 5) ? Number(saved.maxEmails) : 80,
-    hours: (saved && Number(saved.hours) >= 1) ? Number(saved.hours) : 24,
+    autorun: !!(saved && saved.autorun),   // this device runs the scheduled digests
   };
   return digestEngine;
 }
@@ -5982,11 +6074,11 @@ function gmailHeaders() { return { Authorization: `Bearer ${gmailToken.access_to
 
 /* ── Gmail: list + fetch ── */
 async function gmailFetchRecent(opts, signal) {
-  const q = `newer_than:${opts.hours >= 48 ? Math.round(opts.hours / 24) + 'd' : opts.hours + 'h'} -in:spam -in:trash`;
+  const q = DIGEST_WINDOW_QUERY;
   const ids = [];
   let pageToken = '';
-  while (ids.length < opts.maxEmails) {
-    const url = `${GMAIL_API}/users/me/messages?q=${encodeURIComponent(q)}&maxResults=${Math.min(100, opts.maxEmails - ids.length)}${pageToken ? '&pageToken=' + pageToken : ''}`;
+  while (ids.length < DIGEST_MAX_EMAILS) {
+    const url = `${GMAIL_API}/users/me/messages?q=${encodeURIComponent(q)}&maxResults=${Math.min(100, DIGEST_MAX_EMAILS - ids.length)}${pageToken ? '&pageToken=' + pageToken : ''}`;
     const r = await fetch(url, { headers: gmailHeaders(), signal });
     if (r.status === 401) throw new DigestError('Gmail session expired — connect Gmail again in Settings.', 'auth');
     if (!r.ok) throw new DigestError(`Gmail list failed (${r.status}).`);
@@ -6230,8 +6322,9 @@ function digestTasksFromActions(md) {
   return digestNormalizeTasks(items, true);
 }
 
-async function digestRunNow() {
+async function digestRunNow(opts) {
   if (digestRun && digestAbort) return;   // already running
+  const scheduled = !!(opts && opts.scheduled);
   const eng = digestEngineGet();
   if (!gmailIsConnected()) { digestRun = { phase: 'error', error: 'Connect Gmail in Settings first.', kind: 'auth' }; digestPaintProgress(); return; }
   if (!eng.model) { digestRun = { phase: 'error', error: 'Pick an Ollama model in Settings → Email Digest.', kind: 'engine' }; digestPaintProgress(); return; }
@@ -6240,15 +6333,17 @@ async function digestRunNow() {
   try {
     digestProgress('fetching', 0, 0);
     const emails = await gmailFetchRecent(eng, signal);
-    if (!emails.length) throw new DigestError(`No emails in the last ${eng.hours}h.`, 'empty');
+    if (!emails.length) throw new DigestError('No emails in the last 24 hours.', 'empty');
     const { markdown, tasks } = await digestBuild(emails, signal);
-    digestGet().last = { at: Date.now(), markdown, tasks, count: emails.length, model: eng.model, source: 'laptop' };
+    const at = Date.now();
+    digestGet().last = { at, markdown, count: emails.length, model: eng.model, source: scheduled ? 'scheduled' : 'laptop' };
+    const fresh = digestMergeSuggestions(tasks, at);
     digest = normalizeDigest(digest);   // canonical shape, same as after a reload
     digestRun = null;
     digestCollapsed = false;
     saveToLocal();
     renderHome();
-    showToast('Email digest ready ✓');
+    showToast(fresh ? `Email digest ready ✓ ${fresh} new suggestion${fresh === 1 ? '' : 's'}` : 'Email digest ready ✓');
   } catch(e) {
     if (e && e.name === 'AbortError') { digestRun = null; }
     else {
@@ -6272,7 +6367,9 @@ function digestDismissError() { digestRun = null; renderHome(); }
 /* ── sample digest: shows the card without Gmail or Ollama ── */
 function digestLoadSample() {
   digestGet().enabled = true;
-  digestGet().last = { at: Date.now(), markdown: DIGEST_SAMPLE_MD, tasks: digestNormalizeTasks(DIGEST_SAMPLE_TASKS, true), count: 23, model: 'sample', source: 'sample' };
+  const at = Date.now();
+  digestGet().last = { at, markdown: DIGEST_SAMPLE_MD, count: 23, model: 'sample', source: 'sample' };
+  digestMergeSuggestions(digestNormalizeTasks(DIGEST_SAMPLE_TASKS, true), at);
   digest = normalizeDigest(digest);   // canonical shape, same as after a reload
   digestRun = null;
   digestCollapsed = false;
@@ -6373,8 +6470,100 @@ function digestMetaLine(last) {
   const bits = [sameDay ? `Today ${t}` : `${d} ${t}`];
   if (last.count) bits.push(`${last.count} emails`);
   if (last.source === 'sample') bits.push('sample data');
-  else if (last.model) bits.push(last.model);
+  else if (last.model) bits.push(last.model + (last.source === 'scheduled' ? ' · scheduled' : ''));
   return bits.join(' \u00b7 ');
+}
+
+/* ── schedule ──
+ * Times live in synced state; WHICH device runs them is device-local
+ * (`autorun`), because only the machine with Ollama can. A slot fires once
+ * per day (lastScheduled is synced, so a second configured device will not
+ * repeat it) and only if the app is open within 12 h of it. */
+const DIGEST_SCHED_GRACE_MS = 12 * 3600000;
+let digestSchedTimer = null;
+function digestSlotKey(dateKey, hhmm) { return `${dateKey} ${hhmm}`; }
+function digestScheduleDue(now) {
+  const d = digestGet();
+  if (!d.enabled || !d.schedule.enabled || !d.schedule.times.length) return null;
+  const t = now || Date.now();
+  const days = [new Date(t - 86400000), new Date(t)];
+  let due = null;
+  days.forEach(day => {
+    const key = digestDateKey(day);
+    d.schedule.times.forEach(hhmm => {
+      const [h, m] = hhmm.split(':').map(Number);
+      const slot = new Date(day.getFullYear(), day.getMonth(), day.getDate(), h, m).getTime();
+      const slotKey = digestSlotKey(key, hhmm);
+      if (slot <= t && (t - slot) < DIGEST_SCHED_GRACE_MS && slotKey > d.lastScheduled) {
+        if (!due || slotKey > due.key) due = { key: slotKey, at: slot };
+      }
+    });
+  });
+  return due;
+}
+function digestNextRunLabel(now) {
+  const d = digestGet();
+  if (!d.enabled || !d.schedule.enabled || !d.schedule.times.length) return '';
+  const t = now || Date.now();
+  let best = null;
+  [0, 1].forEach(offset => {
+    const day = new Date(t + offset * 86400000);
+    d.schedule.times.forEach(hhmm => {
+      const [h, m] = hhmm.split(':').map(Number);
+      const slot = new Date(day.getFullYear(), day.getMonth(), day.getDate(), h, m).getTime();
+      const key = digestSlotKey(digestDateKey(day), hhmm);
+      if (slot > t || (key > d.lastScheduled && (t - slot) < DIGEST_SCHED_GRACE_MS)) { if (best === null || slot < best) best = slot; }
+    });
+  });
+  if (best === null) return '';
+  const when = new Date(best);
+  const time = when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const sameDay = when.toDateString() === new Date(t).toDateString();
+  return sameDay ? `today ${time}` : `tomorrow ${time}`;
+}
+/* Called every minute, on init, and when the tab becomes visible. Returns
+ * true when it started a run. */
+function digestScheduleTick() {
+  const d = digestGet();
+  const eng = digestEngineGet();
+  if (!eng.autorun || !eng.model) return false;
+  if (digestRun && digestAbort) return false;   // already running
+  const due = digestScheduleDue();
+  if (!due) return false;
+  d.lastScheduled = due.key;                    // claim the slot even if the run fails — no retry storm
+  saveToLocal();
+  if (!gmailIsConnected()) {
+    digestRun = { phase: 'error', error: 'Scheduled digest skipped — Gmail session expired. Connect Gmail again in Settings.', kind: 'auth' };
+    renderHome();
+    return false;
+  }
+  digestRunNow({ scheduled: true });
+  return true;
+}
+function digestScheduleStart() {
+  clearInterval(digestSchedTimer);
+  digestSchedTimer = setInterval(digestScheduleTick, 60000);
+  digestScheduleTick();
+}
+function digestScheduleSet(patch) {
+  const d = digestGet();
+  Object.assign(d.schedule, patch || {});
+  digest = normalizeDigest(digest);
+  /* Editing the schedule must not fire a slot that is already in the past
+   * (adding "7:00" at 9:00 should mean tomorrow, not right now). */
+  const due = digestScheduleDue();
+  if (due) digestGet().lastScheduled = due.key;
+  saveToLocal();
+  digestRenderSettings();
+  renderHome();
+}
+function digestScheduleAddTime(hhmm) {
+  const d = digestGet();
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(hhmm || '')) return;
+  if (!d.schedule.times.includes(hhmm)) digestScheduleSet({ times: d.schedule.times.concat(hhmm) });
+}
+function digestScheduleRemoveTime(hhmm) {
+  digestScheduleSet({ times: digestGet().schedule.times.filter(t => t !== hhmm) });
 }
 function digestProgressHtml() {
   const r = digestRun;
@@ -6422,9 +6611,9 @@ function homeDigestHtml() {
   const chevron = last ? `<button class="dg-chev ${digestCollapsed ? 'closed' : ''}" onclick="digestToggleCollapsed()" title="${digestCollapsed ? 'Expand' : 'Collapse'}" aria-label="Toggle digest">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>` : '';
   let body;
-  if (last && !digestCollapsed) body = `${digestTasksHtml(last)}<div class="dg-md">${digestRenderMd(last.markdown)}</div>`;
+  if (last && !digestCollapsed) body = `${digestTasksHtml()}<div class="dg-md">${digestRenderMd(last.markdown)}</div>`;
   else if (last) body = '';
-  else if (running) body = '';
+  else if (running) body = digestTasksHtml();
   else if (!gmailIsConnected()) body = `
       <div class="dg-empty">
         <div class="dg-empty-text">Connect Gmail and Worky will read the last day of mail, sort it into news, newsletters, job updates and everything else, and write a two-minute summary here.</div>
@@ -6441,9 +6630,9 @@ function homeDigestHtml() {
           <button class="dg-btn ghost" onclick="digestLoadSample()">See a sample</button>
         </div>
       </div>`;
-  else body = `
+  else body = `${digestTasksHtml()}
       <div class="dg-empty">
-        <div class="dg-empty-text">Ready. Running reads your last ${digestEngineGet().hours} hours of Gmail and takes a few minutes on a laptop model.</div>
+        <div class="dg-empty-text">Ready. Running reads every email from the last 24 hours and takes a few minutes on a laptop model.${digestNextRunLabel() ? ' Next scheduled run: ' + digestEsc(digestNextRunLabel()) + '.' : ''}</div>
       </div>`;
   return `
     <section class="home-section dg-section">
@@ -6461,11 +6650,24 @@ function homeDigestHtml() {
     </section>`;
 }
 
-/* ── suggested tasks: rendered above the summary, each with its own Add ── */
-function digestTaskIsAdded(t) { return !!(t.added && dbdById(t.added)); }
-function digestTasksHtml(last) {
-  if (!last || !Array.isArray(last.tasks)) return '';
-  const tasks = last.tasks;
+/* ── suggested tasks: the pool, rendered above the summary ──
+ * Pending ones stay until Add or Dismiss. Ones added since the last run stay
+ * visible (struck through) so the feedback is obvious; they drop off the card
+ * on the next run. An added suggestion whose task the user later deleted is
+ * offered again. */
+function digestTaskIsAdded(t) { return t.status === 'added' && !!(t.dbdId && dbdById(t.dbdId)); }
+function digestVisibleSuggestions() {
+  const d = digestGet();
+  const lastAt = d.last ? d.last.at : 0;
+  return d.suggestions.filter(t => {
+    if (t.status === 'dismissed') return false;
+    if (t.status === 'added') return digestTaskIsAdded(t) ? t.at >= lastAt : true;   // deleted task → re-offer
+    return true;
+  });
+}
+function digestTasksHtml() {
+  const tasks = digestVisibleSuggestions();
+  if (!tasks.length && !(digestGet().last)) return '';
   const remaining = tasks.filter(t => !digestTaskIsAdded(t));
   const rows = tasks.map(t => {
     const added = digestTaskIsAdded(t);
@@ -6479,7 +6681,10 @@ function digestTasksHtml(last) {
         </div>
         ${added
           ? `<span class="dg-todo-added" title="It's in Day by Day">Added ✓</span>`
-          : `<button class="dg-btn dg-todo-add" onclick="digestAddTask(${t.id})" title="Add to Day by Day">Add</button>`}
+          : `<span class="dg-todo-actions">
+               <button class="dg-btn dg-todo-add" onclick="digestAddTask(${t.id})" title="Add to Day by Day">Add</button>
+               <button class="dg-todo-dismiss" onclick="digestDismissTask(${t.id})" title="Dismiss — won't be suggested again" aria-label="Dismiss">×</button>
+             </span>`}
       </div>`;
   }).join('');
   const addAll = remaining.length > 1 ? `<button class="dg-btn ghost dg-todo-addall" onclick="digestAddAllTasks()">Add all (${remaining.length})</button>` : '';
@@ -6489,21 +6694,22 @@ function digestTasksHtml(last) {
         <div class="dg-todos-title">✅ Suggested tasks${tasks.length ? ` <span class="dg-todos-count">${remaining.length ? remaining.length : 'all added'}</span>` : ''}</div>
         ${addAll}
       </div>
-      ${tasks.length ? rows : '<div class="dg-todos-empty">Nothing needs a follow-up today.</div>'}
+      ${tasks.length ? rows : '<div class="dg-todos-empty">No open suggestions.</div>'}
     </div>`;
 }
 function digestTaskById(id) {
-  const last = digestGet().last;
-  return last && Array.isArray(last.tasks) ? last.tasks.find(t => t.id === Number(id)) : null;
+  return digestGet().suggestions.find(t => t.id === Number(id)) || null;
 }
 /* Add → a Day by Day task (due date from the digest, else today), so it lands
  * in Today's tasks on Home and in the Lists tab like anything typed by hand. */
 function digestAddTask(id, opts) {
   const t = digestTaskById(id);
-  if (!t || digestTaskIsAdded(t)) return false;
+  if (!t || t.status === 'dismissed' || digestTaskIsAdded(t)) return false;
   const task = { id: dbdIdCounter++, text: t.title, due: t.due || dbdTodayKey(), done: false };
   dbdTasks.push(task);
-  t.added = task.id;
+  t.status = 'added';
+  t.dbdId = task.id;
+  t.at = Date.now();
   if (!(opts && opts.batch)) {
     renderDbd();
     renderHome();
@@ -6512,10 +6718,19 @@ function digestAddTask(id, opts) {
   }
   return true;
 }
+/* Reject: hidden for good, and the same title is not re-suggested for two weeks */
+function digestDismissTask(id) {
+  const t = digestTaskById(id);
+  if (!t || t.status === 'dismissed') return false;
+  t.status = 'dismissed';
+  t.dbdId = 0;
+  t.at = Date.now();
+  renderHome();
+  saveToLocal();
+  return true;
+}
 function digestAddAllTasks() {
-  const last = digestGet().last;
-  if (!last || !Array.isArray(last.tasks)) return;
-  const n = last.tasks.reduce((c, t) => c + (digestAddTask(t.id, { batch: true }) ? 1 : 0), 0);
+  const n = digestVisibleSuggestions().reduce((c, t) => c + (digestAddTask(t.id, { batch: true }) ? 1 : 0), 0);
   renderDbd();
   renderHome();
   saveToLocal();
@@ -6550,6 +6765,31 @@ function digestRenderSettings() {
   }
   const clr = $('digestClearBtn');
   if (clr) clr.style.display = d.last ? '' : 'none';
+
+  /* schedule */
+  const st = $('digestSchedToggle');
+  if (st) st.checked = d.schedule.enabled;
+  const sf = $('digestSchedFields');
+  if (sf) sf.style.display = d.schedule.enabled ? '' : 'none';
+  const times = $('digestSchedTimes');
+  if (times) times.innerHTML = d.schedule.times.length
+    ? d.schedule.times.map(t => `<span class="dg-sched-chip">${digestEsc(digestFmtTime(t))}<button type="button" onclick="digestScheduleRemoveTime('${t}')" aria-label="Remove ${t}">×</button></span>`).join('')
+    : '<span class="dg-sched-none">No times yet — add one above.</span>';
+  const ar = $('digestAutorunToggle');
+  if (ar) ar.checked = eng.autorun;
+  const ss = $('digestSchedStatus');
+  if (ss) {
+    const next = digestNextRunLabel();
+    ss.textContent = !d.schedule.times.length ? ''
+      : !eng.autorun ? 'Turn on "Use this device" on the computer that runs Ollama.'
+      : !eng.model ? 'This device needs an Ollama model (Test above) before it can run on schedule.'
+      : !gmailIsConnected() ? 'Gmail is not connected on this device — scheduled runs will be skipped.'
+      : next ? `Next run ${next} on this device (keep Worky open).` : '';
+  }
+}
+function digestFmtTime(hhmm) {
+  const [h, m] = hhmm.split(':').map(Number);
+  return new Date(2000, 0, 1, h, m).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 async function digestTestEngine() {
   const status = $('digestEngineStatus');
@@ -6587,6 +6827,10 @@ function bindDigest() {
   $('digestSampleBtn')?.addEventListener('click', () => { closeModal('settingsModal'); digestLoadSample(); });
   $('digestClearBtn')?.addEventListener('click', digestClearLast);
   $('digestRunSettingsBtn')?.addEventListener('click', () => { closeModal('settingsModal'); digestShowHome(); digestRunNow(); });
+  $('digestSchedToggle')?.addEventListener('change', e => digestScheduleSet({ enabled: !!e.target.checked }));
+  $('digestSchedAddBtn')?.addEventListener('click', () => { const inp = $('digestSchedTime'); digestScheduleAddTime(inp?.value); });
+  $('digestSchedTime')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); digestScheduleAddTime(e.target.value); } });
+  $('digestAutorunToggle')?.addEventListener('change', e => { digestEngineSave({ autorun: !!e.target.checked }); digestRenderSettings(); renderHome(); digestScheduleTick(); });
 }
 
 const DIGEST_SAMPLE_MD = `## 🔝 Top of the inbox
@@ -7216,6 +7460,8 @@ function bindTour() {
   gmailLoadToken();
   digestUiLoad();
   gmailHandleRedirect();
+  digestScheduleStart();
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') digestScheduleTick(); });
   if (gmailIsConnected() && !gmailToken.email) gmailFetchProfile();
 
   /* gcal */

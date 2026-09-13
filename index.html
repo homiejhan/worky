@@ -445,6 +445,30 @@
           <button class="modal-file-btn" id="digestSampleBtn">Load sample</button>
           <button class="modal-file-btn" id="digestClearBtn" style="display:none">Clear digest</button>
         </div>
+
+        <div class="dg-field-label">Schedule</div>
+        <div class="settings-view-row">
+          <span class="settings-view-name">Run automatically</span>
+          <label class="gcal-toggle">
+            <input type="checkbox" id="digestSchedToggle">
+            <span class="gcal-toggle-track"></span>
+          </label>
+        </div>
+        <div id="digestSchedFields">
+          <div class="theme-inline">
+            <input class="theme-text" id="digestSchedTime" type="time" value="07:00" aria-label="Time of day">
+            <button class="modal-primary" id="digestSchedAddBtn">Add time</button>
+          </div>
+          <div class="dg-sched-times" id="digestSchedTimes"></div>
+          <div class="settings-view-row">
+            <span class="settings-view-name">Use this device to run them</span>
+            <label class="gcal-toggle">
+              <input type="checkbox" id="digestAutorunToggle">
+              <span class="gcal-toggle-track"></span>
+            </label>
+          </div>
+          <div class="theme-bg-status" id="digestSchedStatus"></div>
+        </div>
       </div>
     </div>
 

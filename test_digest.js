@@ -38,15 +38,77 @@ console.log('\n── 0. Sample digest carries suggested tasks ──');
 {
   const { w, d } = boot();
   w.digestLoadSample();
-  const last = w.digestGet().last;
-  eq(last.tasks.length, 4, 'sample has 4 suggested tasks');
-  ok(last.tasks.every(t => /^\d{4}-\d{2}-\d{2}$/.test(t.due)), 'sample relative dates resolved to real dates');
+  const sug = w.digestGet().suggestions;
+  eq(sug.length, 4, 'sample adds 4 suggestions to the pool');
+  ok(sug.every(t => /^\d{4}-\d{2}-\d{2}$/.test(t.due)), 'sample relative dates resolved to real dates');
   eq(d.querySelectorAll('#homeContainer-d .dg-todo-add').length, 4, 'sample card shows 4 Add buttons');
+  eq(d.querySelectorAll('#homeContainer-d .dg-todo-dismiss').length, 4, 'and 4 Dismiss buttons');
+  w.digestLoadSample();
+  eq(w.digestGet().suggestions.length, 4, 'loading the sample twice does not duplicate suggestions');
+  ok(w.digestDismissTask(2), 'dismiss works');
+  eq(d.querySelectorAll('#homeContainer-d .dg-todo').length, 3, 'dismissed row gone from the card');
+  eq(w.digestGet().suggestions.find(x => x.id === 2).status, 'dismissed', 'kept in the pool as dismissed');
+  w.digestLoadSample();
+  eq(w.digestGet().suggestions.length, 4, 'a later run does not resurrect a dismissed title');
+  eq(d.querySelectorAll('#homeContainer-d .dg-todo').length, 3, 'still hidden');
+  eq(w.digestSugKey('Confirm Fabrikam recruiter screen!'), w.digestSugKey('  confirm fabrikam   recruiter screen'), 'title key ignores case/punctuation/spacing');
   eq(w.digestNormalizeDue('2099-01-01'), '', 'far-future dates dropped');
   eq(w.digestNormalizeDue('tomorrow'), (() => { const x = new Date(); x.setDate(x.getDate()+1); return w.digestDateKey(x); })(), 'tomorrow resolves');
   eq(w.digestNormalizeDue('whenever'), '', 'unparseable → empty');
   eq(w.digestParseTasks('not json'), null, 'parse returns null on garbage');
   eq(w.digestParseTasks('{"tasks":"nope"}'), null, 'parse returns null when tasks is not an array');
+}
+
+console.log('\n── 0b. Scheduler: fires once per slot, only on the device that opted in ──');
+{
+  const { w } = boot({ storage: { 'focus-gmail-token': JSON.stringify({ access_token: 'tok', expires_at: new Date(2030, 0, 1).getTime(), email: 'me@example.com' }), 'focus-digest-engine': JSON.stringify({ url: 'http://localhost:11434', model: 'm', autorun: true }) } });
+  w.eval('digestRunNow = async function(o){ window.__runs = (window.__runs||0)+1; window.__lastOpts = o; }');
+  w.digestGet().enabled = true;
+  w.eval('Date.now = () => ' + new Date(2026, 8, 13, 9, 30).getTime());   // schedule edited at 9:30
+  w.digestScheduleSet({ enabled: true, times: ['21:00', '07:00'] });
+  eq(w.digestGet().schedule.times.join(','), '07:00,21:00', 'times saved sorted');
+  eq(w.digestGet().lastScheduled, '2026-09-13 07:00', 'editing the schedule claims the already-passed 7:00 instead of running it');
+  eq(w.digestNextRunLabel(), 'today 9:00 PM', 'next run is the 21:00 slot');
+  ok(!w.digestScheduleTick(), 'tick right after editing does not run');
+  eq(w.__runs || 0, 0, 'no run yet');
+  /* now pretend the app was closed at 21:00 and reopened at 23:30 */
+  w.eval('Date.now = () => ' + new Date(2026, 8, 13, 23, 30).getTime());
+  eq(w.digestScheduleDue().key, '2026-09-13 21:00', '21:00 slot is due at 23:30 (within the 12h grace)');
+  ok(w.digestScheduleTick(), 'tick starts the run');
+  eq(w.__runs, 1, 'digestRunNow called once');
+  ok(w.__lastOpts && w.__lastOpts.scheduled, 'flagged as scheduled');
+  eq(w.digestGet().lastScheduled, '2026-09-13 21:00', 'slot claimed');
+  ok(!w.digestScheduleTick(), 'second tick in the same slot does nothing');
+  eq(w.__runs, 1, 'still one run');
+  eq(w.digestNextRunLabel(), 'tomorrow 7:00 AM', 'next run label moves to tomorrow 7:00');
+  w.eval('Date.now = () => ' + new Date(2026, 8, 14, 7, 1).getTime());
+  ok(w.digestScheduleTick(), '7:00 slot fires at 7:01');
+  eq(w.digestGet().lastScheduled, '2026-09-14 07:00', 'slot claimed');
+  w.eval('Date.now = () => ' + new Date(2026, 8, 14, 8, 0).getTime());
+  w.digestScheduleSet({ times: ['07:00'] });                                 // single daily slot
+  w.eval('Date.now = () => ' + new Date(2026, 8, 15, 20, 0).getTime());   // laptop closed all day — 7:00 was 13h ago
+  ok(!w.digestScheduleTick(), 'a slot more than 12h old is not run late');
+  eq(w.digestGet().lastScheduled, '2026-09-14 07:00', 'and not claimed');
+  w.eval('Date.now = () => ' + new Date(2026, 8, 16, 7, 0).getTime());
+  ok(w.digestScheduleTick(), 'the next 7:00 fires on the minute');
+  /* device that did not opt in */
+  w.digestEngineSave({ autorun: false });
+  w.digestGet().lastScheduled = '';
+  ok(!w.digestScheduleTick(), 'autorun off → this device never runs the schedule');
+  eq(w.digestGet().lastScheduled, '', 'and does not claim the slot for others');
+  /* schedule survives reload via state */
+  w.saveToLocal();
+  const { w: w2 } = boot({ storage: { 'focus-app-state': w.localStorage.getItem('focus-app-state') } });
+  eq(w2.digestGet().schedule.times.join(','), '07:00', 'schedule persisted in synced state');
+  eq(w2.digestGet().schedule.enabled, true, 'enabled persisted');
+  /* expired gmail at schedule time → error on card, slot still claimed */
+  const { w: w3, d: d3 } = boot({ storage: { 'focus-digest-engine': JSON.stringify({ url: 'http://localhost:11434', model: 'm', autorun: true }) } });
+  w3.eval('Date.now = () => ' + new Date(2026, 8, 13, 6, 0).getTime());
+  w3.digestGet().enabled = true; w3.digestScheduleSet({ enabled: true, times: ['07:00'] });
+  w3.eval('Date.now = () => ' + new Date(2026, 8, 13, 9, 30).getTime());
+  ok(!w3.digestScheduleTick(), 'no gmail → does not run');
+  ok(d3.querySelector('#homeContainer-d .dg-status-text') && /Gmail/.test(d3.querySelector('#homeContainer-d .dg-status-text').textContent), 'card explains the skip');
+  eq(w3.digestGet().lastScheduled, '2026-09-13 07:00', 'slot claimed so it does not retry every minute');
 }
 
 console.log('\n── 1. Default boot: digest off, nothing on Home, state carries the record ──');
@@ -207,17 +269,21 @@ console.log('\n── 8. Full pipeline against a fake Gmail + fake Ollama ──
     const chat = calls.filter(c => c.url.endsWith('/api/chat'));
     eq(chat.length, 5, 'three section calls (tldr, jobs, misc) + overview + tasks — promo skipped, empty sections skipped');
     ok(chat.every(c => JSON.parse(c.opts.body).model === 'qwen2.5:14b'), 'model passed to every call');
-    ok(calls.some(c => c.url.includes('newer_than%3A24h')), 'gmail query uses the 24h window');
+    ok(calls.some(c => c.url.includes('newer_than%3A1d')), 'gmail query covers the past 24 hours');
+    ok(calls.some(c => c.url.includes('maxResults=100')), 'lists in full pages, not capped at 80');
     ok(calls.filter(c => /messages\/\w+\?format=full/.test(c.url)).every(c => c.opts.headers.Authorization === 'Bearer tok'), 'bearer token sent');
     const last = savedDigest(w).last;
     ok(last && last.markdown.includes('## 📰 Tech News (TLDR)') && last.markdown.includes('## 🏗️ ByteByteGo\n_Nothing today_'), 'assembled digest keeps every section, empty ones say Nothing today');
     ok(last.markdown.startsWith('## 🔝 Top of the inbox'), 'overview first');
     ok(!last.markdown.includes('## ✅'), 'checklist no longer lives in the markdown (it became suggested tasks)');
-    eq(last.tasks.length, 2, 'tasks parsed from fenced JSON, duplicate and blank dropped');
-    eq(last.tasks[0].title, 'Finish the Northwind assessment', 'first task kept in model order');
-    ok(/^\d{4}-\d{2}-\d{2}$/.test(last.tasks[0].due) && new Date(last.tasks[0].due + 'T00:00:00').getDay() === 5, '"friday" resolved to the next Friday');
-    eq(last.tasks[1].due, w.dbdTodayKey(), 'a past due date is clamped to today');
-    eq(last.tasks[1].section, 'misc', 'section preserved');
+    ok(!('tasks' in last), 'tasks no longer live on last (they are in the pool)');
+    const pool = savedDigest(w).suggestions;
+    eq(pool.length, 2, 'tasks parsed from fenced JSON, duplicate and blank dropped, merged into the pool');
+    eq(pool[0].title, 'Finish the Northwind assessment', 'first task kept in model order');
+    ok(/^\d{4}-\d{2}-\d{2}$/.test(pool[0].due) && new Date(pool[0].due + 'T00:00:00').getDay() === 5, '"friday" resolved to the next Friday');
+    eq(pool[1].due, w.dbdTodayKey(), 'a past due date is clamped to today');
+    eq(pool[1].section, 'misc', 'section preserved');
+    eq(last.source, 'laptop', 'manual run source');
     eq(d.querySelectorAll('#homeContainer-d .dg-todo').length, 2, 'card lists the suggested tasks');
     eq(d.querySelectorAll('#homeContainer-d .dg-todo-add').length, 2, 'each has its own Add button');
     ok(d.querySelector('#homeContainer-d .dg-todo-addall'), 'Add all offered when more than one remains');
@@ -228,9 +294,10 @@ console.log('\n── 8. Full pipeline against a fake Gmail + fake Ollama ──
     eq(dbd(w).length, dbdBefore + 1, 'Add creates one Day by Day task');
     const made = dbd(w)[dbd(w).length - 1];
     eq(made.text, 'Finish the Northwind assessment', 'task text = suggestion title');
-    eq(made.due, last.tasks[0].due, 'task due = suggestion due');
+    eq(made.due, pool[0].due, 'task due = suggestion due');
     eq(made.done, false, 'not done');
-    eq(savedDigest(w).last.tasks[0].added, made.id, 'suggestion remembers which dbd task it became (synced)');
+    eq(savedDigest(w).suggestions[0].dbdId, made.id, 'suggestion remembers which dbd task it became (synced)');
+    eq(savedDigest(w).suggestions[0].status, 'added', 'status = added');
     eq(d.querySelectorAll('#homeContainer-d .dg-todo-add').length, 1, 'that Add button becomes Added ✓');
     ok(d.querySelector('#homeContainer-d .dg-todo[data-dgt="1"].added'), 'row marked added');
     eq(d.querySelector('#homeContainer-d .dg-todo-addall'), null, 'Add all hidden with one left');
@@ -251,9 +318,9 @@ console.log('\n── 8. Full pipeline against a fake Gmail + fake Ollama ──
     /* state round trip keeps tasks and their added links */
     const raw = w.localStorage.getItem('focus-app-state');
     const { w: w2, d: d2 } = boot({ storage: { 'focus-app-state': raw } });
-    const t2 = w2.digestGet().last.tasks;
-    eq(t2.length, 2, 'tasks survive reload');
-    ok(t2.every(x => x.added && w2.dbdById(x.added)), 'added links survive reload and still resolve');
+    const t2 = w2.digestGet().suggestions;
+    eq(t2.length, 2, 'suggestions survive reload');
+    ok(t2.every(x => x.status === 'added' && w2.dbdById(x.dbdId)), 'added links survive reload and still resolve');
     eq(d2.querySelectorAll('#homeContainer-d .dg-todo.added').length, 2, 'reloaded card shows both as added');
     eq(last.count, 4, 'count = emails processed');
     eq(last.model, 'qwen2.5:14b', 'model recorded');
@@ -267,10 +334,13 @@ console.log('\n── 8. Full pipeline against a fake Gmail + fake Ollama ──
       return fetchImpl(url, o);
     };
     await w.digestRunNow();
-    const fb = savedDigest(w).last.tasks;
-    eq(fb.length, 1, 'fallback: tasks parsed from the overview checklist');
-    eq(fb[0].title, 'Finish the Northwind assessment by Friday', 'fallback title = checklist line');
-    eq(fb[0].due, '', 'fallback has no due date');
+    const fb = savedDigest(w).suggestions;
+    eq(fb.length, 3, 'fallback: checklist task merged into the pool (the two earlier ones stay)');
+    eq(fb[2].title, 'Finish the Northwind assessment by Friday', 'fallback title = checklist line');
+    eq(fb[2].due, '', 'fallback has no due date');
+    eq(fb[2].status, 'pending', 'pending');
+    ok(fb[0].status === 'added' && fb[1].status === 'added', 'earlier accepted ones untouched by the new run');
+    eq(d.querySelectorAll('#homeContainer-d .dg-todo').length, 1, 'card now shows only the new pending one (added ones from before the run drop off)');
     w.fetch = fetchImpl;
 
     /* engine unreachable → readable error with a Settings shortcut */

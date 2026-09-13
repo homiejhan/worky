@@ -12,7 +12,7 @@
      passed straight through to the network — never cached.
    ════════════════════════════════════════════════════════════ */
 
-const CACHE_VERSION = 'worky-v5';
+const CACHE_VERSION = 'worky-v6';
 const SHELL_CACHE   = `${CACHE_VERSION}-shell`;
 const FONT_CACHE    = `${CACHE_VERSION}-fonts`;
 

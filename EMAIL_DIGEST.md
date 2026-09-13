@@ -35,42 +35,59 @@ that would let other people use this (a hosted engine, refresh tokens) come late
 
 **Load sample** shows the card with canned data if you just want to see the layout.
 
-## What runs when you press Run digest
+## What runs when you press Run digest (or the schedule does)
 
-1. `GET gmail/v1/users/me/messages?q=newer_than:24h -in:spam -in:trash` (up to 80 ids),
-   then each message with `format=full`, 6 at a time. HTML bodies become text with
-   links kept as `text (url)`.
+1. `GET gmail/v1/users/me/messages?q=newer_than:1d -in:spam -in:trash`, paged until Gmail
+   runs out (every email from the past 24 hours; a 400-message ceiling is the only limit),
+   then each message with `format=full`, 6 at a time. HTML bodies become text with links
+   kept as `text (url)`.
 2. Each email is routed by sender/subject: TLDR, ByteByteGo, jobs (ATS words),
    promotions (skipped), newsletters (`List-Id` or newsletter words), everything else.
-3. One `/api/chat` call per section (chunked at ~16k chars of email text), using the
-   section rules from the original digest spec. Empty sections say *Nothing today*.
+3. One `/api/chat` call per section (chunked at ~16k chars of email text). Empty sections
+   say *Nothing today*.
 4. One more call writes **Top of the inbox** and an action-items checklist.
-5. A final structured-output call (`format: json`, reasoning field first) turns the digest
-   into **Suggested tasks** — `{title, why, due, section}` — given today's date so
-   "Friday" becomes a real date. The client re-validates every field (dedupe, blank titles,
-   past dates → today, >100 days out → no date). If the JSON is unusable the checklist from
-   step 4 becomes the tasks instead, so the card never comes back empty.
-6. The markdown and the tasks are saved to `digest.last` (synced), rendered on Home, and a
-   toast fires.
+5. A structured-output call (`format: json`, reasoning field first) turns the digest into
+   task candidates `{title, why, due, section}`, given today's date so "Friday" becomes a
+   real date. Every field is re-validated; if the JSON is unusable the checklist from step 4
+   is used instead.
+6. The candidates are **merged into the suggestion pool**, the markdown is saved to
+   `digest.last`, everything syncs, and a toast reports how many suggestions are new.
 
-## Suggested tasks → your dashboard
+## Suggested tasks — the pool
 
-The card shows the tasks above the summary, each with its own **Add** (plus **Add all**).
-Add creates a normal Day by Day task with the suggested due date (today if none), so it
-shows up in *Today's tasks* on Home and in the Lists tab exactly like something you typed.
-Each suggestion remembers which task it became (`added`), so it reads *Added ✓* on every
-signed-in device; deleting that task makes the suggestion offerable again.
+Suggestions live in `digest.suggestions`, not on a single digest, so they never expire on
+their own. Each has a status:
 
-Progress shows on the card; Cancel aborts. Errors stay on the card with the fix
-(Connect Gmail / Open Settings) until dismissed; the previous digest stays visible.
+- **pending** — shown on the card with **Add** and **×**. Stays until you act on it, across
+  any number of runs.
+- **added** — Add created a normal Day by Day task (due = suggested date, else today) and
+  remembered its id. It shows as *Added ✓* until the next run, then drops off the card. If
+  you delete that task later, the suggestion is offered again.
+- **dismissed** — × hides it for good. Its title is remembered for 14 days so the next run
+  doesn't re-suggest the same email.
+
+Matching is by normalised title (case, punctuation and spacing ignored), so the same
+follow-up seen in two runs is one suggestion. Load sample twice → still four suggestions.
+
+## Schedule
+
+Settings → Email Digest → **Run automatically** → add one or more times of day. The times
+are synced; **which device runs them** is device-local ("Use this device to run them") —
+only the machine with Ollama can. Every minute, on launch and when the tab becomes
+visible, that device checks for a slot that has passed in the last 12 hours and hasn't run
+yet, claims it (`digest.lastScheduled`, synced, so a second configured device won't repeat
+it) and runs. Editing the schedule claims any already-passed slot instead of running it
+("7:00" added at 9:00 means tomorrow). If Gmail's one-hour token has expired at run time the
+card says so and the slot is skipped, not retried every minute. Worky has to be open for a
+scheduled run — it's a browser app; a true background cron is the hosted/backend step.
 
 ## Where things live
 
 | Thing | Where | Synced |
 |---|---|---|
-| `digest.enabled`, `digest.last {at, markdown, tasks[], count, model, source}` | app state (`dg` compressed, tasks as `tk`) | yes |
+| `digest.enabled`, `digest.last {at, markdown, count, model, source}`, `digest.suggestions[]`, `digest.schedule`, `digest.lastScheduled` | app state (`dg` compressed) | yes |
 | Gmail token | `localStorage focus-gmail-token` | no |
-| Ollama URL, model, window | `localStorage focus-digest-engine` | no |
+| Ollama URL, model, autorun | `localStorage focus-digest-engine` | no |
 | Card collapsed | `localStorage focus-digest-ui` | no |
 
 Files touched: `app.js` (EMAIL DIGEST section + hooks in config, state
