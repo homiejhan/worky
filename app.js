@@ -6282,33 +6282,90 @@ function digestClassify(e) {
 /* ── Ollama ── */
 class DigestError extends Error { constructor(msg, kind) { super(msg); this.kind = kind || 'engine'; } }
 
+/* Streams the reply so the card can show tokens arriving (and so a stalled
+ * model is detected instead of hanging forever). Falls back to a plain JSON
+ * body when the response has no stream (older Ollama, test doubles). */
+let OLLAMA_STALL_MS      = 4 * 60000;    // no bytes for this long → give up on the call
+const OLLAMA_CALL_MAX_MS = 20 * 60000;   // hard cap per call
+let digestStreamNote = null;             // { tokens, startedAt } for the progress line
+
 async function ollamaChat(system, user, opts, signal) {
   const eng = digestEngineGet();
+  const ctl = new AbortController();
+  const onOuterAbort = () => ctl.abort();
+  if (signal) signal.addEventListener('abort', onOuterAbort, { once: true });
+  let stallReason = '';
+  let stallTimer = null;
+  const armStall = () => {
+    clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => { stallReason = `Ollama went quiet for ${Math.round(OLLAMA_STALL_MS / 60000)} minutes on "${eng.model}". Check \`ollama ps\` on the laptop — if the model shows CPU instead of 100% GPU it is too big for the graphics card; try a smaller one.`; ctl.abort(); }, OLLAMA_STALL_MS);
+  };
+  const capTimer = setTimeout(() => { stallReason = `One model call took more than ${Math.round(OLLAMA_CALL_MAX_MS / 60000)} minutes. The model is probably running on CPU — try a smaller one in Settings.`; ctl.abort(); }, OLLAMA_CALL_MAX_MS);
+  digestStreamNote = { tokens: 0, startedAt: Date.now() };
   let r;
   try {
+    armStall();
     r = await fetch(`${eng.url}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      signal,
+      signal: ctl.signal,
       body: JSON.stringify({
         model: eng.model,
-        stream: false,
+        stream: true,
         messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
         ...(opts.json ? { format: 'json' } : {}),
         options: { temperature: opts.json ? 0.1 : 0.2, num_ctx: eng.numCtx, num_predict: opts.numPredict || 1200 },
       }),
     });
+    if (!r.ok) {
+      let detail = '';
+      try { detail = (await r.json()).error || ''; } catch(e) {}
+      throw new DigestError(`Ollama error ${r.status}${detail ? ': ' + detail : ''}`, 'engine');
+    }
+    /* no readable body (test double / very old server) → plain JSON */
+    if (!r.body || typeof r.body.getReader !== 'function') {
+      const j = await r.json();
+      return String((j.message && j.message.content) || '').trim();
+    }
+    const reader = r.body.getReader();
+    ctl.signal.addEventListener('abort', () => { try { reader.cancel(); } catch(e) {} }, { once: true });
+    const dec = new TextDecoder();
+    let buf = '', out = '', lastPaint = 0;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (ctl.signal.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+      if (done) break;
+      armStall();
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let j;
+        try { j = JSON.parse(line); } catch(e) { continue; }
+        if (j.error) throw new DigestError(`Ollama: ${j.error}`, 'engine');
+        if (j.message && j.message.content) { out += j.message.content; digestStreamNote.tokens++; }
+        if (j.done) buf = '';
+      }
+      const now = Date.now();
+      if (now - lastPaint > 700) { lastPaint = now; digestPaintProgress(); }
+    }
+    if (buf.trim()) { try { const j = JSON.parse(buf); if (j.message && j.message.content) out += j.message.content; } catch(e) {} }
+    return out.trim();
   } catch(e) {
-    if (e && e.name === 'AbortError') throw e;
+    if (e instanceof DigestError) throw e;
+    if (e && e.name === 'AbortError') {
+      if (signal && signal.aborted) throw e;                 // the user cancelled
+      throw new DigestError(stallReason || 'Ollama call was interrupted.', 'engine');
+    }
     throw new DigestError(`Can't reach Ollama at ${eng.url}. Is it running? On GitHub Pages it also needs OLLAMA_ORIGINS=https://homiejhan.github.io.`, 'engine');
+  } finally {
+    clearTimeout(stallTimer);
+    clearTimeout(capTimer);
+    if (signal) signal.removeEventListener('abort', onOuterAbort);
+    digestStreamNote = null;
   }
-  if (!r.ok) {
-    let detail = '';
-    try { detail = (await r.json()).error || ''; } catch(e) {}
-    throw new DigestError(`Ollama error ${r.status}${detail ? ': ' + detail : ''}`, 'engine');
-  }
-  const j = await r.json();
-  return String((j.message && j.message.content) || '').trim();
 }
 async function ollamaListModels(url) {
   const base = (url || digestEngineGet().url).replace(/\/+$/, '');
@@ -6432,6 +6489,7 @@ async function digestRunNow(opts) {
   digestAbort = new AbortController();
   digestActiveRequest = serving;
   const signal = digestAbort.signal;
+  const ticker = setInterval(() => { if (digestRun && digestRun.phase !== 'fetching' && digestRun.phase !== 'error') digestPaintProgress(); }, 1000);
   try {
     digestProgress('fetching', 0, 0);
     const emails = await gmailFetchRecent(eng, signal);
@@ -6460,6 +6518,7 @@ async function digestRunNow(opts) {
     }
     renderHome();
   } finally {
+    clearInterval(ticker);
     digestAbort = null;
     digestActiveRequest = 0;
   }
@@ -6828,7 +6887,13 @@ function digestProgressHtml() {
     : r.phase === 'overview' ? 'Writing the overview'
     : r.phase === 'tasks' ? 'Picking out tasks for you'
     : `Summarizing ${r.note}`;
-  const sub = r.phase === 'fetching' ? '' : `${r.done} of ${r.total} model calls done`;
+  let sub = r.phase === 'fetching' ? '' : `${r.done} of ${r.total} model calls done`;
+  if (r.phase !== 'fetching' && digestStreamNote) {
+    const secs = Math.round((Date.now() - digestStreamNote.startedAt) / 1000);
+    sub += digestStreamNote.tokens
+      ? ` · ${digestStreamNote.tokens} tokens in`
+      : (r.done === 0 && secs > 20 ? ` · loading the model & reading the emails (${secs}s)…` : ` · thinking (${secs}s)`);
+  }
   const pct = r.total ? Math.round((r.done / r.total) * 100) : 0;
   return `
     <div class="dg-status">

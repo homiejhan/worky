@@ -2766,3 +2766,76 @@ body.format-mode .list-sched-row { display: flex; }
 .dg-fields .theme-bg-actions { flex-wrap: wrap; }
 .dg-fields .theme-bg-actions .modal-file-btn { flex: 1 1 30%; }
 .tour-next:active { transform: translateY(1px); }
+
+
+/* ═══════════════════════════════════════════════════════
+   LAYOUT POLISH — spacing fixes found in a screen-by-screen review,
+   plus a gentler, less "dashboard" feel. Appended last so it wins
+   ties on equal specificity.
+   ═══════════════════════════════════════════════════════ */
+
+/* Day by Day rows on phones: the task text was being crushed to a
+   letter or two by the tag / date / calendar / delete controls. Keep
+   check + text + delete on the first line, drop the controls onto a
+   second line indented under the text. */
+@media (max-width: 640px) {
+  .dbd-row { flex-wrap: wrap; row-gap: 6px; padding: 9px 8px 9px 7px; }
+  .dbd-row .task-text { flex: 1 1 0; min-width: 140px; font-size: 14px; order: 0; }
+  .dbd-row .task-del { order: 1; opacity: 0.55; }
+  .dbd-row::after { content: ''; flex-basis: 100%; height: 0; order: 2; }
+  .dbd-row .dbd-tag-select,
+  .dbd-row .dbd-date-input,
+  .dbd-row .task-cal-chip { order: 3; opacity: 1; }
+  .dbd-row .dbd-tag-select { margin-left: 26px; max-width: 120px; min-width: 60px; font-size: 12px; padding: 5px 9px; }
+  .dbd-tagged.dbd-row .dbd-tag-select { margin-left: 25px; }
+  .dbd-row .dbd-date-input { max-width: 132px; font-size: 12px; }
+  .dbd-row .task-cal-chip { margin-left: auto; }
+}
+
+/* Budget on phones: the three small figures were a 2-up grid that left
+   the third one orphaned. Stack them as label-left / value-right rows. */
+@media (max-width: 640px) {
+  .budget-fields { grid-template-columns: 1fr; gap: 8px; }
+  .budget-field { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 12px; padding: 12px 14px; }
+  .budget-field-label { margin-bottom: 0; font-size: 13px; color: var(--ink); }
+  .budget-field-hint { grid-column: 1; grid-row: 2; margin-top: 2px; font-size: 11.5px; }
+  .budget-input-wrap { grid-column: 2; grid-row: 1 / span 2; justify-self: end; flex: 0 0 auto; }
+  .budget-input { flex: 0 0 auto; width: 6.5ch; text-align: right; }
+  .budget-field-hint { max-width: 22ch; }
+  .budget-new-amount { width: 84px; }
+}
+
+/* Digest header: let the meta line wrap on narrow screens instead of
+   truncating to "23 emails · sa…". */
+@media (max-width: 640px) {
+  .dg-meta { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.4; }
+  .dg-head { align-items: flex-start; }
+  .dg-actions { margin-top: 2px; }
+}
+
+/* Type: nothing below 11.5px. The 10.5px labels read as machine text. */
+.budget-field-hint, .dg-todo-counts, .fmt-tpl-counts, .fmt-tpl-chip, .dg-todo-due, .dg-todos-count, .home-dbd-cal { font-size: 11.5px; }
+.timer-sub { font-size: 11.5px; }
+.dg-todo-sub { font-size: 12px; }
+.dg-todo-title { font-size: 13.5px; }
+
+/* Cards: a hair more breathing room and a soft top highlight so they
+   read as surfaces rather than outlined boxes. */
+.home-card { padding: 10px; border-color: color-mix(in srgb, var(--border) 70%, transparent); box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255,255,255,0.04); }
+.dg-card.home-card { padding: 0; }
+.dg-head { padding: 14px 16px 10px; }
+.dg-todos { padding: 6px 16px 8px; }
+.dg-md { padding-left: 16px; padding-right: 16px; }
+@media (max-width: 640px) {
+  .dg-head { padding: 13px 14px 10px; }
+  .dg-todos { padding: 6px 14px 8px; }
+  .dg-md { padding-left: 14px; padding-right: 14px; }
+}
+
+/* Section headers: slightly larger, calmer tracking, more air above. */
+.section-label { font-size: 12.5px; letter-spacing: 0.02em; margin-top: 4px; }
+.home-section + .home-section { margin-top: 4px; }
+
+/* Status / hint copy: give it a real line-height so wrapped hints don't
+   look cramped. */
+.theme-bg-status, .modal-sub, .dg-empty-text, .home-muted-note, .budget-field-hint { line-height: 1.5; }

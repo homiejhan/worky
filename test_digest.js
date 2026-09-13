@@ -120,6 +120,43 @@ console.log('\n── 0b. Scheduler: fires once per slot, only on the device tha
   eq(w3.digestGet().lastScheduled, '2026-09-13 07:00', 'slot claimed so it does not retry every minute');
 }
 
+let streamTests = async () => {};
+{
+  const { w } = boot({ storage: { 'focus-digest-engine': JSON.stringify({ url: 'http://localhost:11434', model: 'm' }) } });
+  const ndjson = lines => new ReadableStream({ start(c) { lines.forEach(l => c.enqueue(new TextEncoder().encode(l + '\n'))); c.close(); } });
+  let body = null;
+  w.fetch = async (url, o) => {
+    body = JSON.parse(o.body);
+    return { ok: true, status: 200, body: ndjson([
+      JSON.stringify({ message: { content: 'Hello ' }, done: false }),
+      JSON.stringify({ message: { content: 'world' }, done: false }),
+      JSON.stringify({ message: { content: '' }, done: true }),
+    ]) };
+  };
+  streamTests = async () => {
+    console.log('\n── 0c (async). Streaming Ollama replies + stall detection ──');
+    const out = await w.ollamaChat('sys', 'user', { numPredict: 10 });
+    eq(out, 'Hello world', 'streamed chunks are joined');
+    eq(body.stream, true, 'requests a stream');
+    w.fetch = async () => ({ ok: true, status: 200, json: async () => ({ message: { content: 'plain' } }) });
+    eq(await w.ollamaChat('s', 'u', {}), 'plain', 'non-stream body still works');
+    w.fetch = async () => ({ ok: true, status: 200, body: ndjson([JSON.stringify({ error: 'model "m" not found' })]) });
+    let err = null; try { await w.ollamaChat('s', 'u', {}); } catch(e) { err = e; }
+    ok(err && /not found/.test(err.message) && err.kind === 'engine', 'in-stream error surfaces as an engine error');
+    /* stall: a stream that never sends anything */
+    w.eval('OLLAMA_STALL_MS = 60');
+    w.fetch = async () => ({ ok: true, status: 200, body: new ReadableStream({ start() {} }) });
+    err = null; try { await w.ollamaChat('s', 'u', {}); } catch(e) { err = e; }
+    ok(err && /went quiet/.test(err.message), 'a silent model is reported instead of hanging: ' + (err && err.message.slice(0, 40)));
+    /* user cancel still reads as abort */
+    const ac = new w.AbortController();
+    w.fetch = async (u, o) => new Promise((_, rej) => o.signal.addEventListener('abort', () => rej(Object.assign(new Error('x'), { name: 'AbortError' }))));
+    const p = w.ollamaChat('s', 'u', {}, ac.signal); ac.abort();
+    err = null; try { await p; } catch(e) { err = e; }
+    eq(err && err.name, 'AbortError', 'cancel propagates as AbortError');
+  };
+}
+
 console.log('\n── 1. Default boot: digest off, nothing on Home, state carries the record ──');
 {
   const { w, d } = boot();
@@ -391,4 +428,4 @@ console.log('\n── 8. Full pipeline against a fake Gmail + fake Ollama ──
     process.exit(fail ? 1 : 0);
   });
 }
-function await_(fn) { fn().catch(e => { console.error(e); process.exit(1); }); }
+function await_(fn) { streamTests().then(fn).catch(e => { console.error(e); process.exit(1); }); }
