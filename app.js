@@ -369,9 +369,28 @@ function liveTimerRecord(t) {
   };
 }
 
+/* Build number of the state schema. Bumped whenever gatherState() learns a
+ * new top-level key (digest was build 2, digest tasks build 3). Lets a newer
+ * device recognise a cloud copy written by an older build, which cannot have
+ * carried the newer fields. */
+const STATE_BUILD = 3;
+const STATE_KNOWN_KEYS = new Set(['version', 'build', 'wokenUp', 'timerDefaults', 'timers', 'todoIdCounter',
+  'taskIdCounter', 'todoLists', 'dbdTasks', 'dbdIdCounter', 'budget', 'purchaseIdCounter', 'views', 'theme',
+  'digest', 'calendar']);
+/* Top-level keys this build does not understand, carried through untouched so
+ * an older device never strips what a newer one wrote (see syncApplyRemote). */
+let stateExtra = {};
+function stateCaptureExtra(state) {
+  stateExtra = {};
+  if (!state || typeof state !== 'object') return;
+  Object.keys(state).forEach(k => { if (!STATE_KNOWN_KEYS.has(k)) stateExtra[k] = state[k]; });
+}
+
 function gatherState() {
   return {
+    ...stateExtra,
     version: 1,
+    build: STATE_BUILD,
     wokenUp,
     timerDefaults: TIMER_DEFAULTS,
     timers: timers.map(liveTimerRecord),
@@ -403,6 +422,7 @@ function gatherState() {
 function applyState(state) {
   const st = decompressState(state);
   if (!st || st.version !== 1) { showToast('Invalid or unsupported file.'); return; }
+  stateCaptureExtra(st);
   wokenUp = !!st.wokenUp;
   if (st.timerDefaults) TIMER_DEFAULTS = st.timerDefaults;
   timers = st.timers.map(t => ({
@@ -458,6 +478,7 @@ function loadFromLocal() {
     if (!raw) return false;
     const state = JSON.parse(raw);
     if (!state || state.version !== 1) return false;
+    stateCaptureExtra(state);
     wokenUp = !!state.wokenUp;
     if (state.timerDefaults) TIMER_DEFAULTS = state.timerDefaults;
     timers = state.timers.map(t => ({
@@ -4723,10 +4744,22 @@ function syncConfigured() {
  * determine the remaining time — so mask `seconds` on running timers
  * to keep the fingerprint stable while a timer runs. */
 function syncFingerprint(state) {
-  return JSON.stringify({
+  return JSON.stringify(syncCanon({
     ...state,
     timers: (state.timers || []).map(t => t.running ? { ...t, seconds: -1 } : t),
-  });
+  }));
+}
+/* Key order is not identity: a device that re-normalises a record on load
+ * (e.g. digest.last) must produce the same fingerprint as the one that wrote
+ * it, or the two ping-pong the same content back and forth. */
+function syncCanon(v) {
+  if (Array.isArray(v)) return v.map(syncCanon);
+  if (v && typeof v === 'object') {
+    const o = {};
+    Object.keys(v).sort().forEach(k => { if (v[k] !== undefined) o[k] = syncCanon(v[k]); });
+    return o;
+  }
+  return v;
 }
 
 /* Short stable hash of a fingerprint, persisted in sync meta as
@@ -4846,11 +4879,35 @@ function syncCommitFormat() {
 /* Apply a remote state through the standard load path, then let the
  * normal save machinery detect any follow-up local diff (e.g. a budget
  * rollover triggered by the incoming state) and push it back. */
+let syncApplyTimes = [];        // recent remote applies, for bounce detection
+let syncBouncing   = false;     // true once we've decided another device is fighting us
+const SYNC_BOUNCE_N  = 4;       // applies …
+const SYNC_BOUNCE_MS = 90000;   // … within this window = a loop, not a person editing
+
 function syncApplyRemote(remoteStr, remoteUpdatedAt) {
   let remoteFp = null;
+  const now = Date.now();
+  syncApplyTimes = syncApplyTimes.filter(t => now - t < SYNC_BOUNCE_MS);
+  syncApplyTimes.push(now);
+  const bouncing = syncApplyTimes.length >= SYNC_BOUNCE_N;
+  /* A cloud copy written by an older build cannot carry fields it never knew
+   * about (digest, suggested tasks, …). Missing there does not mean "the user
+   * removed it" — so keep this device's copy of any top-level field the
+   * remote lacks, instead of letting the old build silently erase it. */
+  let effective = remoteStr;
+  try {
+    const remote = JSON.parse(remoteStr);
+    if (remote && typeof remote === 'object' && (Number(remote.build) || 1) < STATE_BUILD) {
+      const local = gatherState();
+      let patched = false;
+      Object.keys(local).forEach(k => { if (!(k in remote)) { remote[k] = local[k]; patched = true; } });
+      remote.build = STATE_BUILD;
+      if (patched) effective = JSON.stringify(remote);
+    }
+  } catch(e) {}
   syncApplying = true;
   try {
-    localStorage.setItem(LS_KEY, remoteStr);
+    localStorage.setItem(LS_KEY, effective);
     if (!loadFromLocal()) return;             // corrupt payload — keep local
     calSave();
     calPruneDays();
@@ -4872,9 +4929,26 @@ function syncApplyRemote(remoteStr, remoteUpdatedAt) {
     else syncLastSyncAt = Date.now();
     syncApplying = false;
   }
+  if (bouncing && !syncBouncing) {
+    syncBouncing = true;
+    console.warn('[sync] remote applies are bouncing — another device is probably running an older Worky build');
+    showToast('Sync keeps bouncing — update Worky on your other devices (close and reopen the app there).');
+  } else if (!bouncing) {
+    if (syncBouncing) syncBouncing = false;
+    showToast('Synced from cloud ✓');
+  }
   syncUpdateUI();
-  showToast('Synced from cloud ✓');
-  saveToLocal();   // persists rollover diffs; pushes them if they exist
+  /* Persist any follow-up diff (rollover, or fields we protected above).
+   * Normally that diff is pushed back so the cloud converges. While bouncing
+   * the push is the fuel for the loop, so keep the diff local and let the
+   * user's next real edit carry it — without the other device updating,
+   * nothing we push would stick anyway. */
+  if (bouncing) {
+    syncApplying = true;
+    try { saveToLocal(); syncLastSeenFp = syncFingerprint(gatherState()); } finally { syncApplying = false; }
+  } else {
+    saveToLocal();
+  }
 }
 
 /* Realtime listener — also performs the initial reconcile on connect. */
@@ -5075,7 +5149,9 @@ function syncUpdateUI() {
     const when = syncLastSyncAt
       ? ` · last sync ${new Date(syncLastSyncAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
       : '';
-    line.textContent = `Syncing as ${syncUser.email || 'Google account'}${when}`;
+    line.textContent = syncBouncing
+      ? `Syncing as ${syncUser.email || 'Google account'}${when} — changes keep bouncing with another device. It is probably running an older version of Worky: fully close and reopen the app there.`
+      : `Syncing as ${syncUser.email || 'Google account'}${when}`;
     btn.textContent = 'Sign out';
   } else {
     const meta = syncLoadMeta();
@@ -5731,7 +5807,12 @@ function normalizeDigest(v) {
   return out;
 }
 /* Suggested tasks: { id, title, why, due:'YYYY-MM-DD'|'', section, added:<dbd id>|0 } */
-function digestNormalizeTasks(arr) {
+/* `resolve` = the tasks come fresh from the model or the sample: relative
+ * words ("friday") are resolved and past dates clamped to today. On a plain
+ * load (localStorage, cloud) dates are kept verbatim so that normalising a
+ * record twice yields exactly the same record — anything else makes two
+ * devices disagree about the same digest and sync it back and forth. */
+function digestNormalizeTasks(arr, resolve) {
   const out = [];
   const seen = new Set();
   (Array.isArray(arr) ? arr : []).forEach(t => {
@@ -5745,7 +5826,7 @@ function digestNormalizeTasks(arr) {
       id: out.length + 1,
       title,
       why: String(t.why || '').replace(/\s+/g, ' ').trim().slice(0, 200),
-      due: digestNormalizeDue(t.due),
+      due: resolve ? digestNormalizeDue(t.due) : (/^\d{4}-\d{2}-\d{2}$/.test(String(t.due || '')) ? String(t.due) : ''),
       section: ['jobs', 'newsletter', 'misc'].includes(t.section) ? t.section : 'misc',
       added: Number(t.added) > 0 ? Number(t.added) : 0,
     });
@@ -6135,7 +6216,7 @@ function digestParseTasks(raw) {
   try {
     const obj = JSON.parse(txt.slice(a, b + 1));
     if (!obj || !Array.isArray(obj.tasks)) return null;
-    return digestNormalizeTasks(obj.tasks);
+    return digestNormalizeTasks(obj.tasks, true);
   } catch(e) { return null; }
 }
 function digestTasksFromActions(md) {
@@ -6146,7 +6227,7 @@ function digestTasksFromActions(md) {
     const title = m[1].replace(/\*\*/g, '').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').trim();
     if (title) items.push({ title, why: '', due: '', section: 'misc' });
   });
-  return digestNormalizeTasks(items);
+  return digestNormalizeTasks(items, true);
 }
 
 async function digestRunNow() {
@@ -6162,6 +6243,7 @@ async function digestRunNow() {
     if (!emails.length) throw new DigestError(`No emails in the last ${eng.hours}h.`, 'empty');
     const { markdown, tasks } = await digestBuild(emails, signal);
     digestGet().last = { at: Date.now(), markdown, tasks, count: emails.length, model: eng.model, source: 'laptop' };
+    digest = normalizeDigest(digest);   // canonical shape, same as after a reload
     digestRun = null;
     digestCollapsed = false;
     saveToLocal();
@@ -6190,7 +6272,8 @@ function digestDismissError() { digestRun = null; renderHome(); }
 /* ── sample digest: shows the card without Gmail or Ollama ── */
 function digestLoadSample() {
   digestGet().enabled = true;
-  digestGet().last = { at: Date.now(), markdown: DIGEST_SAMPLE_MD, tasks: digestNormalizeTasks(DIGEST_SAMPLE_TASKS), count: 23, model: 'sample', source: 'sample' };
+  digestGet().last = { at: Date.now(), markdown: DIGEST_SAMPLE_MD, tasks: digestNormalizeTasks(DIGEST_SAMPLE_TASKS, true), count: 23, model: 'sample', source: 'sample' };
+  digest = normalizeDigest(digest);   // canonical shape, same as after a reload
   digestRun = null;
   digestCollapsed = false;
   saveToLocal();

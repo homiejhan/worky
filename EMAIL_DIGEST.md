@@ -88,3 +88,21 @@ end, state round trip, redirect routing, renderer safety. `test_theme.js` still 
 - The laptop must be on and Ollama running to *generate*; any signed-in device can *read*
   the last result.
 - Local dev at `localhost:8000` still redirects OAuth to GitHub Pages (existing limitation).
+
+## Sync notes (added after the "digest keeps reverting" bug)
+
+A device running an older Worky build does not know the `digest` field, so when it
+applied a newer cloud copy it dropped the field and pushed the stripped state back —
+newer devices then "synced from cloud" and lost the digest, over and over. Three
+changes in `app.js` make that impossible to repeat:
+
+- State carries a `build` number and unknown top-level fields pass straight through
+  `loadFromLocal → gatherState`, so a build never strips what a newer one wrote.
+- The sync fingerprint is canonical (sorted keys), so re-normalising a record on load is
+  not a "change".
+- When a cloud copy from an older build lacks fields this device has, the local values
+  are kept; if applies start bouncing (4 in 90 s) the device stops pushing back and the
+  Settings line says which device to update.
+
+Devices already on an old build still need one refresh (desktop: hard reload; iPhone:
+fully close and reopen the PWA). `node test_sync.js` covers all three scenarios.

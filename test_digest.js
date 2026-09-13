@@ -1,5 +1,5 @@
 /* Email digest — headless tests (node test_digest.js; needs `npm i jsdom`). */
-const { JSDOM } = require('/home/claude/node_modules/jsdom');
+const { JSDOM } = require('jsdom');
 const fs = require('fs');
 const path = require('path');
 
