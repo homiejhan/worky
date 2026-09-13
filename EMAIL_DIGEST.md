@@ -81,13 +81,37 @@ it) and runs. Editing the schedule claims any already-passed slot instead of run
 card says so and the slot is skipped, not retried every minute. Worky has to be open for a
 scheduled run — it's a browser app; a true background cron is the hosted/backend step.
 
+## Run on another device (phone asks, laptop works)
+
+Settings → Email Digest → **Use this device to run digests** — turn this on only on the
+machine with Ollama (give it a name in the box below the toggle; it defaults to "Windows
+PC", "Mac", …). Every other signed-in device shows **Run on another device** instead of
+Run digest. Pressing it writes a request into synced state (`digest.request`); the runner
+device picks it up on its next sync event or minute tick, claims it, runs the normal
+pipeline, relays coarse progress back (phase, n of m calls, at most every 8 s), and
+finishes by writing the digest and suggestions as usual — the request is then cleared and
+the other devices show the result with "from another device" in the meta line.
+
+What the requester sees: *Sent to your other device* (after 3 min with no runner: a hint to
+check that Worky is open on the computer with the toggle on) → *jhan_laptop is running it —
+Summarizing …* with a progress bar → the digest. Cancel works at every stage; a runner
+that goes silent for 10 minutes (laptop asleep) is reported so you can retry.
+
+**Gmail on the runner.** The one-hour token would make an unattended laptop useless, so a
+runner with an expired token and work to do renews it with a `prompt=none` round trip
+through Google (silent while your Google session is alive; `login_hint` is the account
+you connected). The work is picked up again after the redirect. Never more than once per
+20 minutes; if Google needs interaction the card says so and the request is failed
+rather than left hanging. Sleep-proofing the laptop itself (power settings) is still on you.
+
 ## Where things live
 
 | Thing | Where | Synced |
 |---|---|---|
-| `digest.enabled`, `digest.last {at, markdown, count, model, source}`, `digest.suggestions[]`, `digest.schedule`, `digest.lastScheduled` | app state (`dg` compressed) | yes |
+| `digest.enabled`, `digest.last {at, markdown, count, model, source}`, `digest.suggestions[]`, `digest.schedule`, `digest.lastScheduled`, `digest.request` | app state (`dg` compressed) | yes |
 | Gmail token | `localStorage focus-gmail-token` | no |
-| Ollama URL, model, autorun | `localStorage focus-digest-engine` | no |
+| Ollama URL, model, autorun, device name | `localStorage focus-digest-engine` | no |
+| Gmail account (for silent renewal), last renewal attempt | `localStorage focus-gmail-email`, `focus-gmail-renew` | no |
 | Card collapsed | `localStorage focus-digest-ui` | no |
 
 Files touched: `app.js` (EMAIL DIGEST section + hooks in config, state

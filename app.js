@@ -4929,6 +4929,7 @@ function syncApplyRemote(remoteStr, remoteUpdatedAt) {
     else syncLastSyncAt = Date.now();
     syncApplying = false;
   }
+  try { digestOnRemoteApplied(); } catch(e) {}
   if (bouncing && !syncBouncing) {
     syncBouncing = true;
     console.warn('[sync] remote applies are bouncing — another device is probably running an older Worky build');
@@ -5804,8 +5805,9 @@ const DIGEST_SUG_MEMORY_MS = 14 * 86400000;   // how long accepted/dismissed tit
 const DIGEST_SUG_MAX = 120;
 
 function normalizeDigest(v) {
-  const out = { enabled: false, last: null, suggestions: [], sugIdCounter: 1, schedule: { enabled: false, times: [] }, lastScheduled: '' };
+  const out = { enabled: false, last: null, suggestions: [], sugIdCounter: 1, schedule: { enabled: false, times: [] }, lastScheduled: '', request: null };
   if (!v || typeof v !== 'object') return out;
+  out.request = digestNormalizeRequest(v.request);
   out.enabled = !!v.enabled;
   const l = v.last;
   if (l && typeof l === 'object' && typeof l.markdown === 'string' && l.markdown.trim()) {
@@ -5836,6 +5838,29 @@ function normalizeDigest(v) {
   }
   out.lastScheduled = typeof v.lastScheduled === 'string' ? v.lastScheduled.slice(0, 16) : '';
   return out;
+}
+/* A run request: one device asks, the device that can run Ollama answers.
+ * { id, at, by, status: pending|running|done|failed, runner, startedAt,
+ *   updatedAt, phase, done, total, note, error, doneAt } — synced. */
+const DIGEST_REQ_STATUSES = ['pending', 'running', 'done', 'failed'];
+function digestNormalizeRequest(r) {
+  if (!r || typeof r !== 'object' || !(Number(r.id) > 0)) return null;
+  const str = (x, n) => typeof x === 'string' ? x.slice(0, n) : '';
+  return {
+    id: Number(r.id),
+    at: Number(r.at) || 0,
+    by: str(r.by, 40),
+    status: DIGEST_REQ_STATUSES.includes(r.status) ? r.status : 'pending',
+    runner: str(r.runner, 40),
+    startedAt: Number(r.startedAt) || 0,
+    updatedAt: Number(r.updatedAt) || 0,
+    phase: str(r.phase, 20),
+    done: Number(r.done) || 0,
+    total: Number(r.total) || 0,
+    note: str(r.note, 60),
+    error: str(r.error, 300),
+    doneAt: Number(r.doneAt) || 0,
+  };
 }
 function digestNormalizeSuggestions(arr) {
   const out = [];
@@ -5947,6 +5972,7 @@ function digestRecord() {
     sugIdCounter: d.sugIdCounter,
     schedule: { enabled: d.schedule.enabled, times: d.schedule.times.slice() },
     lastScheduled: d.lastScheduled,
+    request: d.request ? { ...d.request } : null,
   };
 }
 function compressDigest(d) {
@@ -5957,6 +5983,7 @@ function compressDigest(d) {
   if (n.sugIdCounter > 1) o.sn = n.sugIdCounter;
   if (n.schedule.enabled || n.schedule.times.length) o.sc = { en: n.schedule.enabled ? 1 : 0, t: n.schedule.times };
   if (n.lastScheduled) o.ls = n.lastScheduled;
+  if (n.request) o.rq = n.request;
   return o;
 }
 function decompressDigest(c) {
@@ -5969,6 +5996,7 @@ function decompressDigest(c) {
     sugIdCounter: c.sn,
     schedule: c.sc ? { enabled: !!c.sc.en, times: c.sc.t } : undefined,
     lastScheduled: c.ls,
+    request: c.rq,
   });
 }
 
@@ -5987,7 +6015,8 @@ function digestEngineGet() {
     url:   (saved && typeof saved.url === 'string' && saved.url.trim()) ? saved.url.trim().replace(/\/+$/, '') : DIGEST_ENGINE_DEFAULT_URL,
     model: (saved && typeof saved.model === 'string') ? saved.model.trim() : '',
     numCtx: (saved && Number(saved.numCtx) >= 4096) ? Number(saved.numCtx) : 12288,
-    autorun: !!(saved && saved.autorun),   // this device runs the scheduled digests
+    autorun: !!(saved && saved.autorun),   // this device runs scheduled and requested digests
+    deviceName: (saved && typeof saved.deviceName === 'string' && saved.deviceName.trim()) ? saved.deviceName.trim().slice(0, 40) : '',
   };
   return digestEngine;
 }
@@ -5996,6 +6025,25 @@ function digestEngineSave(patch) {
   try { localStorage.setItem(DIGEST_ENGINE_LS_KEY, JSON.stringify(e)); } catch(err) {}
   return e;
 }
+/* Human name for this device, shown to the other devices ("MacBook is running it") */
+function digestDeviceName() {
+  const eng = digestEngineGet();
+  if (eng.deviceName) return eng.deviceName;
+  const ua = navigator.userAgent || '';
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/iPad/.test(ua)) return 'iPad';
+  if (/Android/.test(ua)) return 'Android phone';
+  if (/Macintosh/.test(ua)) return 'Mac';
+  if (/Windows/.test(ua)) return 'Windows PC';
+  if (/Linux/.test(ua)) return 'Linux computer';
+  return 'this device';
+}
+/* Can this device produce a digest right now? */
+function digestCanRunHere() { return gmailIsConnected() && !!digestEngineGet().model; }
+/* Is this device the one that answers requests and the schedule? */
+function digestIsRunner() { const e = digestEngineGet(); return !!(e.autorun && e.model); }
+/* Should Run here just ask another device instead? */
+function digestShouldRequest() { return !digestCanRunHere() && !!syncUser; }
 function digestUiLoad() {
   try { digestCollapsed = !!JSON.parse(localStorage.getItem(DIGEST_UI_LS_KEY))?.collapsed; } catch(e) {}
 }
@@ -6026,28 +6074,68 @@ function gmailIsConnected() { return !!(gmailToken && Date.now() < gmailToken.ex
 /* Same OAuth client + redirect as Calendar and Cloud Sync; the state tag
  * routes this redirect to gmailHandleRedirect. Full-page redirect (like
  * sync sign-in) so it also works inside the iOS PWA. */
-function gmailConnect() {
+const GMAIL_EMAIL_LS_KEY = 'focus-gmail-email';
+const GMAIL_RENEW_LS_KEY = 'focus-gmail-renew';     // { at, ok } — last silent renewal attempt
+const GMAIL_RENEW_MIN_GAP_MS = 20 * 60000;
+function gmailConnect(opts) {
+  const silent = !!(opts && opts.silent);
+  let email = '';
+  try { email = localStorage.getItem(GMAIL_EMAIL_LS_KEY) || ''; } catch(e) {}
   const params = new URLSearchParams({
     client_id:     GCAL_CLIENT_ID,
     redirect_uri:  GCAL_REDIRECT,
     response_type: 'token',
     scope:         GMAIL_SCOPES,
-    prompt:        'select_account',
+    prompt:        silent ? 'none' : 'select_account',
     include_granted_scopes: 'true',
     state:         DIGEST_STATE_TAG,
   });
+  if (silent && email) params.set('login_hint', email);
   window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
+}
+/* The one-hour token is the weak spot of an unattended runner. When it has
+ * expired and there is work to do, a runner device renews it with a
+ * prompt=none round trip through Google: no interaction if the Google
+ * session is alive, and the pending work is picked up again after the
+ * redirect (state is in localStorage / the cloud). Never more than once per
+ * 20 minutes, and never on a device that is not a runner. Returns true when
+ * it navigated away. */
+function gmailTryRenew() {
+  if (!digestIsRunner() || gmailIsConnected()) return false;
+  let last = null;
+  try { last = JSON.parse(localStorage.getItem(GMAIL_RENEW_LS_KEY)); } catch(e) {}
+  if (last && Date.now() - (last.at || 0) < GMAIL_RENEW_MIN_GAP_MS) return false;
+  try { localStorage.setItem(GMAIL_RENEW_LS_KEY, JSON.stringify({ at: Date.now(), ok: false })); } catch(e) {}
+  gmailConnect({ silent: true });
+  return true;
+}
+function gmailRenewJustFailed() {
+  let last = null;
+  try { last = JSON.parse(localStorage.getItem(GMAIL_RENEW_LS_KEY)); } catch(e) {}
+  return !!(last && !last.ok && last.error && Date.now() - (last.at || 0) < GMAIL_RENEW_MIN_GAP_MS);
 }
 function gmailHandleRedirect() {
   const hash = window.location.hash.slice(1);
-  if (!hash.includes('access_token')) return;
+  if (!hash.includes('access_token') && !hash.includes('error=')) return;
   const params = new URLSearchParams(hash);
   if (params.get('state') !== DIGEST_STATE_TAG) return;   // calendar / sync — not ours
+  history.replaceState(null, '', window.location.pathname);
+  if (params.get('error')) {
+    /* a silent renewal that needed interaction — remember so we don't loop */
+    try { localStorage.setItem(GMAIL_RENEW_LS_KEY, JSON.stringify({ at: Date.now(), ok: false, error: params.get('error') })); } catch(e) {}
+    const req = digestGet().request;
+    if (req && req.status === 'running' && req.runner === digestDeviceName()) {
+      digestRequestFinish('failed', `Gmail needs you to sign in again on ${digestDeviceName()} (${params.get('error')}).`);
+    }
+    digestRun = { phase: 'error', error: 'Gmail could not be renewed automatically — press Connect Gmail.', kind: 'auth' };
+    renderHome();
+    return;
+  }
   const token = params.get('access_token');
   const expiresIn = parseInt(params.get('expires_in') || '3600');
-  history.replaceState(null, '', window.location.pathname);
   if (!token) return;
   gmailSaveToken({ access_token: token, expires_at: Date.now() + expiresIn * 1000 });
+  try { localStorage.setItem(GMAIL_RENEW_LS_KEY, JSON.stringify({ at: Date.now(), ok: true })); } catch(e) {}
   if (!digestGet().enabled) { digestGet().enabled = true; saveToLocal(); }
   showToast('Gmail connected ✓');
   gmailFetchProfile().then(() => { renderSettings(); renderHome(); });
@@ -6061,13 +6149,17 @@ function gmailDisconnect() {
   showToast('Gmail disconnected');
 }
 async function gmailFetchProfile() {
+  /* (email is also kept separately so a silent renewal can pass login_hint) */
   if (!gmailIsConnected()) return;
   try {
     const r = await fetch(`${GMAIL_API}/users/me/profile`, { headers: gmailHeaders() });
     if (r.status === 401) { gmailSaveToken(null); return; }
     if (!r.ok) return;
     const p = await r.json();
-    if (p && p.emailAddress) gmailSaveToken({ ...gmailToken, email: p.emailAddress });
+    if (p && p.emailAddress) {
+      gmailSaveToken({ ...gmailToken, email: p.emailAddress });
+      try { localStorage.setItem(GMAIL_EMAIL_LS_KEY, p.emailAddress); } catch(e) {}
+    }
   } catch(e) {}
 }
 function gmailHeaders() { return { Authorization: `Bearer ${gmailToken.access_token}` }; }
@@ -6228,8 +6320,10 @@ async function ollamaListModels(url) {
 
 /* ── pipeline ── */
 function digestProgress(phase, done, total, note) {
+  const changed = !digestRun || digestRun.phase !== phase;
   digestRun = { phase, done, total, note: note || '', error: null };
   digestPaintProgress();
+  digestRelayProgress(changed);
 }
 function digestChunk(emails, perEmailBudget) {
   const chunks = [];
@@ -6322,13 +6416,21 @@ function digestTasksFromActions(md) {
   return digestNormalizeTasks(items, true);
 }
 
+let digestActiveRequest = 0;    // request id this device is currently serving
+let digestRelayAt = 0;          // last time progress was pushed to the cloud
+
 async function digestRunNow(opts) {
   if (digestRun && digestAbort) return;   // already running
   const scheduled = !!(opts && opts.scheduled);
+  const serving = Number(opts && opts.requestId) || 0;
   const eng = digestEngineGet();
+  /* Not able to run here (phone, no Ollama) but signed in → hand the job to
+   * the runner device and watch its progress through the cloud. */
+  if (!serving && !scheduled && digestShouldRequest()) { digestRequestRun(); return; }
   if (!gmailIsConnected()) { digestRun = { phase: 'error', error: 'Connect Gmail in Settings first.', kind: 'auth' }; digestPaintProgress(); return; }
   if (!eng.model) { digestRun = { phase: 'error', error: 'Pick an Ollama model in Settings → Email Digest.', kind: 'engine' }; digestPaintProgress(); return; }
   digestAbort = new AbortController();
+  digestActiveRequest = serving;
   const signal = digestAbort.signal;
   try {
     digestProgress('fetching', 0, 0);
@@ -6336,8 +6438,9 @@ async function digestRunNow(opts) {
     if (!emails.length) throw new DigestError('No emails in the last 24 hours.', 'empty');
     const { markdown, tasks } = await digestBuild(emails, signal);
     const at = Date.now();
-    digestGet().last = { at, markdown, count: emails.length, model: eng.model, source: scheduled ? 'scheduled' : 'laptop' };
+    digestGet().last = { at, markdown, count: emails.length, model: eng.model, source: serving ? 'remote' : scheduled ? 'scheduled' : 'laptop' };
     const fresh = digestMergeSuggestions(tasks, at);
+    if (serving) digestRequestFinish('done', '', serving);
     digest = normalizeDigest(digest);   // canonical shape, same as after a reload
     digestRun = null;
     digestCollapsed = false;
@@ -6345,15 +6448,20 @@ async function digestRunNow(opts) {
     renderHome();
     showToast(fresh ? `Email digest ready ✓ ${fresh} new suggestion${fresh === 1 ? '' : 's'}` : 'Email digest ready ✓');
   } catch(e) {
-    if (e && e.name === 'AbortError') { digestRun = null; }
-    else {
+    if (e && e.name === 'AbortError') {
+      digestRun = null;
+      if (serving) digestRequestFinish('failed', `Cancelled on ${digestDeviceName()}.`, serving);
+    } else {
       console.warn('Digest failed:', e);
-      digestRun = { phase: 'error', error: e && e.message ? e.message : String(e), kind: e && e.kind };
+      const msg = e && e.message ? e.message : String(e);
+      digestRun = { phase: 'error', error: msg, kind: e && e.kind };
       if (e && e.kind === 'auth') gmailSaveToken(null);
+      if (serving) digestRequestFinish('failed', `${digestDeviceName()}: ${msg}`, serving);
     }
     renderHome();
   } finally {
     digestAbort = null;
+    digestActiveRequest = 0;
   }
 }
 function digestCancel() {
@@ -6361,6 +6469,83 @@ function digestCancel() {
   digestRun = null;
   digestAbort = null;
   renderHome();
+}
+
+/* ── run requests: phone asks, runner answers ── */
+function digestRequestRun() {
+  const d = digestGet();
+  const r = d.request;
+  if (r && (r.status === 'pending' || (r.status === 'running' && !digestRequestStale(r)))) { renderHome(); return; }   // one at a time
+  d.request = digestNormalizeRequest({ id: Date.now(), at: Date.now(), by: digestDeviceName(), status: 'pending', updatedAt: Date.now() });
+  saveToLocal();
+  renderHome();
+  showToast(digestIsRunner() ? 'Queued — will run when Gmail is back' : 'Asked your other devices to run it');
+  digestServiceRequests();   // this device may be the runner after all
+}
+function digestRequestCancel() {
+  const d = digestGet();
+  if (!d.request) return;
+  if (d.request.status === 'running' && d.request.runner === digestDeviceName() && digestAbort) { digestCancel(); return; }
+  d.request = null;
+  saveToLocal();
+  renderHome();
+}
+function digestRequestFinish(status, error, id) {
+  const d = digestGet();
+  if (!d.request || (id && d.request.id !== id)) return;
+  Object.assign(d.request, { status, error: error || '', updatedAt: Date.now(), doneAt: status === 'done' ? Date.now() : d.request.doneAt });
+  if (status === 'done') d.request = null;          // the result itself is the notification
+  saveToLocal();
+}
+const DIGEST_REQ_PENDING_HINT_MS = 3 * 60000;   // no runner yet → show the hint
+const DIGEST_REQ_STALE_MS        = 10 * 60000;  // runner silent this long → treat as gone
+function digestRequestStale(r) { return r.status === 'running' && Date.now() - (r.updatedAt || r.startedAt || 0) > DIGEST_REQ_STALE_MS; }
+/* Runner side: called after every remote apply, on every scheduler tick,
+ * and at init. Claims a pending request and runs it — or, if this runner's
+ * Gmail token has lapsed, renews it first (the request stays claimed and is
+ * resumed after the redirect). */
+function digestServiceRequests() {
+  const d = digestGet();
+  const r = d.request;
+  if (!r || !digestIsRunner() || !d.enabled) return false;
+  if (digestRun && digestAbort) return false;         // busy
+  const me = digestDeviceName();
+  const mine = r.status === 'running' && r.runner === me;
+  if (r.status !== 'pending' && !mine) return false;  // someone else's, or finished
+  if (!mine) {
+    Object.assign(r, { status: 'running', runner: me, startedAt: Date.now(), updatedAt: Date.now(), phase: 'claimed', done: 0, total: 0, note: '', error: '' });
+    saveToLocal();
+  }
+  if (!gmailIsConnected()) {
+    if (gmailTryRenew()) return true;                 // navigating away; resumed on return
+    digestRequestFinish('failed', `Gmail session expired on ${me} — open Worky there and press Connect Gmail.`, r.id);
+    renderHome();
+    return false;
+  }
+  digestRunNow({ requestId: r.id });
+  return true;
+}
+let digestSeenLastAt = 0;
+function digestOnRemoteApplied() {
+  const d = digestGet();
+  /* a result from another device just landed → say so once */
+  if (d.last && d.last.at !== digestSeenLastAt) {
+    if (digestSeenLastAt && d.last.source === 'remote') showToast('Email digest arrived from your other device ✓');
+    digestSeenLastAt = d.last.at;
+  }
+  digestServiceRequests();
+}
+/* progress relay: coarse updates to the cloud so the requesting phone can watch */
+function digestRelayProgress(force) {
+  if (!digestActiveRequest) return;
+  const d = digestGet();
+  const r = d.request;
+  if (!r || r.id !== digestActiveRequest || !digestRun) return;
+  const now = Date.now();
+  if (!force && now - digestRelayAt < 8000 && r.phase === digestRun.phase) return;
+  digestRelayAt = now;
+  Object.assign(r, { phase: digestRun.phase, done: digestRun.done || 0, total: digestRun.total || 0, note: digestRun.note || '', updatedAt: now });
+  saveToLocal();
 }
 function digestDismissError() { digestRun = null; renderHome(); }
 
@@ -6470,7 +6655,7 @@ function digestMetaLine(last) {
   const bits = [sameDay ? `Today ${t}` : `${d} ${t}`];
   if (last.count) bits.push(`${last.count} emails`);
   if (last.source === 'sample') bits.push('sample data');
-  else if (last.model) bits.push(last.model + (last.source === 'scheduled' ? ' · scheduled' : ''));
+  else if (last.model) bits.push(last.model + (last.source === 'scheduled' ? ' · scheduled' : last.source === 'remote' ? ' · from another device' : ''));
   return bits.join(' \u00b7 ');
 }
 
@@ -6528,21 +6713,25 @@ function digestScheduleTick() {
   const eng = digestEngineGet();
   if (!eng.autorun || !eng.model) return false;
   if (digestRun && digestAbort) return false;   // already running
+  if (digestServiceRequests()) return true;     // a request from another device comes first
   const due = digestScheduleDue();
   if (!due) return false;
-  d.lastScheduled = due.key;                    // claim the slot even if the run fails — no retry storm
-  saveToLocal();
   if (!gmailIsConnected()) {
-    digestRun = { phase: 'error', error: 'Scheduled digest skipped — Gmail session expired. Connect Gmail again in Settings.', kind: 'auth' };
+    if (gmailTryRenew()) return true;           // slot stays unclaimed; picked up after the redirect
+    d.lastScheduled = due.key;                  // renewal not possible right now — skip this slot, don't retry every minute
+    saveToLocal();
+    digestRun = { phase: 'error', error: 'Scheduled digest skipped — Gmail session expired and could not be renewed. Press Connect Gmail.', kind: 'auth' };
     renderHome();
     return false;
   }
+  d.lastScheduled = due.key;                    // claim the slot even if the run fails — no retry storm
+  saveToLocal();
   digestRunNow({ scheduled: true });
   return true;
 }
 function digestScheduleStart() {
   clearInterval(digestSchedTimer);
-  digestSchedTimer = setInterval(digestScheduleTick, 60000);
+  digestSchedTimer = setInterval(() => { digestScheduleTick(); if (digestGet().request && !digestRun) digestPaintProgress(); }, 60000);
   digestScheduleTick();
 }
 function digestScheduleSet(patch) {
@@ -6565,9 +6754,65 @@ function digestScheduleAddTime(hhmm) {
 function digestScheduleRemoveTime(hhmm) {
   digestScheduleSet({ times: digestGet().schedule.times.filter(t => t !== hhmm) });
 }
+function digestRequestHtml() {
+  const d = digestGet();
+  const r = d.request;
+  if (!r) return '';
+  const me = digestDeviceName();
+  if (r.status === 'running' && r.runner === me && digestRun) return '';   // local progress covers it
+  if (r.status === 'failed') {
+    return `
+      <div class="dg-status error">
+        <div class="dg-status-text">${digestEsc(r.error || 'The other device could not finish the digest.')}</div>
+        <div class="dg-status-actions"><button class="dg-btn" onclick="digestRequestCancel(); digestRunNow()">Try again</button><button class="dg-btn ghost" onclick="digestRequestCancel()">Dismiss</button></div>
+      </div>`;
+  }
+  if (r.status === 'pending') {
+    const waited = Date.now() - r.at;
+    const hint = digestIsRunner()
+      ? 'Queued on this device.'
+      : waited > DIGEST_REQ_PENDING_HINT_MS
+        ? 'Nobody has picked it up yet. Is Worky open on your computer with "Use this device to run digests" turned on?'
+        : `Waiting for your computer to pick it up${r.by && r.by !== me ? ` (asked from ${r.by})` : ''}…`;
+    return `
+      <div class="dg-status">
+        <div class="dg-status-row">
+          <span class="dg-spinner"></span>
+          <div class="dg-status-text">Sent to your other device<span class="dg-status-sub">${digestEsc(hint)}</span></div>
+          <button class="dg-btn ghost" onclick="digestRequestCancel()">Cancel</button>
+        </div>
+      </div>`;
+  }
+  if (r.status === 'running') {
+    if (digestRequestStale(r)) {
+      return `
+        <div class="dg-status error">
+          <div class="dg-status-text">${digestEsc(r.runner || 'The other device')} stopped responding while running the digest (it may have gone to sleep).</div>
+          <div class="dg-status-actions"><button class="dg-btn" onclick="digestRequestCancel(); digestRunNow()">Try again</button><button class="dg-btn ghost" onclick="digestRequestCancel()">Dismiss</button></div>
+        </div>`;
+    }
+    const label = r.phase === 'claimed' ? 'Starting'
+      : r.phase === 'fetching' ? (r.total ? `Reading email ${r.done} of ${r.total}` : 'Finding recent email')
+      : r.phase === 'overview' ? 'Writing the overview'
+      : r.phase === 'tasks' ? 'Picking out tasks'
+      : `Summarizing ${r.note}`;
+    const sub = (r.phase === 'fetching' || r.phase === 'claimed') ? '' : `${r.done} of ${r.total} model calls done`;
+    const pct = r.total ? Math.round((r.done / r.total) * 100) : 0;
+    return `
+      <div class="dg-status">
+        <div class="dg-status-row">
+          <span class="dg-spinner"></span>
+          <div class="dg-status-text">${digestEsc(r.runner || 'Your other device')} is running it — ${digestEsc(label)}${sub ? `<span class="dg-status-sub">${digestEsc(sub)}</span>` : ''}</div>
+          <button class="dg-btn ghost" onclick="digestRequestCancel()">Cancel</button>
+        </div>
+        <div class="dg-track"><div class="dg-fill" style="width:${pct}%"></div></div>
+      </div>`;
+  }
+  return '';
+}
 function digestProgressHtml() {
   const r = digestRun;
-  if (!r) return '';
+  if (!r) return digestRequestHtml();
   if (r.phase === 'error') {
     const fix = r.kind === 'auth'
       ? `<button class="dg-btn" onclick="gmailConnect()">Connect Gmail</button>`
@@ -6606,14 +6851,22 @@ function homeDigestHtml() {
   if (!d.enabled) return '';
   const running = !!(digestRun && digestRun.phase !== 'error');
   const last = d.last;
-  const canRun = gmailIsConnected() && !!digestEngineGet().model;
-  const runBtn = running ? '' : `<button class="dg-btn" onclick="digestRunNow()" title="${canRun ? 'Read the last day of Gmail and summarize it' : 'Needs Gmail and an Ollama model (Settings)'}">Run digest</button>`;
+  const canRun = digestCanRunHere();
+  const req = d.request;
+  const reqActive = !!(req && (req.status === 'pending' || req.status === 'running'));
+  const remote = !canRun && digestShouldRequest();
+  const runBtn = (running || reqActive) ? '' : `<button class="dg-btn" onclick="digestRunNow()" title="${canRun ? 'Read the last day of Gmail and summarize it here' : remote ? 'Ask the device that runs Ollama to do it; the result syncs back here' : 'Needs Gmail and an Ollama model (Settings)'}">${remote ? 'Run on another device' : 'Run digest'}</button>`;
   const chevron = last ? `<button class="dg-chev ${digestCollapsed ? 'closed' : ''}" onclick="digestToggleCollapsed()" title="${digestCollapsed ? 'Expand' : 'Collapse'}" aria-label="Toggle digest">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>` : '';
   let body;
   if (last && !digestCollapsed) body = `${digestTasksHtml()}<div class="dg-md">${digestRenderMd(last.markdown)}</div>`;
   else if (last) body = '';
   else if (running) body = digestTasksHtml();
+  else if (reqActive) body = digestTasksHtml();
+  else if (remote) body = `${digestTasksHtml()}
+      <div class="dg-empty">
+        <div class="dg-empty-text">This device can't write the summary itself (that needs Ollama), but it can ask the computer that does. Press Run on another device; the result and the suggested tasks sync back here.</div>
+      </div>`;
   else if (!gmailIsConnected()) body = `
       <div class="dg-empty">
         <div class="dg-empty-text">Connect Gmail and Worky will read the last day of mail, sort it into news, newsletters, job updates and everything else, and write a two-minute summary here.</div>
@@ -6777,6 +7030,12 @@ function digestRenderSettings() {
     : '<span class="dg-sched-none">No times yet — add one above.</span>';
   const ar = $('digestAutorunToggle');
   if (ar) ar.checked = eng.autorun;
+  const dn = $('digestDeviceName');
+  if (dn && document.activeElement !== dn) { dn.value = eng.deviceName; dn.placeholder = digestDeviceName(); }
+  const rl = $('digestRunnerLine');
+  if (rl) rl.textContent = eng.autorun
+    ? `Requests from your other devices and the schedule run here${eng.model ? '' : ' once a model is picked'}. Keep Worky open; Gmail is renewed automatically while your Google session lasts.`
+    : 'Off — this device only asks another one to run digests.';
   const ss = $('digestSchedStatus');
   if (ss) {
     const next = digestNextRunLabel();
@@ -6831,6 +7090,7 @@ function bindDigest() {
   $('digestSchedAddBtn')?.addEventListener('click', () => { const inp = $('digestSchedTime'); digestScheduleAddTime(inp?.value); });
   $('digestSchedTime')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); digestScheduleAddTime(e.target.value); } });
   $('digestAutorunToggle')?.addEventListener('change', e => { digestEngineSave({ autorun: !!e.target.checked }); digestRenderSettings(); renderHome(); digestScheduleTick(); });
+  $('digestDeviceName')?.addEventListener('change', e => { digestEngineSave({ deviceName: (e.target.value || '').trim().slice(0, 40) }); digestRenderSettings(); });
 }
 
 const DIGEST_SAMPLE_MD = `## 🔝 Top of the inbox
@@ -7460,6 +7720,7 @@ function bindTour() {
   gmailLoadToken();
   digestUiLoad();
   gmailHandleRedirect();
+  digestSeenLastAt = digestGet().last ? digestGet().last.at : 0;
   digestScheduleStart();
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') digestScheduleTick(); });
   if (gmailIsConnected() && !gmailToken.email) gmailFetchProfile();

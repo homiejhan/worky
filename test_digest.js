@@ -105,8 +105,17 @@ console.log('\n── 0b. Scheduler: fires once per slot, only on the device tha
   const { w: w3, d: d3 } = boot({ storage: { 'focus-digest-engine': JSON.stringify({ url: 'http://localhost:11434', model: 'm', autorun: true }) } });
   w3.eval('Date.now = () => ' + new Date(2026, 8, 13, 6, 0).getTime());
   w3.digestGet().enabled = true; w3.digestScheduleSet({ enabled: true, times: ['07:00'] });
-  w3.eval('Date.now = () => ' + new Date(2026, 8, 13, 9, 30).getTime());
-  ok(!w3.digestScheduleTick(), 'no gmail → does not run');
+  const t930 = new Date(2026, 8, 13, 9, 30).getTime();
+  w3.eval('Date.now = () => ' + t930);
+  ok(w3.digestScheduleTick(), 'no gmail on a runner → tries a silent Gmail renewal first (navigates away)');
+  const renew = JSON.parse(w3.localStorage.getItem('focus-gmail-renew'));
+  ok(renew && renew.at === t930 && !renew.ok, 'renewal attempt recorded');
+  eq(w3.digestGet().lastScheduled, '', 'slot NOT claimed — it runs after the redirect brings a token back');
+  ok(!w3.digestScheduleTick(), 'a second tick within 20 min does not redirect again');
+  /* simulate: Google said interaction_required on the way back */
+  w3.localStorage.setItem('focus-gmail-renew', JSON.stringify({ at: t930, ok: false, error: 'interaction_required' }));
+  w3.eval('Date.now = () => ' + (t930 + 60000));
+  ok(!w3.digestScheduleTick(), 'renewal failed → this slot is skipped');
   ok(d3.querySelector('#homeContainer-d .dg-status-text') && /Gmail/.test(d3.querySelector('#homeContainer-d .dg-status-text').textContent), 'card explains the skip');
   eq(w3.digestGet().lastScheduled, '2026-09-13 07:00', 'slot claimed so it does not retry every minute');
 }

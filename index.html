@@ -460,15 +460,22 @@
             <button class="modal-primary" id="digestSchedAddBtn">Add time</button>
           </div>
           <div class="dg-sched-times" id="digestSchedTimes"></div>
-          <div class="settings-view-row">
-            <span class="settings-view-name">Use this device to run them</span>
-            <label class="gcal-toggle">
-              <input type="checkbox" id="digestAutorunToggle">
-              <span class="gcal-toggle-track"></span>
-            </label>
-          </div>
           <div class="theme-bg-status" id="digestSchedStatus"></div>
         </div>
+
+        <div class="dg-field-label">Which device does the work</div>
+        <div class="settings-view-row">
+          <span class="settings-view-name">Use this device to run digests</span>
+          <label class="gcal-toggle">
+            <input type="checkbox" id="digestAutorunToggle">
+            <span class="gcal-toggle-track"></span>
+          </label>
+        </div>
+        <div class="theme-bg-status" id="digestRunnerLine"></div>
+        <div class="theme-inline">
+          <input class="theme-text" id="digestDeviceName" type="text" maxlength="40" placeholder="This device's name" autocomplete="off" aria-label="This device's name">
+        </div>
+        <div class="modal-sub">Turn this on only where Ollama runs (a laptop that stays awake). Phones and other devices then press "Run on another device" and get the result through sync.</div>
       </div>
     </div>
 
