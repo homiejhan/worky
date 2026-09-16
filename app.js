@@ -1964,6 +1964,27 @@ function dbdAllEntries() {
   return out;
 }
 
+/* Start time (minutes from midnight) of the calendar event linked to an
+ * entry, or null when it has no linked event. */
+function dbdEntryStartMins(entry) {
+  const hit = taskLinkGet(taskLinkRef(entry.kind, entry.task.id));
+  return hit && hit.ev.start ? calTimeToMins(hit.ev.start) : null;
+}
+
+/* Order for Day by Day / Home: due date, then linked start time within the
+ * day (timed tasks first, ascending; untimed ones after), then creation. */
+function dbdCompare(a, b) {
+  if (a.task.due !== b.task.due) return a.task.due < b.task.due ? -1 : 1;
+  const ta = dbdEntryStartMins(a), tb = dbdEntryStartMins(b);
+  if (ta !== tb) {
+    if (ta === null) return 1;
+    if (tb === null) return -1;
+    return ta - tb;
+  }
+  if (a.kind !== b.kind) return a.kind === 'dbd' ? -1 : 1;
+  return a.task.id - b.task.id;
+}
+
 function dbdTagSelectHtml(entry) {
   const cur = entry.kind === 'list' ? String(entry.list.id) : '';
   const opts = [`<option value="">${cur ? 'No tag' : 'Tag'}</option>`]
@@ -2078,8 +2099,7 @@ function dbdRowHtml(entry, overdue) {
 function renderDbd() {
   const todayKey = dbdTodayKey();
   const all = dbdAllEntries();
-  const byDue = (a, b) => (a.task.due < b.task.due ? -1 : a.task.due > b.task.due ? 1
-    : a.kind === b.kind ? a.task.id - b.task.id : (a.kind === 'dbd' ? -1 : 1));
+  const byDue = dbdCompare;
 
   const overdue   = all.filter(e => !e.task.done && e.task.due < todayKey).sort(byDue);
   const upcoming  = all.filter(e => e.task.due >= todayKey).sort(byDue);
@@ -2910,8 +2930,7 @@ function homeDbdRow(entry, tone) {
 function homeDbdHtml() {
   const todayKey = dbdTodayKey();
   const all = dbdAllEntries();
-  const byDue = (a, b) => (a.task.due < b.task.due ? -1 : a.task.due > b.task.due ? 1
-    : a.kind === b.kind ? a.task.id - b.task.id : (a.kind === 'dbd' ? -1 : 1));
+  const byDue = dbdCompare;
   const overdue  = all.filter(e => !e.task.done && e.task.due <  todayKey).sort(byDue);
   const today    = all.filter(e =>                 e.task.due === todayKey).sort(byDue);
   const upcoming = all.filter(e => !e.task.done && e.task.due >  todayKey).sort(byDue).slice(0, 3);
