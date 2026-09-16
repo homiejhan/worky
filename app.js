@@ -151,7 +151,7 @@ const VIEW_DEFS = [
 let views = { timers: true, daily: true, lists: true, calendar: true, budget: true };
 
 /* Mobile swipe panels. Daily and My Lists share one "Lists" panel on
- * mobile (Daily on top, My Lists below — same as the desktop right
+ * mobile (My Lists on top, Daily below — same as the desktop right
  * panel), so a panel is visible when any of the views it hosts is on.
  * currentView holds a panel key. */
 const MOBILE_PANELS = [

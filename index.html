@@ -96,16 +96,7 @@
   <main class="right-panel" id="rightPanel">
     <div class="page-head">
       <h1 class="page-title">Lists</h1>
-      <p class="page-sub">Daily routines, dated tasks, and everything else.</p>
-    </div>
-
-    <div id="dailySection-d" data-view="daily" class="page-block">
-      <div class="panel-header">
-        <span class="section-label section-label-daily"><span class="section-dot"></span>Daily</span>
-        <button class="fmt-add-daily" id="addDailyBtn">+ Add list</button>
-      </div>
-      <div class="lists-grid" id="defaultContainer-d"></div>
-      <hr class="section-divider">
+      <p class="page-sub">Dated tasks, your lists, and daily routines.</p>
     </div>
 
     <div id="listsSection-d" data-view="lists" class="page-block">
@@ -130,6 +121,15 @@
       <div class="lists-grid" id="todoContainer-d">
         <div class="empty-state" id="emptyState-d">No lists yet.<br>Click “+ New list” to get started.</div>
       </div>
+      <hr class="section-divider">
+    </div>
+
+    <div id="dailySection-d" data-view="daily" class="page-block">
+      <div class="panel-header">
+        <span class="section-label section-label-daily"><span class="section-dot"></span>Daily</span>
+        <button class="fmt-add-daily" id="addDailyBtn">+ Add list</button>
+      </div>
+      <div class="lists-grid" id="defaultContainer-d"></div>
     </div>
   </main>
 </div>
@@ -190,20 +190,11 @@
         </button>
       </section>
 
-      <!-- Tab 2: Lists (Daily on top, My Lists below — mirrors the desktop right panel) -->
+      <!-- Tab 2: Lists (My Lists on top, Daily below — mirrors the desktop right panel) -->
       <section class="swipe-panel" data-view="lists">
         <div class="page-head page-head-lists">
           <h1 class="page-title">Lists</h1>
-          <p class="page-sub">Daily routines, dated tasks, and everything else.</p>
-        </div>
-
-        <div id="dailySection-m" data-view="daily" class="page-block">
-          <div class="panel-header">
-            <span class="section-label section-label-daily"><span class="section-dot"></span>Daily</span>
-            <button class="fmt-add-daily" id="addDailyBtn-m">+ Add list</button>
-          </div>
-          <div id="defaultContainer-m" class="lists-stack"></div>
-          <hr class="section-divider">
+          <p class="page-sub">Dated tasks, your lists, and daily routines.</p>
         </div>
 
         <div id="listsSection-m" data-view="lists" class="page-block">
@@ -228,6 +219,15 @@
           <div id="todoContainer-m" class="lists-stack">
             <div class="empty-state" id="emptyState-m">No lists yet.<br>Tap “+ New list” to get started.</div>
           </div>
+          <hr class="section-divider">
+        </div>
+
+        <div id="dailySection-m" data-view="daily" class="page-block">
+          <div class="panel-header">
+            <span class="section-label section-label-daily"><span class="section-dot"></span>Daily</span>
+            <button class="fmt-add-daily" id="addDailyBtn-m">+ Add list</button>
+          </div>
+          <div id="defaultContainer-m" class="lists-stack"></div>
         </div>
       </section>
 
