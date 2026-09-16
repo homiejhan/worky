@@ -317,7 +317,6 @@ input, textarea, select { font-family: var(--font-sans); color: var(--ink); }
 }
 .tab-home     { --tc: var(--hue-home); }
 .tab-timers   { --tc: var(--hue-timers); }
-.tab-daily    { --tc: var(--hue-daily); }
 .tab-lists    { --tc: var(--hue-lists); }
 .tab-calendar { --tc: var(--hue-calendar); }
 .tab-budget   { --tc: var(--hue-budget); }

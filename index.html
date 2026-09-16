@@ -145,19 +145,15 @@
       <span class="tab-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8.5" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M8 5.5v3l2 1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.2 1.8h3.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
       <span class="tab-lbl">Timers</span>
     </button>
-    <button class="tab-btn tab-daily" id="tab-2" data-view="daily">
-      <span class="tab-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3.2" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
-      <span class="tab-lbl">Daily</span>
-    </button>
-    <button class="tab-btn tab-lists" id="tab-3" data-view="lists">
+    <button class="tab-btn tab-lists" id="tab-2" data-view="lists">
       <span class="tab-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M5.5 4h8M5.5 8h8M5.5 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="2.6" cy="4" r="1.1" fill="currentColor"/><circle cx="2.6" cy="8" r="1.1" fill="currentColor"/><circle cx="2.6" cy="12" r="1.1" fill="currentColor"/></svg></span>
       <span class="tab-lbl">Lists</span>
     </button>
-    <button class="tab-btn tab-calendar" id="tab-4" data-view="calendar">
+    <button class="tab-btn tab-calendar" id="tab-3" data-view="calendar">
       <span class="tab-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 6.5h12" stroke="currentColor" stroke-width="1.5"/><path d="M5 1.5v3M11 1.5v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
       <span class="tab-lbl">Calendar</span>
     </button>
-    <button class="tab-btn tab-budget" id="tab-5" data-view="budget">
+    <button class="tab-btn tab-budget" id="tab-4" data-view="budget">
       <span class="tab-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="4" width="13" height="9.5" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M1.5 7h13" stroke="currentColor" stroke-width="1.5"/><circle cx="11" cy="10.4" r="1.1" fill="currentColor"/></svg></span>
       <span class="tab-lbl">Budget</span>
     </button>
@@ -194,46 +190,48 @@
         </button>
       </section>
 
-      <!-- Tab 2: Daily -->
-      <section class="swipe-panel" data-view="daily">
-        <div class="page-head page-head-daily">
-          <h1 class="page-title">Daily</h1>
-          <p class="page-sub">Routines that come back every day.</p>
-        </div>
-        <div class="panel-header">
-          <span class="section-label section-label-daily"><span class="section-dot"></span>Lists</span>
-          <button class="fmt-add-daily" id="addDailyBtn-m">+ Add list</button>
-        </div>
-        <div id="defaultContainer-m" class="lists-stack"></div>
-      </section>
-
-      <!-- Tab 3: My Lists -->
+      <!-- Tab 2: Lists (Daily on top, My Lists below — mirrors the desktop right panel) -->
       <section class="swipe-panel" data-view="lists">
         <div class="page-head page-head-lists">
-          <h1 class="page-title">My lists</h1>
-          <p class="page-sub">Dated tasks first, then everything else.</p>
+          <h1 class="page-title">Lists</h1>
+          <p class="page-sub">Daily routines, dated tasks, and everything else.</p>
         </div>
-        <div class="dbd-section-header">
-          <span class="section-sublabel">Day by Day</span>
-        </div>
-        <div class="dbd-add-row" id="dbdAddRow-m">
-          <input class="dbd-new-text" id="dbdText-m" placeholder="New task…"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();addDbdTask('m');}">
-          <input type="date" class="dbd-new-date" id="dbdDate-m">
-          <button class="add-btn dbd-add-btn" id="dbdAddBtn-m">+ Add</button>
-        </div>
-        <div class="dbd-stack" id="dbdContainer-m"></div>
 
-        <div class="dbd-section-header">
-          <span class="section-sublabel">Lists</span>
-          <button class="add-btn" id="addListBtn-m">+ New list</button>
+        <div id="dailySection-m" data-view="daily" class="page-block">
+          <div class="panel-header">
+            <span class="section-label section-label-daily"><span class="section-dot"></span>Daily</span>
+            <button class="fmt-add-daily" id="addDailyBtn-m">+ Add list</button>
+          </div>
+          <div id="defaultContainer-m" class="lists-stack"></div>
+          <hr class="section-divider">
         </div>
-        <div id="todoContainer-m" class="lists-stack">
-          <div class="empty-state" id="emptyState-m">No lists yet.<br>Tap “+ New list” to get started.</div>
+
+        <div id="listsSection-m" data-view="lists" class="page-block">
+          <div class="panel-header">
+            <span class="section-label section-label-lists"><span class="section-dot"></span>My lists</span>
+          </div>
+          <div class="dbd-section-header">
+            <span class="section-sublabel">Day by Day</span>
+          </div>
+          <div class="dbd-add-row" id="dbdAddRow-m">
+            <input class="dbd-new-text" id="dbdText-m" placeholder="New task…"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();addDbdTask('m');}">
+            <input type="date" class="dbd-new-date" id="dbdDate-m">
+            <button class="add-btn dbd-add-btn" id="dbdAddBtn-m">+ Add</button>
+          </div>
+          <div class="dbd-stack" id="dbdContainer-m"></div>
+
+          <div class="dbd-section-header">
+            <span class="section-sublabel">Lists</span>
+            <button class="add-btn" id="addListBtn-m">+ New list</button>
+          </div>
+          <div id="todoContainer-m" class="lists-stack">
+            <div class="empty-state" id="emptyState-m">No lists yet.<br>Tap “+ New list” to get started.</div>
+          </div>
         </div>
       </section>
 
-      <!-- Tab 4: Calendar -->
+      <!-- Tab 3: Calendar -->
       <section class="swipe-panel cal-swipe-panel" id="mobileCalPanel" data-view="calendar">
         <div class="cal-mobile-header">
           <button class="cal-nav-btn" id="calNavPrev" aria-label="Previous day">
@@ -248,7 +246,7 @@
         <div class="cal-grid-wrap" id="calMobileGrid"></div>
       </section>
 
-      <!-- Tab 5: Budget -->
+      <!-- Tab 4: Budget -->
       <section class="swipe-panel" data-view="budget">
         <div id="budgetContainer-m"></div>
       </section>

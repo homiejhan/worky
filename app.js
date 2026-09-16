@@ -149,6 +149,18 @@ const VIEW_DEFS = [
   { key: 'budget',   label: 'Budget' },
 ];
 let views = { timers: true, daily: true, lists: true, calendar: true, budget: true };
+
+/* Mobile swipe panels. Daily and My Lists share one "Lists" panel on
+ * mobile (Daily on top, My Lists below — same as the desktop right
+ * panel), so a panel is visible when any of the views it hosts is on.
+ * currentView holds a panel key. */
+const MOBILE_PANELS = [
+  { key: 'home',     views: ['home'] },
+  { key: 'timers',   views: ['timers'] },
+  { key: 'lists',    views: ['daily', 'lists'] },
+  { key: 'calendar', views: ['calendar'] },
+  { key: 'budget',   views: ['budget'] },
+];
 let currentView = 'home';
 
 /* misc */
@@ -3052,6 +3064,17 @@ function viewEnabled(key) {
 }
 function visibleViews() { return VIEW_DEFS.filter(v => viewEnabled(v.key)); }
 
+/* Mobile panel helpers — see MOBILE_PANELS. */
+function panelForView(key) {
+  const p = MOBILE_PANELS.find(p => p.views.includes(key));
+  return p ? p.key : key;
+}
+function panelEnabled(key) {
+  const p = MOBILE_PANELS.find(p => p.key === key);
+  return !!p && p.views.some(viewEnabled);
+}
+function visiblePanels() { return MOBILE_PANELS.filter(p => panelEnabled(p.key)); }
+
 /* Show/hide every element tagged with data-view, close any desktop overlay
  * whose view was just disabled, and rebuild the mobile tab strip. */
 function applyViewVisibility() {
@@ -3063,7 +3086,7 @@ function applyViewVisibility() {
   if (!viewEnabled('budget')   && budgetDesktopOpen) budgetToggleDesktop(false);
   const listsTab = $('listsDesktopNavTab');
   if (listsTab) listsTab.style.display = (viewEnabled('daily') || viewEnabled('lists')) ? '' : 'none';
-  if (!viewEnabled(currentView)) currentView = 'home';
+  if (!panelEnabled(currentView)) currentView = 'home';
   setSwipePanelWidths();
   renderHome();
 }
@@ -3072,16 +3095,16 @@ function setSwipePanelWidths() {
   const w = window.innerWidth;
   const track = $('swipeTrack');
   document.querySelectorAll('.swipe-panel').forEach(p => {
-    const on = viewEnabled(p.dataset.view);
+    const on = panelEnabled(p.dataset.view);
     p.style.display = on ? '' : 'none';
     if (on) p.style.width = w + 'px';
   });
   document.querySelectorAll('.tab-btn').forEach(b => {
-    const on = viewEnabled(b.dataset.view);
+    const on = panelEnabled(b.dataset.view);
     b.style.display = on ? '' : 'none';
     b.classList.toggle('active', b.dataset.view === currentView);
   });
-  const vis = visibleViews();
+  const vis = visiblePanels();
   const idx = Math.max(0, vis.findIndex(v => v.key === currentView));
   if (track) {
     track.style.width = (w * vis.length) + 'px';
@@ -3091,12 +3114,14 @@ function setSwipePanelWidths() {
   currentTab = idx;
 }
 
-/* Accepts a view key ('budget') or a legacy numeric index. */
+/* Accepts a view key ('budget', 'daily') or a legacy numeric index.
+ * View keys are mapped to the mobile panel that hosts them. */
 function goTab(target, animate) {
   let key = (typeof target === 'number') ? (VIEW_DEFS[target] || {}).key : target;
-  if (!key || !viewEnabled(key)) key = 'home';
+  key = panelForView(key);
+  if (!key || !panelEnabled(key)) key = 'home';
   currentView = key;
-  const vis = visibleViews();
+  const vis = visiblePanels();
   const idx = Math.max(0, vis.findIndex(v => v.key === key));
   currentTab = idx;
   const w = window.innerWidth;
@@ -3191,7 +3216,7 @@ function initSwipe() {
     const dx = e.changedTouches[0].clientX - sx;
     const dy = e.changedTouches[0].clientY - sy;
     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
-      const vis = visibleViews();
+      const vis = visiblePanels();
       const at = Math.max(0, vis.findIndex(v => v.key === currentView));
       const next = dx < 0 ? Math.min(at + 1, vis.length - 1) : Math.max(at - 1, 0);
       goTab(vis[next].key, true);
@@ -7485,7 +7510,7 @@ const TOUR_STEPS = [
     target: { d: '#timersSection-d', m: ['#wakeupRow-m', '#timerStack-m'] } },
   { key: 'daily', view: 'daily', title: 'Daily',
     body: 'Routines that reset every day. Star a list to pin it on Home. In Formats you can give a list a schedule — "Weekend reset" only shows up on Saturdays and Sundays. A task named after a Daily list ("Morning routine" inside Health) checks itself off when that list is done.',
-    target: { d: '#dailySection-d', m: '#defaultContainer-m' } },
+    target: { d: '#dailySection-d', m: '#dailySection-m' } },
   { key: 'dbd', view: 'lists', title: 'Day by Day',
     body: 'One-off tasks with a date. Overdue ones turn red and wait until you clear them. Use the tag menu to file a task under one of your lists — it keeps its date and still shows up here.',
     target: { d: ['#dbdAddRow-d', '#dbdContainer-d'], m: ['#dbdAddRow-m', '#dbdContainer-m'] } },
