@@ -563,7 +563,7 @@ function timerPct(t) {
 }
 function timerPaintProgress(t) {
   const w = (timerPct(t) * 100).toFixed(1) + '%';
-  document.querySelectorAll(`.tfill-${t.id}`).forEach(el => { el.style.width = w; });
+  document.querySelectorAll(`.tfill-${t.id}`).forEach(el => { if (el.style.width !== w) el.style.width = w; });
 }
 
 function timerCardHTML(t, pfx) {
@@ -718,15 +718,25 @@ function resetTimer(id) {
   saveToLocal();
 }
 
+/* Timer displays only change once a second, so the DOM is only touched
+ * once a second. This used to rewrite every timer's text, progress bar
+ * and the summary innerHTML on every animation frame (60x/s), which kept
+ * the phone's main thread busy with layout and made taps feel late. */
+let _tickLastSec = -1;
 function tickAll() {
-  timers.forEach(t => {
-    if (!t.running) return;
-    const rem = getRemaining(t);
-    document.querySelectorAll(`.tdisp-${t.id}`).forEach(el => el.textContent = fmt(rem));
-    timerPaintProgress(t);
-    if (rem <= 0) { t.seconds = 0; t.running = false; updateTimerUI(t.id); }
-  });
-  if (wokenUp) updateTimerSummary();
+  const sec = Math.floor(Date.now() / 1000);
+  if (sec !== _tickLastSec) {
+    _tickLastSec = sec;
+    timers.forEach(t => {
+      if (!t.running) return;
+      const rem = getRemaining(t);
+      const txt = fmt(rem);
+      document.querySelectorAll(`.tdisp-${t.id}`).forEach(el => { if (el.textContent !== txt) el.textContent = txt; });
+      timerPaintProgress(t);
+      if (rem <= 0) { t.seconds = 0; t.running = false; updateTimerUI(t.id); }
+    });
+    if (wokenUp) updateTimerSummary();
+  }
   requestAnimationFrame(tickAll);
 }
 
@@ -768,7 +778,7 @@ function updateTimerSummary() {
   ['d','m'].forEach(p => {
     const el = $(`timerSummary-${p}`);
     if (!el) return;
-    el.innerHTML = html;
+    if (el._lastHtml !== html) { el.innerHTML = html; el._lastHtml = html; }
     el.classList.toggle('visible', wokenUp);
   });
 }

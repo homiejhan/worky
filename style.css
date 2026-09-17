@@ -1678,10 +1678,18 @@ body.format-mode .list-sched-row { display: flex; }
   -webkit-backdrop-filter: blur(6px);
   display: flex; align-items: center; justify-content: center;
   opacity: 0; pointer-events: none;
-  transition: opacity 0.2s var(--ease);
+  /* visibility:hidden removes the layer from painting entirely (opacity:0
+     alone keeps the backdrop blur running); the 0.2s delay lets the
+     fade-out finish before the layer disappears. */
+  visibility: hidden;
+  transition: opacity 0.2s var(--ease), visibility 0s linear 0.2s;
   padding: 16px;
 }
-.modal-overlay.show { opacity: 1; pointer-events: all; }
+.modal-overlay.show {
+  opacity: 1; pointer-events: all;
+  visibility: visible;
+  transition: opacity 0.2s var(--ease), visibility 0s;
+}
 
 .modal-box {
   position: relative;
