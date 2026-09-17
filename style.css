@@ -76,9 +76,17 @@ html, body {
   font-size: var(--font-size);
   line-height: 1.5;
   overflow: hidden;
-  position: fixed;
+  overscroll-behavior: none;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
+}
+/* Only <body> is fixed. Making <html> itself position:fixed lets iOS
+   WebKit leave the whole document shifted after the keyboard closes,
+   so taps land on a different spot than what is drawn. */
+body {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
 }
 
 button { font-family: var(--font-sans); color: inherit; background: none; border: none; cursor: pointer; }
@@ -330,7 +338,7 @@ input, textarea, select { font-family: var(--font-sans); color: var(--ink); }
 .tab-btn.active .tab-ico { background: color-mix(in srgb, var(--tc) 16%, transparent); transform: translateY(-1px); }
 .tab-btn:active .tab-ico { transform: scale(0.94); }
 
-.swipe-container { order: 1; flex: 1; overflow: hidden; }
+.swipe-container { order: 1; flex: 1; overflow: hidden; touch-action: pan-y; }
 .swipe-track {
   display: flex; height: 100%;
   transition: transform 0.32s var(--ease);
@@ -339,7 +347,7 @@ input, textarea, select { font-family: var(--font-sans); color: var(--ink); }
 .swipe-panel {
   height: 100%;
   overflow-y: auto; overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
   padding: 18px 16px 28px;
   display: flex; flex-direction: column; gap: 12px;
   flex-shrink: 0;
@@ -1648,7 +1656,7 @@ body.format-mode .list-sched-row { display: flex; }
 .cal-nav-btn:active { transform: scale(0.92); }
 .cal-grid-wrap {
   flex: 1; overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
 }
 .cal-mobile-body { display: flex; }
 .cal-mobile-time-col { width: 50px; flex-shrink: 0; position: relative; }

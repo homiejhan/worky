@@ -3110,8 +3110,13 @@ function applyViewVisibility() {
   renderHome();
 }
 
+function swipeFrameWidth() {
+  const c = $('swipeContainer');
+  return (c && c.clientWidth) || window.innerWidth;
+}
+
 function setSwipePanelWidths() {
-  const w = window.innerWidth;
+  const w = swipeFrameWidth();
   const track = $('swipeTrack');
   document.querySelectorAll('.swipe-panel').forEach(p => {
     const on = panelEnabled(p.dataset.view);
@@ -3143,7 +3148,7 @@ function goTab(target, animate) {
   const vis = visiblePanels();
   const idx = Math.max(0, vis.findIndex(v => v.key === key));
   currentTab = idx;
-  const w = window.innerWidth;
+  const w = swipeFrameWidth();
   const track = $('swipeTrack');
   if (track) {
     track.style.transition = animate === false ? 'none' : 'transform 0.32s cubic-bezier(0.3,0.7,0.4,1)';
@@ -3242,6 +3247,54 @@ function initSwipe() {
     }
     sx = 0; swiping = false;
   }, { passive: true });
+}
+
+/* ── Touch-offset guard (iOS keyboard / zoom drift) ──
+ * On iOS, focusing an input scrolls the document (even a position:fixed
+ * one) to bring the field above the keyboard, and it does not always
+ * scroll back when the keyboard is dismissed. From then on the page is
+ * painted offset from where it is hit-tested, so taps land on the wrong
+ * element until something happens to reset the scroll. Reset it ourselves
+ * whenever the keyboard goes away, the visual viewport changes, or the
+ * device rotates — but never while a field is being edited, because that
+ * scroll is what keeps the field visible. */
+function isEditableEl(el) {
+  if (!el || el === document.body) return false;
+  const t = el.tagName;
+  return t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT' || !!el.isContentEditable;
+}
+
+function resetViewportScroll() {
+  if (isEditableEl(document.activeElement)) return;
+  const de = document.documentElement, b = document.body;
+  const off = window.scrollX || window.scrollY || (de && de.scrollTop) || (b && b.scrollTop);
+  if (!off) return;
+  try { window.scrollTo(0, 0); } catch (e) {}
+  if (de) de.scrollTop = 0;
+  if (b) b.scrollTop = 0;
+}
+
+function initViewportGuard() {
+  // Keyboard is dismissed via blur — iOS animates it out over ~250ms, and
+  // the stray scroll can land at any point in that window.
+  document.addEventListener('focusout', () => {
+    [40, 160, 320].forEach(ms => setTimeout(resetViewportScroll, ms));
+  }, true);
+
+  // Visual viewport resize fires when the keyboard opens/closes and when
+  // the page zooms; scroll fires when the visual viewport pans around.
+  const vv = window.visualViewport;
+  if (vv) {
+    let _vt;
+    const onVv = () => { clearTimeout(_vt); _vt = setTimeout(resetViewportScroll, 60); };
+    vv.addEventListener('resize', onVv);
+    vv.addEventListener('scroll', onVv);
+  }
+  window.addEventListener('orientationchange', () => setTimeout(resetViewportScroll, 300));
+
+  // Belt-and-braces: a window scroll on a page that cannot scroll is always
+  // WebKit's own doing.
+  window.addEventListener('scroll', () => setTimeout(resetViewportScroll, 0), { passive: true });
 }
 
 /* ───────────────────────── CALENDAR ───────────────────────── */
@@ -7781,6 +7834,7 @@ function bindTour() {
 
   bindStatic();
   initSwipe();
+  initViewportGuard();
 
   renderTimers();
   renderTodos();
