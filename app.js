@@ -242,6 +242,17 @@ function calFmtTime(s) {
   const ap = h>=12?'pm':'am'; const h12 = h%12||12;
   return m===0?`${h12}${ap}`:`${h12}:${String(m).padStart(2,'0')}${ap}`;
 }
+/* "45m" / "1h" / "1h 30m" */
+function calFmtDur(mins) {
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return h && m ? `${h}h ${m}m` : h ? `${h}h` : `${m}m`;
+}
+/* Length of an event in minutes, or null when it has none (dividers). */
+function calEventDurMins(ev) {
+  if (!ev || ev.type === 'divider' || !ev.start || !ev.end) return null;
+  const d = calTimeToMins(ev.end) - calTimeToMins(ev.start);
+  return d > 0 ? d : null;
+}
 function calMinsToPx(n)  { return (n/60)*CAL_HOUR_PX; }
 function calPxToMins(px) { return Math.round((px/CAL_HOUR_PX)*60/15)*15; }
 
@@ -2052,7 +2063,16 @@ function setListTaskDue(listId, taskId, value) {
   saveToLocal();
 }
 
-function dbdRowHtml(entry, overdue) {
+/* Compact "change date" button for a Day by Day row. Rows under a dated
+ * header (Today, Tomorrow, Fri…) show just the calendar icon — the header
+ * already says which day. Overdue / Completed mix several days, so those
+ * rows keep a short date label next to the icon. */
+function dbdDateBtnHtml(due, onchange, showLabel) {
+  const label = showLabel ? `<span>${taskDateChipLabel(due)}</span>` : '';
+  return `<label class="task-date-chip dbd-date-btn${showLabel ? ' has-label' : ''}" title="${escAttr(dbdLabelFor(due))} — tap to change date">${CALICON_SVG}${label}<input type="date" value="${escAttr(due)}" onchange="${onchange}"></label>`;
+}
+
+function dbdRowHtml(entry, overdue, showDate) {
   const t = entry.task;
   const tagSel = dbdTagSelectHtml(entry);
   if (entry.kind === 'list') {
@@ -2071,13 +2091,11 @@ function dbdRowHtml(entry, overdue) {
         oninput="setTaskText(${list.id},${t.id},this.value)"
         onblur="taskLinkFlushRename('list',${t.id})">
       ${tagSel}
-      <input type="date" class="dbd-date-input" value="${escAttr(t.due)}"
-        onchange="setListTaskDue(${list.id},${t.id},this.value)" title="Due date">
+      ${dbdDateBtnHtml(t.due, `setListTaskDue(${list.id},${t.id},this.value)`, showDate)}
       ${taskLinkChipHtml('list', t.id)}
       <button class="task-del" onclick="removeTask(${list.id},${t.id})">×</button>
     </div>`;
   }
-  const dueAttr = escAttr(t.due || dbdTodayKey());
   return `
     <div class="task-row dbd-row ${overdue ? 'dbd-overdue-row' : ''}" data-dbd-id="${t.id}">
       <div class="task-check dbd-check ${t.done ? 'done' : ''}" onclick="toggleDbdTask(${t.id})">
@@ -2089,8 +2107,7 @@ function dbdRowHtml(entry, overdue) {
         oninput="setDbdText(${t.id}, this.value)"
         onblur="taskLinkFlushRename('dbd',${t.id})">
       ${tagSel}
-      <input type="date" class="dbd-date-input" value="${dueAttr}"
-        onchange="setDbdDue(${t.id}, this.value)" title="Due date">
+      ${dbdDateBtnHtml(t.due || dbdTodayKey(), `setDbdDue(${t.id}, this.value)`, showDate)}
       ${taskLinkChipHtml('dbd', t.id)}
       <button class="task-del" onclick="removeDbdTask(${t.id})">×</button>
     </div>`;
@@ -2119,21 +2136,21 @@ function renderDbd() {
       <div class="dbd-group dbd-group-overdue">
         <div class="dbd-group-header dbd-header-overdue">Overdue
           <span class="dbd-count">${overdue.length}</span></div>
-        ${overdue.map(e => dbdRowHtml(e, true)).join('')}
+        ${overdue.map(e => dbdRowHtml(e, true, true)).join('')}
       </div>`;
   }
   groups.forEach(g => {
     html += `
       <div class="dbd-group">
         <div class="dbd-group-header">${dbdLabelFor(g.key)}</div>
-        ${g.entries.map(e => dbdRowHtml(e, false)).join('')}
+        ${g.entries.map(e => dbdRowHtml(e, false, false)).join('')}
       </div>`;
   });
   if (donePast.length) {
     html += `
       <div class="dbd-group dbd-group-done">
         <div class="dbd-group-header dbd-header-done">Completed</div>
-        ${donePast.map(e => dbdRowHtml(e, false)).join('')}
+        ${donePast.map(e => dbdRowHtml(e, false, true)).join('')}
       </div>`;
   }
   if (!html) html = '<div class="empty-state dbd-empty">No day-by-day tasks yet.<br>Add one above with a due date.</div>';
@@ -2338,16 +2355,24 @@ function taskLinkChipHtml(kind, id) {
   const hit = taskLinkGet(taskLinkRef(kind, id));
   if (hit) {
     const { ev, dateKey } = hit;
+    const dur = calEventDurMins(ev);
+    const durHtml = dur ? `<span class="task-cal-dur">${calFmtDur(dur)}</span>` : '';
+    const range = dur ? `, ${calFmtTime(ev.start)}–${calFmtTime(ev.end)}` : '';
     return `<button class="task-cal-chip linked" style="color:${escAttr(ev.color)}"
       onclick="taskLinkOpenEvent('${kind}',${id})"
-      title="Linked to a calendar event on ${escAttr(dbdLabelFor(dateKey))} — tap to edit">${CLOCK_SVG}<span>${calFmtTime(ev.start)}</span></button>`;
+      title="Linked to a calendar event on ${escAttr(dbdLabelFor(dateKey))}${range} — tap to edit">${CLOCK_SVG}<span>${calFmtTime(ev.start)}</span>${durHtml}</button>`;
   }
   return `<button class="task-cal-chip" onclick="openTaskLinkModal('${kind}',${id})" title="Link to a calendar event">${CLOCK_SVG}</button>`;
 }
 function taskLinkHomeChipHtml(kind, id) {
   const hit = taskLinkGet(taskLinkRef(kind, id));
   if (!hit) return '';
-  return `<span class="home-dbd-cal" style="color:${escAttr(hit.ev.color)}">${CLOCK_SVG}${calFmtTime(hit.ev.start)}</span>`;
+  // Home shows how long the task takes; events with no length (dividers)
+  // fall back to their start time.
+  const dur = calEventDurMins(hit.ev);
+  const label = dur ? calFmtDur(dur) : calFmtTime(hit.ev.start);
+  const range = dur ? `${calFmtTime(hit.ev.start)}–${calFmtTime(hit.ev.end)}` : calFmtTime(hit.ev.start);
+  return `<span class="home-dbd-cal" style="color:${escAttr(hit.ev.color)}" title="${range}">${CLOCK_SVG}${label}</span>`;
 }
 
 /* Open the linked event in the regular event editor. */

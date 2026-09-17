@@ -858,7 +858,7 @@ body.format-mode .list-sched-row { display: flex; }
   padding: 8px 10px;
   outline: none;
 }
-.dbd-new-date, .dbd-date-input {
+.dbd-new-date {
   font-size: 12px;
   font-family: inherit;
   color: var(--ink-2);
@@ -870,7 +870,7 @@ body.format-mode .list-sched-row { display: flex; }
   flex-shrink: 0;
   transition: border-color 0.15s;
 }
-.dbd-new-date:focus, .dbd-date-input:focus { border-color: var(--border-strong); }
+.dbd-new-date:focus { border-color: var(--border-strong); }
 .dbd-add-btn { flex-shrink: 0; }
 
 .dbd-stack { display: flex; flex-direction: column; gap: 10px; }
@@ -897,15 +897,17 @@ body.format-mode .list-sched-row { display: flex; }
 }
 
 .dbd-check.done { background: var(--accent); border-color: var(--accent); }
-.dbd-date-input { max-width: 124px; }
-.dbd-row .dbd-date-input { opacity: 0.75; }
-.dbd-row:hover .dbd-date-input { opacity: 1; }
+/* compact "change date" button (icon only under dated headers) */
+.dbd-row .dbd-date-btn { padding: 5px 7px; opacity: 0.6; }
+.dbd-row .dbd-date-btn.has-label { padding: 4px 8px; opacity: 0.85; }
+.dbd-row:hover .dbd-date-btn { opacity: 1; }
+.dbd-date-btn:hover, .dbd-date-btn:focus-within { border-color: var(--border-strong); }
 
 /* overdue styling */
 .dbd-group-overdue { border-color: rgba(var(--danger-rgb),0.3); background: linear-gradient(180deg, rgba(var(--danger-rgb),0.06), transparent 60%), var(--bg-elevated); }
 .dbd-header-overdue { color: var(--danger); }
 .dbd-overdue-row .task-text { color: var(--danger); }
-.dbd-overdue-row .dbd-date-input { color: var(--danger); background: var(--danger-dim); }
+.dbd-overdue-row .dbd-date-btn { color: var(--danger); background: var(--danger-dim); }
 
 /* completed-past styling */
 .dbd-group-done { opacity: 0.6; }
@@ -1912,11 +1914,13 @@ body.format-mode .list-sched-row { display: flex; }
   opacity: 1;
   background: color-mix(in srgb, currentColor 14%, transparent);
 }
+/* subtle "time taken" note after the start time */
+.task-cal-dur { opacity: 0.6; font-weight: 400; }
+.task-cal-dur::before { content: '·'; margin-right: 4px; opacity: 0.8; }
 .dbd-overdue-row .task-cal-chip:not(.linked) { color: var(--danger); background: var(--danger-dim); }
 @media (hover: none) { .task-cal-chip { opacity: 0.85; } }
 @media (max-width: 640px) {
-  .dbd-row .task-cal-chip.linked span { display: none; }
-  .dbd-row .task-cal-chip { padding: 5px 6px; }
+  .dbd-row .task-cal-chip { padding: 5px 8px; }
 }
 
 /* Home "Today's Tasks" rows: read-only time badge */
@@ -2791,11 +2795,10 @@ body.format-mode .list-sched-row { display: flex; }
   .dbd-row .task-del { order: 1; opacity: 0.55; }
   .dbd-row::after { content: ''; flex-basis: 100%; height: 0; order: 2; }
   .dbd-row .dbd-tag-select,
-  .dbd-row .dbd-date-input,
+  .dbd-row .dbd-date-btn,
   .dbd-row .task-cal-chip { order: 3; opacity: 1; }
   .dbd-row .dbd-tag-select { margin-left: 26px; max-width: 120px; min-width: 60px; font-size: 12px; padding: 5px 9px; }
   .dbd-tagged.dbd-row .dbd-tag-select { margin-left: 25px; }
-  .dbd-row .dbd-date-input { max-width: 132px; font-size: 12px; }
   .dbd-row .task-cal-chip { margin-left: auto; }
 }
 
