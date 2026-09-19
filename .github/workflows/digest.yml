@@ -1,0 +1,123 @@
+name: Email digest
+
+# Runs the digest on GitHub's free runner: restores the Qwen3.5-4B weights from
+# cache (downloads them once), starts llama-server locally, runs
+# backend/digest.py against it, and delivers the result to Firebase.
+# Nothing here calls a paid API. The only recurring cost is $0.
+
+on:
+  schedule:
+    - cron: "30 11 * * *"     # 11:30 UTC = 6:30 am Austin (CDT) / 5:30 am (CST). Cron is UTC-only.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build the digest but don't write to Firebase"
+        type: boolean
+        default: false
+
+concurrency:
+  group: digest
+  cancel-in-progress: false
+
+env:
+  MODEL_REPO: unsloth/Qwen3.5-4B-GGUF
+  MODEL_FILE: Qwen3.5-4B-UD-Q4_K_XL.gguf        # 2.7 GB, 4-bit; fits the runner's 16 GB with room to spare
+  CTX: "16384"                                  # tokens of context; the largest chunk is ~5k tokens
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - run: pip install -r backend/requirements.txt
+
+      # ── model weights: cached between runs, downloaded from Hugging Face only on a miss ──
+      - name: Restore model from cache
+        id: model-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/models/${{ env.MODEL_FILE }}
+          key: gguf-${{ env.MODEL_REPO }}-${{ env.MODEL_FILE }}
+
+      - name: Download model
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/models
+          curl -L --retry 3 --fail -o ~/models/$MODEL_FILE \
+            "https://huggingface.co/$MODEL_REPO/resolve/main/$MODEL_FILE"
+          ls -lh ~/models
+
+      # ── llama.cpp: prebuilt Linux binary from the official releases, also cached ──
+      - name: Resolve llama.cpp release
+        id: llama-tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "tag=$(gh release view --repo ggml-org/llama.cpp --json tagName -q .tagName)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore llama.cpp from cache
+        id: llama-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/llama
+          key: llama-cpp-${{ steps.llama-tag.outputs.tag }}-ubuntu-x64
+
+      - name: Download llama.cpp
+        if: steps.llama-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ~/llama && cd ~/llama
+          gh release download "${{ steps.llama-tag.outputs.tag }}" --repo ggml-org/llama.cpp \
+            --pattern '*bin-ubuntu-x64.zip' --clobber
+          unzip -q -o *.zip && rm -f *.zip
+          find . -type f -name llama-server -exec chmod +x {} \;
+          find . -type f -name llama-server
+
+      # ── serve the model on localhost; thinking mode off so it answers instead of deliberating ──
+      - name: Start llama-server
+        run: |
+          BIN=$(find ~/llama -type f -name llama-server | head -1)
+          export LD_LIBRARY_PATH=$(dirname "$BIN"):$LD_LIBRARY_PATH
+          nohup "$BIN" -m ~/models/$MODEL_FILE \
+            --host 127.0.0.1 --port 8080 \
+            -c $CTX -t 4 --parallel 1 -fa on \
+            --jinja --chat-template-kwargs '{"enable_thinking": false}' \
+            --no-webui > ~/llama-server.log 2>&1 &
+          for i in $(seq 1 90); do
+            if curl -sf http://127.0.0.1:8080/health >/dev/null; then echo "ready after ${i}s"; exit 0; fi
+            sleep 2
+          done
+          echo "llama-server did not become ready"; tail -50 ~/llama-server.log; exit 1
+
+      - name: Build and deliver digest
+        env:
+          TZ: America/Chicago
+          LLM_URL: http://127.0.0.1:8080
+          LLM_MODEL: qwen3.5-4b
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          WORKY_UID: ${{ secrets.WORKY_UID }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            python backend/digest.py --dry-run --out ~/digest.md
+            echo "dry run: $(wc -c < ~/digest.md) bytes (not uploaded — it's your inbox)"
+          else
+            python backend/digest.py
+          fi
+
+      - name: Server log on failure
+        if: failure()
+        run: tail -80 ~/llama-server.log || true

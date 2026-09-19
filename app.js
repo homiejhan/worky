@@ -1573,6 +1573,7 @@ function commitFormatMode() {
   if (currentView === 'calendar') calRenderMobile();
   saveToLocal();
   const overrode = syncCommitFormat();   // Done = the one moment Formats reaches the cloud
+  digestInboxFlush();                    // a digest delivered during Formats can land now
   showToast(overrode ? 'Format saved ✓ · replaced a newer cloud copy' : 'Format saved ✓');
 }
 
@@ -5087,6 +5088,7 @@ function syncApplyRemote(remoteStr, remoteUpdatedAt) {
 /* Realtime listener — also performs the initial reconcile on connect. */
 function syncOnRemoteValue(snap) {
   const v = snap.val();
+  digestInboxSeen(v && v.digestInbox);        // backend-delivered digest, if any
   const localFp = syncFingerprint(gatherState());
   syncReconciled = true;                      // from here on pushes are allowed
 
@@ -5204,12 +5206,14 @@ function syncChooseImport() {
   syncPendingRemote = null;
   $('syncChoiceModal')?.classList.remove('show');
   if (pending) syncApplyRemote(pending.state, pending.updatedAt);
+  digestInboxFlush();
   syncUpdateUI();
   if (tourReoffer) { tourReoffer = false; tourMarkSeen(); }   // cloud data → returning user
 }
 function syncChooseExport() {
   syncPendingRemote = null;
   $('syncChoiceModal')?.classList.remove('show');
+  digestInboxFlush();                          // merge before the push rewrites the user node
   syncPushNow();
   showToast('Exported to cloud ✓');
   syncUpdateUI();
@@ -6044,6 +6048,49 @@ function digestMergeSuggestions(tasks, at) {
   }
   return added;
 }
+/* ── backend delivery: users/<uid>/digestInbox ──
+ * The GitHub Actions digest (backend/digest.py) never edits the synced state
+ * blob — that would race this device's own edits. It leaves its result in a
+ * sibling node instead. The realtime listener hands it here; we merge it into
+ * digest.last and the suggestion pool exactly like a local run, save, and the
+ * next push (which rewrites the whole user node) clears the inbox. If it
+ * arrives before this connection has a settled baseline (Import/Export modal
+ * open, Formats mode), it waits in memory until that resolves. */
+let digestInboxPending = null;
+function digestInboxSeen(inbox) {
+  if (!inbox || typeof inbox !== 'object' || typeof inbox.markdown !== 'string' || !inbox.markdown.trim()) return;
+  const at = Number(inbox.at) || 0;
+  const last = digestGet().last;
+  if (!at || (last && at <= last.at)) return;   // already merged (or something newer ran here)
+  digestInboxPending = inbox;
+  digestInboxFlush();
+}
+function digestInboxFlush() {
+  const inbox = digestInboxPending;
+  if (!inbox || !syncReconciled || syncPendingRemote || syncHeld()) return;
+  digestInboxPending = null;
+  const at = Number(inbox.at) || 0;
+  const d = digestGet();
+  if (d.last && at <= d.last.at) return;
+  d.enabled = true;                   // a delivery means the feature is in use; show the card
+  d.last = {
+    at,
+    markdown: String(inbox.markdown),
+    count: Number(inbox.count) || 0,
+    model: typeof inbox.model === 'string' ? inbox.model : '',
+    source: typeof inbox.source === 'string' && inbox.source ? inbox.source : 'github',
+  };
+  const tasks = digestNormalizeTasks(Array.isArray(inbox.tasks) ? inbox.tasks : [], false);
+  const fresh = digestMergeSuggestions(tasks, at);
+  digest = normalizeDigest(digest);   // canonical shape, same as after a reload
+  if (!digestAbort) digestRun = null; // don't clobber a run in progress on this device
+  digestCollapsed = false;
+  saveToLocal();
+  renderSettings();
+  renderHome();
+  showToast(fresh ? `Email digest ready ✓ ${fresh} new suggestion${fresh === 1 ? '' : 's'}` : 'Email digest ready ✓');
+}
+
 /* Suggested tasks: { id, title, why, due:'YYYY-MM-DD'|'', section, added:<dbd id>|0 } */
 /* `resolve` = the tasks come fresh from the model or the sample: relative
  * words ("friday") are resolved and past dates clamped to today. On a plain
