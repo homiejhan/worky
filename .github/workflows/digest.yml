@@ -76,13 +76,22 @@ jobs:
         if: steps.llama-cache.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.llama-tag.outputs.tag }}
         run: |
           mkdir -p ~/llama && cd ~/llama
-          gh release download "${{ steps.llama-tag.outputs.tag }}" --repo ggml-org/llama.cpp \
-            --pattern '*bin-ubuntu-x64.zip' --clobber
-          unzip -q -o *.zip && rm -f *.zip
+          # Linux CPU build. Releases ship it as .tar.gz now (older ones used .zip); accept either.
+          grab() { gh release download "$1" --repo ggml-org/llama.cpp --clobber \
+                     --pattern '*bin-ubuntu-x64.tar.gz' --pattern '*bin-ubuntu-x64.zip'; }
+          if ! grab "$TAG"; then
+            echo "no Ubuntu x64 CPU asset on $TAG — falling back to the newest build release"
+            ALT=$(gh release list --repo ggml-org/llama.cpp --limit 30 --json tagName,isPrerelease \
+                    -q '.[] | select(.isPrerelease) | .tagName' | head -1)
+            echo "trying $ALT"; grab "$ALT"
+          fi
+          for f in *.tar.gz; do [ -e "$f" ] && tar xzf "$f" && rm -f "$f"; done
+          for f in *.zip;    do [ -e "$f" ] && unzip -q -o "$f" && rm -f "$f"; done
           find . -type f -name llama-server -exec chmod +x {} \;
-          find . -type f -name llama-server
+          echo "llama-server at: $(find . -type f -name llama-server)"
 
       # ── serve the model on localhost; thinking mode off so it answers instead of deliberating ──
       - name: Start llama-server
