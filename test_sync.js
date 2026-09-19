@@ -122,71 +122,52 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
   ok(!!A.w.digestGet().last, 'A still has the digest after the loop stopped');
   cloud.hooks.length = 0;
 
-  console.log('\n── 4. Phone asks, laptop runs, result syncs back ──');
+  console.log('\n── 4. Backend delivers to digestInbox; both devices merge it; the next push clears it ──');
   {
     cloud.val = null; cloud.listeners.length = 0; cloud.hooks.length = 0;
-    /* laptop: runner with Ollama + Gmail (fake fetch) */
-    const emails = { m1: { id: 'm1', internalDate: String(Date.now()), snippet: 'hi', payload: { headers: [{ name: 'From', value: 'Mom <mom@example.com>' }, { name: 'Subject', value: 'Dinner Sunday?' }], mimeType: 'text/plain', body: { data: Buffer.from('Dinner Sunday at 6 — reply!').toString('base64') } } } };
-    const jsonRes = (obj, status = 200) => ({ ok: status < 300, status, json: async () => obj });
-    let chatCalls = 0;
-    const laptopFetch = async (url, o = {}) => {
-      if (url.includes('/users/me/messages?')) return jsonRes({ messages: [{ id: 'm1' }] });
-      if (/\/users\/me\/messages\/m1/.test(url)) return jsonRes(emails.m1);
-      if (url.endsWith('/api/chat')) {
-        chatCalls++; await sleep(1500);
-        const sys = JSON.parse(o.body).messages[0].content;
-        if (sys.startsWith('You turn a daily')) return jsonRes({ message: { content: '{"reasoning":"reply to mom","tasks":[{"title":"Reply to Mom about Sunday dinner","why":"Dinner at 6.","due":"","section":"misc"}]}' } });
-        if (sys.startsWith('Below is today')) return jsonRes({ message: { content: '## 🔝 Top of the inbox\nOne email.\n\n## ✅ Action items\n- [ ] Reply to Mom' } });
-        return jsonRes({ message: { content: '- **Mom** — dinner Sunday' } });
-      }
-      return jsonRes({}, 404);
-    };
-    const L = boot('laptop', {
-      'focus-gmail-token': JSON.stringify({ access_token: 'tok', expires_at: Date.now() + 3600e3, email: 'me@example.com' }),
-      'focus-digest-engine': JSON.stringify({ url: 'http://localhost:11434', model: 'qwen', autorun: true, deviceName: 'MacBook' }),
-      'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }),
-    });
-    L.w.fetch = laptopFetch;
+    const L = boot('laptop', { 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }) });
     L.w.digestGet().enabled = true; L.w.saveToLocal();
     L.w.__signIn(); await sleep(80);
-    /* phone: same state, no Ollama */
-    const P = boot('phone', { 'focus-app-state': cloud.val.state, 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: L.w.eval('syncHash(syncFingerprint(gatherState()))') }), 'focus-digest-engine': JSON.stringify({ deviceName: 'iPhone' }) });
+    const P = boot('phone', { 'focus-app-state': cloud.val.state, 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: L.w.eval('syncHash(syncFingerprint(gatherState()))') }) });
     P.w.__signIn(); await sleep(120);
-    P.w.renderHome();
-    const btn = P.d.querySelector('#homeContainer-d .dg-actions .dg-btn');
-    ok(btn && btn.textContent === 'Run on another device', 'phone offers Run on another device');
-    ok(/can.t write the summary itself/.test(P.d.querySelector('#homeContainer-d .dg-empty-text')?.textContent || ''), 'phone explains why');
-    btn.click();
-    const req = P.w.digestGet().request;
-    ok(req && req.status === 'pending' && req.by === 'iPhone', 'request created as pending by iPhone');
-    ok(P.d.querySelector('#homeContainer-d .dg-spinner') && /Sent to your other device/.test(P.d.querySelector('#homeContainer-d .dg-status-text').textContent), 'phone shows the request as sent');
-    await sleep(1900);   // debounce push + claim
-    const lr = L.w.digestGet().request;
-    ok(lr && (lr.status === 'running') && lr.runner === 'MacBook', 'laptop claimed the request and is running it');
-    await sleep(1700);
-    P.w.renderHome();
-    console.log('    phone request:', JSON.stringify(P.w.digestGet().request), '| status text:', P.d.querySelector('#homeContainer-d .dg-status-text')?.textContent);
-    ok(/MacBook is running it/.test(P.d.querySelector('#homeContainer-d .dg-status-text')?.textContent || ''), 'phone shows MacBook running with relayed progress');
-    await sleep(4000);
-    ok(!L.w.digestGet().request, 'laptop finished: request cleared');
-    ok(L.w.digestGet().last && L.w.digestGet().last.source === 'remote', 'laptop result marked as run for another device');
-    await sleep(2500);
-    ok(!P.w.digestGet().request, 'phone: request cleared');
-    ok(P.w.digestGet().last && /Mom/.test(P.w.digestGet().last.markdown), 'phone received the digest');
-    eq(P.w.digestGet().suggestions.length, 1, 'phone received the suggested task');
-    ok(P.d.querySelector('#homeContainer-d .dg-todo-add'), 'phone can Add it');
-    ok(/from another device/.test(P.d.querySelector('#homeContainer-d .dg-meta').textContent), 'meta line says where it came from');
-    ok(chatCalls >= 3, 'laptop did the model work');
-    /* cancel path */
-    P.w.digestRunNow();
-    ok(P.w.digestGet().request && P.w.digestGet().request.status === 'pending', 'second request');
-    P.w.digestRequestCancel();
-    ok(!P.w.digestGet().request, 'cancelled before pickup');
-    /* stale runner */
-    P.w.digestGet().request = P.w.digestNormalizeRequest({ id: 5, at: Date.now() - 20 * 60000, by: 'iPhone', status: 'running', runner: 'MacBook', startedAt: Date.now() - 20 * 60000, updatedAt: Date.now() - 15 * 60000, phase: 'fetching' });
-    P.w.renderHome();
-    ok(/stopped responding/.test(P.d.querySelector('#homeContainer-d .dg-status-text')?.textContent || ''), 'a silent runner is reported after 10 minutes');
-    P.w.digestRequestCancel();
+    eq(L.w.digestGet().last, null, 'laptop starts with no digest');
+    eq(P.w.digestGet().last, null, 'phone starts with no digest');
+
+    /* backend/digest.py: PUT users/<uid>/digestInbox — a sibling of `state`, never inside it */
+    const at = Date.now();
+    cloud.val = { ...cloud.val, digestInbox: { at, markdown: '## 🔝 Top of the inbox\nOne email.\n\n## 📬 Miscellaneous\n- **Mom** — dinner Sunday', count: 1, model: 'qwen3.5-4b', source: 'github',
+      tasks: [{ title: 'Reply to Mom about Sunday dinner', why: 'Dinner at 6.', due: '', section: 'misc' }] } };
+    cloud.listeners.forEach(cb => cb({ val: () => cloud.val }));
+    await sleep(400);
+
+    ok(!!L.w.digestGet().last && L.w.digestGet().last.at === at, 'laptop merged the delivered digest');
+    ok(!!P.w.digestGet().last && P.w.digestGet().last.at === at, 'phone merged it too');
+    eq(L.w.digestGet().last.source, 'github', 'source recorded as github');
+    eq(L.w.digestGet().suggestions.length, 1, 'laptop pool has the suggestion');
+    eq(P.w.digestGet().suggestions.length, 1, 'phone pool has the suggestion');
+    ok(P.d.querySelector('#homeContainer-d .dg-todo-add'), 'phone shows Add on the card');
+    eq(cloud.val.digestInbox, undefined, 'the next push rewrote the user node and cleared the inbox');
+    ok(typeof cloud.val.state === 'string' && JSON.parse(cloud.val.state).digest.last.at === at, 'cloud state now carries the digest itself');
+    ok(fpOf(L.w) === fpOf(P.w), 'both devices agree on the fingerprint (no ping-pong)');
+    const pushesBefore = L.w.__stats.pushes + P.w.__stats.pushes;
+    await sleep(600);
+    eq(L.w.__stats.pushes + P.w.__stats.pushes, pushesBefore, 'and stop pushing');
+
+    /* Add on the phone → the laptop sees it as added */
+    P.w.digestAddTask(1); await sleep(2500);
+    eq(L.w.digestGet().suggestions[0].status, 'added', 'laptop sees the phone added it');
+    ok(!!L.w.dbdById(L.w.digestGet().suggestions[0].dbdId), 'the Day by Day task synced with it');
+
+    /* A second delivery while the phone is asleep: only the newest is kept, nothing dupes */
+    const at2 = at + 1000;
+    cloud.val = { ...cloud.val, digestInbox: { at: at2, markdown: '## 🔝 Top of the inbox\nTwo emails.', count: 2, model: 'qwen3.5-4b', source: 'github',
+      tasks: [{ title: 'Reply to Mom about Sunday dinner', why: '', due: '', section: 'misc' }, { title: 'Pay Austin Energy', why: 'due Friday', due: '', section: 'misc' }] } };
+    cloud.listeners.forEach(cb => cb({ val: () => cloud.val }));
+    await sleep(400);
+    eq(L.w.digestGet().last.at, at2, 'second delivery replaced the first');
+    eq(L.w.digestGet().suggestions.length, 2, 'repeated title skipped, new one added');
+    eq(P.w.digestGet().suggestions.length, 2, 'phone converged');
+    eq(cloud.val.digestInbox, undefined, 'inbox cleared again');
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

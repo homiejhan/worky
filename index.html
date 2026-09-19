@@ -427,53 +427,23 @@
         </label>
       </div>
       <div class="dg-fields" id="digestFields">
-        <div class="modal-sub" id="digestGmailLine">Not connected.</div>
-        <button class="gcal-connect-btn" id="digestGmailBtn">Connect Gmail</button>
+        <div class="modal-sub" id="digestStatusLine">No digest delivered yet.</div>
+        <div class="modal-sub">Built every morning around 6:30 by GitHub Actions in your <code>worky</code> repo, on a model you host, and delivered here through sync. Nothing runs on this device.</div>
 
-        <div class="dg-field-label">Ollama on this device</div>
+        <div class="dg-field-label">Run it from this device</div>
         <div class="theme-inline">
-          <input class="theme-text" id="digestEngineUrl" type="url" placeholder="http://localhost:11434" autocomplete="off" spellcheck="false">
-          <button class="modal-primary" id="digestEngineTestBtn">Test</button>
+          <input class="theme-text" id="digestGithubToken" type="password" placeholder="GitHub token (Actions: read &amp; write)" autocomplete="off" spellcheck="false" aria-label="GitHub token">
+          <button class="modal-primary" id="digestGithubSaveBtn">Save</button>
         </div>
-        <select class="theme-select" id="digestModelSelect" aria-label="Model"></select>
-        <div class="theme-bg-status" id="digestEngineStatus"></div>
+        <div class="theme-bg-status" id="digestGithubStatus"></div>
+        <div class="modal-sub">Create one at GitHub → Settings → Developer settings → Fine-grained tokens, limited to <code>homiejhan/worky</code> with <b>Actions: Read and write</b>. It stays on this device.</div>
 
         <div class="theme-bg-actions">
           <button class="modal-file-btn" id="digestRunSettingsBtn">Run digest now</button>
+          <button class="modal-file-btn" id="digestOpenRunBtn" style="display:none">Open latest run</button>
           <button class="modal-file-btn" id="digestSampleBtn">Load sample</button>
           <button class="modal-file-btn" id="digestClearBtn" style="display:none">Clear digest</button>
         </div>
-
-        <div class="dg-field-label">Schedule</div>
-        <div class="settings-view-row">
-          <span class="settings-view-name">Run automatically</span>
-          <label class="gcal-toggle">
-            <input type="checkbox" id="digestSchedToggle">
-            <span class="gcal-toggle-track"></span>
-          </label>
-        </div>
-        <div id="digestSchedFields">
-          <div class="theme-inline">
-            <input class="theme-text" id="digestSchedTime" type="time" value="07:00" aria-label="Time of day">
-            <button class="modal-primary" id="digestSchedAddBtn">Add time</button>
-          </div>
-          <div class="dg-sched-times" id="digestSchedTimes"></div>
-          <div class="theme-bg-status" id="digestSchedStatus"></div>
-        </div>
-
-        <div class="dg-field-label">Which device does the work</div>
-        <div class="settings-view-row">
-          <span class="settings-view-name">Use this device to run digests</span>
-          <label class="gcal-toggle">
-            <input type="checkbox" id="digestAutorunToggle">
-            <span class="gcal-toggle-track"></span>
-          </label>
-        </div>
-        <div class="theme-bg-status" id="digestRunnerLine"></div>
-        <div class="theme-inline">
-          <input class="theme-text" id="digestDeviceName" type="text" maxlength="40" placeholder="This device's name" autocomplete="off" aria-label="This device's name">
-        </div>
-        <div class="modal-sub">Turn this on only where Ollama runs (a laptop that stays awake). Phones and other devices then press "Run on another device" and get the result through sync.</div>
       </div>
     </div>
 

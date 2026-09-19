@@ -1,4 +1,7 @@
-/* Email digest — headless tests (node test_digest.js; needs `npm i jsdom`). */
+/* Email digest — headless tests (node test_digest.js; needs `npm i jsdom`).
+ * The digest is built on GitHub and delivered through Firebase; these tests
+ * cover the app side: state, the suggestion pool, rendering, delivery merge,
+ * and the GitHub "Run now" trigger against a fake GitHub API. */
 const { JSDOM } = require('jsdom');
 const fs = require('fs');
 const path = require('path');
@@ -32,7 +35,7 @@ const b64url = s => Buffer.from(s, 'utf8').toString('base64').replace(/\+/g, '-'
 const jsonRes = (obj, status = 200) => ({ ok: status < 300, status, json: async () => obj });
 const dbd = w => w.eval('dbdTasks');
 const savedDigest = w => JSON.parse(w.localStorage.getItem('focus-app-state')).digest;
-const token = () => JSON.stringify({ access_token: 'tok', expires_at: Date.now() + 3600e3, email: 'me@example.com' });
+
 
 console.log('\n── 0. Sample digest carries suggested tasks ──');
 {
@@ -55,106 +58,6 @@ console.log('\n── 0. Sample digest carries suggested tasks ──');
   eq(w.digestNormalizeDue('2099-01-01'), '', 'far-future dates dropped');
   eq(w.digestNormalizeDue('tomorrow'), (() => { const x = new Date(); x.setDate(x.getDate()+1); return w.digestDateKey(x); })(), 'tomorrow resolves');
   eq(w.digestNormalizeDue('whenever'), '', 'unparseable → empty');
-  eq(w.digestParseTasks('not json'), null, 'parse returns null on garbage');
-  eq(w.digestParseTasks('{"tasks":"nope"}'), null, 'parse returns null when tasks is not an array');
-}
-
-console.log('\n── 0b. Scheduler: fires once per slot, only on the device that opted in ──');
-{
-  const { w } = boot({ storage: { 'focus-gmail-token': JSON.stringify({ access_token: 'tok', expires_at: new Date(2030, 0, 1).getTime(), email: 'me@example.com' }), 'focus-digest-engine': JSON.stringify({ url: 'http://localhost:11434', model: 'm', autorun: true }) } });
-  w.eval('digestRunNow = async function(o){ window.__runs = (window.__runs||0)+1; window.__lastOpts = o; }');
-  w.digestGet().enabled = true;
-  w.eval('Date.now = () => ' + new Date(2026, 8, 13, 9, 30).getTime());   // schedule edited at 9:30
-  w.digestScheduleSet({ enabled: true, times: ['21:00', '07:00'] });
-  eq(w.digestGet().schedule.times.join(','), '07:00,21:00', 'times saved sorted');
-  eq(w.digestGet().lastScheduled, '2026-09-13 07:00', 'editing the schedule claims the already-passed 7:00 instead of running it');
-  eq(w.digestNextRunLabel(), 'today 9:00 PM', 'next run is the 21:00 slot');
-  ok(!w.digestScheduleTick(), 'tick right after editing does not run');
-  eq(w.__runs || 0, 0, 'no run yet');
-  /* now pretend the app was closed at 21:00 and reopened at 23:30 */
-  w.eval('Date.now = () => ' + new Date(2026, 8, 13, 23, 30).getTime());
-  eq(w.digestScheduleDue().key, '2026-09-13 21:00', '21:00 slot is due at 23:30 (within the 12h grace)');
-  ok(w.digestScheduleTick(), 'tick starts the run');
-  eq(w.__runs, 1, 'digestRunNow called once');
-  ok(w.__lastOpts && w.__lastOpts.scheduled, 'flagged as scheduled');
-  eq(w.digestGet().lastScheduled, '2026-09-13 21:00', 'slot claimed');
-  ok(!w.digestScheduleTick(), 'second tick in the same slot does nothing');
-  eq(w.__runs, 1, 'still one run');
-  eq(w.digestNextRunLabel(), 'tomorrow 7:00 AM', 'next run label moves to tomorrow 7:00');
-  w.eval('Date.now = () => ' + new Date(2026, 8, 14, 7, 1).getTime());
-  ok(w.digestScheduleTick(), '7:00 slot fires at 7:01');
-  eq(w.digestGet().lastScheduled, '2026-09-14 07:00', 'slot claimed');
-  w.eval('Date.now = () => ' + new Date(2026, 8, 14, 8, 0).getTime());
-  w.digestScheduleSet({ times: ['07:00'] });                                 // single daily slot
-  w.eval('Date.now = () => ' + new Date(2026, 8, 15, 20, 0).getTime());   // laptop closed all day — 7:00 was 13h ago
-  ok(!w.digestScheduleTick(), 'a slot more than 12h old is not run late');
-  eq(w.digestGet().lastScheduled, '2026-09-14 07:00', 'and not claimed');
-  w.eval('Date.now = () => ' + new Date(2026, 8, 16, 7, 0).getTime());
-  ok(w.digestScheduleTick(), 'the next 7:00 fires on the minute');
-  /* device that did not opt in */
-  w.digestEngineSave({ autorun: false });
-  w.digestGet().lastScheduled = '';
-  ok(!w.digestScheduleTick(), 'autorun off → this device never runs the schedule');
-  eq(w.digestGet().lastScheduled, '', 'and does not claim the slot for others');
-  /* schedule survives reload via state */
-  w.saveToLocal();
-  const { w: w2 } = boot({ storage: { 'focus-app-state': w.localStorage.getItem('focus-app-state') } });
-  eq(w2.digestGet().schedule.times.join(','), '07:00', 'schedule persisted in synced state');
-  eq(w2.digestGet().schedule.enabled, true, 'enabled persisted');
-  /* expired gmail at schedule time → error on card, slot still claimed */
-  const { w: w3, d: d3 } = boot({ storage: { 'focus-digest-engine': JSON.stringify({ url: 'http://localhost:11434', model: 'm', autorun: true }) } });
-  w3.eval('Date.now = () => ' + new Date(2026, 8, 13, 6, 0).getTime());
-  w3.digestGet().enabled = true; w3.digestScheduleSet({ enabled: true, times: ['07:00'] });
-  const t930 = new Date(2026, 8, 13, 9, 30).getTime();
-  w3.eval('Date.now = () => ' + t930);
-  ok(w3.digestScheduleTick(), 'no gmail on a runner → tries a silent Gmail renewal first (navigates away)');
-  const renew = JSON.parse(w3.localStorage.getItem('focus-gmail-renew'));
-  ok(renew && renew.at === t930 && !renew.ok, 'renewal attempt recorded');
-  eq(w3.digestGet().lastScheduled, '', 'slot NOT claimed — it runs after the redirect brings a token back');
-  ok(!w3.digestScheduleTick(), 'a second tick within 20 min does not redirect again');
-  /* simulate: Google said interaction_required on the way back */
-  w3.localStorage.setItem('focus-gmail-renew', JSON.stringify({ at: t930, ok: false, error: 'interaction_required' }));
-  w3.eval('Date.now = () => ' + (t930 + 60000));
-  ok(!w3.digestScheduleTick(), 'renewal failed → this slot is skipped');
-  ok(d3.querySelector('#homeContainer-d .dg-status-text') && /Gmail/.test(d3.querySelector('#homeContainer-d .dg-status-text').textContent), 'card explains the skip');
-  eq(w3.digestGet().lastScheduled, '2026-09-13 07:00', 'slot claimed so it does not retry every minute');
-}
-
-let streamTests = async () => {};
-{
-  const { w } = boot({ storage: { 'focus-digest-engine': JSON.stringify({ url: 'http://localhost:11434', model: 'm' }) } });
-  const ndjson = lines => new ReadableStream({ start(c) { lines.forEach(l => c.enqueue(new TextEncoder().encode(l + '\n'))); c.close(); } });
-  let body = null;
-  w.fetch = async (url, o) => {
-    body = JSON.parse(o.body);
-    return { ok: true, status: 200, body: ndjson([
-      JSON.stringify({ message: { content: 'Hello ' }, done: false }),
-      JSON.stringify({ message: { content: 'world' }, done: false }),
-      JSON.stringify({ message: { content: '' }, done: true }),
-    ]) };
-  };
-  streamTests = async () => {
-    console.log('\n── 0c (async). Streaming Ollama replies + stall detection ──');
-    const out = await w.ollamaChat('sys', 'user', { numPredict: 10 });
-    eq(out, 'Hello world', 'streamed chunks are joined');
-    eq(body.stream, true, 'requests a stream');
-    w.fetch = async () => ({ ok: true, status: 200, json: async () => ({ message: { content: 'plain' } }) });
-    eq(await w.ollamaChat('s', 'u', {}), 'plain', 'non-stream body still works');
-    w.fetch = async () => ({ ok: true, status: 200, body: ndjson([JSON.stringify({ error: 'model "m" not found' })]) });
-    let err = null; try { await w.ollamaChat('s', 'u', {}); } catch(e) { err = e; }
-    ok(err && /not found/.test(err.message) && err.kind === 'engine', 'in-stream error surfaces as an engine error');
-    /* stall: a stream that never sends anything */
-    w.eval('OLLAMA_STALL_MS = 60');
-    w.fetch = async () => ({ ok: true, status: 200, body: new ReadableStream({ start() {} }) });
-    err = null; try { await w.ollamaChat('s', 'u', {}); } catch(e) { err = e; }
-    ok(err && /went quiet/.test(err.message), 'a silent model is reported instead of hanging: ' + (err && err.message.slice(0, 40)));
-    /* user cancel still reads as abort */
-    const ac = new w.AbortController();
-    w.fetch = async (u, o) => new Promise((_, rej) => o.signal.addEventListener('abort', () => rej(Object.assign(new Error('x'), { name: 'AbortError' }))));
-    const p = w.ollamaChat('s', 'u', {}, ac.signal); ac.abort();
-    err = null; try { await p; } catch(e) { err = e; }
-    eq(err && err.name, 'AbortError', 'cancel propagates as AbortError');
-  };
 }
 
 console.log('\n── 1. Default boot: digest off, nothing on Home, state carries the record ──');
@@ -168,7 +71,7 @@ console.log('\n── 1. Default boot: digest off, nothing on Home, state carrie
   eq(JSON.stringify(c.dg), '{"en":0}', 'compressed form is tiny when empty');
 }
 
-console.log('\n── 2. Settings toggle shows the card; empty state offers Connect + sample ──');
+console.log('\n── 2. Settings toggle shows the card; empty state explains GitHub + offers sample ──');
 {
   const { w, d } = boot();
   d.getElementById('settingsBtn').click();
@@ -179,8 +82,9 @@ console.log('\n── 2. Settings toggle shows the card; empty state offers Conn
   eq(d.getElementById('digestFields').style.display, '', 'fields shown when on');
   ok(d.querySelector('#homeContainer-d .dg-section'), 'card renders on desktop Home');
   ok(d.querySelector('#homeContainer-m .dg-section'), 'card renders on mobile Home');
-  ok(d.querySelector('.dg-empty-text').textContent.includes('Connect Gmail'), 'empty copy invites connecting Gmail');
-  ok(d.querySelector('.dg-empty button[onclick="gmailConnect()"]'), 'Connect Gmail button present');
+  ok(d.querySelector('.dg-empty-text').textContent.includes('GitHub'), 'empty copy explains GitHub builds it');
+  ok(d.querySelector('.dg-empty button[onclick="openSettings()"]'), 'Open Settings button present (no token yet)');
+  ok(d.querySelector('.dg-btn[onclick="digestRunNow()"]'), 'Run now button offered');
   ok(d.querySelector('.dg-empty button[onclick="digestLoadSample()"]'), 'sample button present');
   eq(savedDigest(w).enabled, true, 'enabled persisted');
 }
@@ -232,6 +136,10 @@ console.log('\n── 5. Compress/decompress round trip keeps the digest ──'
   const n = w.normalizeDigest({ enabled: 'yes', last: { markdown: '   ' } });
   eq(n.last, null, 'blank markdown normalises to no digest');
   eq(w.normalizeDigest(null).enabled, false, 'null normalises to disabled');
+  const old = w.normalizeDigest({ enabled: true, schedule: { enabled: true, times: ['07:00'] }, lastScheduled: '2026-01-01 07:00', request: { id: 3 } });
+  eq(old.schedule, undefined, 'legacy schedule field dropped');
+  eq(old.request, undefined, 'legacy request field dropped');
+  eq(JSON.stringify(w.compressDigest({ enabled: true, schedule: { enabled: true, times: ['07:00'] } })), '{"en":1}', 'legacy fields do not survive compression');
 }
 
 console.log('\n── 6. Reload persistence + a synced copy shows up on another device ──');
@@ -241,191 +149,132 @@ console.log('\n── 6. Reload persistence + a synced copy shows up on another 
   const raw = a.w.localStorage.getItem('focus-app-state');
   const b = boot({ storage: { 'focus-app-state': raw } });
   ok(b.d.querySelector('#homeContainer-d .dg-md'), 'second device renders the digest from state alone');
-  eq(b.w.gmailIsConnected(), false, 'gmail token is device-local (not carried by state)');
-  ok(b.d.querySelector('.dg-btn[onclick="digestRunNow()"]'), 'Run button still offered (it explains what is missing)');
+  eq(b.w.digestGithubGet().token, '', 'GitHub token is device-local (not carried by state)');
+  ok(b.d.querySelector('.dg-btn[onclick="digestRunNow()"]'), 'Run now still offered');
 }
 
-console.log('\n── 7. OAuth redirect with the gmail state tag is routed to Gmail, not Calendar ──');
+console.log('\n── 7. Delivered digest (users/<uid>/digestInbox) merges like a run ──');
 {
-  const { w, d } = boot({ url: 'https://localhost/worky/#access_token=abc&expires_in=3599&state=worky-gmail&token_type=Bearer' });
-  eq(w.gmailIsConnected(), true, 'gmail token stored');
-  eq(w.gcalIsConnected(), false, 'calendar did not grab the token');
-  ok(JSON.parse(w.localStorage.getItem('focus-gmail-token')).access_token === 'abc', 'token persisted device-locally');
-  eq(savedDigest(w).enabled, true, 'connecting turns the card on');
-  eq(w.location.hash, '', 'hash cleaned');
-  ok(d.querySelector('.dg-empty-text').textContent.includes('Pick the Ollama model'), 'next step is picking a model');
+  const { w, d } = boot();
+  const inbox = (at, n) => ({ at, markdown: `## 🔝 Top of the inbox\nrun ${n}\n\n## 📰 Tech News (TLDR)\n- a story`, count: 12, model: 'qwen3.5-4b', source: 'github',
+    tasks: [{ title: `Reply to Acme recruiter ${n}`, why: 'asked for times', due: '2026-09-22', section: 'jobs' }, { title: 'Pay the water bill', why: '', due: 'garbage', section: 'nope' }] });
+  w.eval('syncReconciled = false');
+  w.digestInboxSeen(inbox(1000, 1));
+  eq(w.digestGet().last, null, 'held until the sync baseline is settled');
+  w.eval('syncReconciled = true; syncPendingRemote = { state: "{}", updatedAt: 1 }');
+  w.digestInboxFlush();
+  eq(w.digestGet().last, null, 'held while the Import/Export modal is open');
+  w.eval('syncPendingRemote = null'); w.digestInboxFlush();
+  const dg = w.digestGet();
+  ok(dg.enabled && dg.last && dg.last.source === 'github' && dg.last.count === 12, 'digest.last taken from the inbox and the card enabled');
+  eq(dg.suggestions.length, 2, 'both tasks entered the pool');
+  eq(dg.suggestions[0].due, '2026-09-22', 'valid due kept');
+  eq(dg.suggestions[1].due, '', 'invalid due dropped');
+  eq(dg.suggestions[1].section, 'misc', 'unknown section → misc');
+  ok(d.querySelector('#homeContainer-d .dg-todo-add'), 'home card shows Add buttons');
+  ok(d.querySelector('#homeContainer-d .dg-meta').textContent.includes('GitHub'), 'meta line says GitHub');
+  w.digestInboxSeen(inbox(1000, 1));
+  eq(w.digestGet().suggestions.length, 2, 'same inbox again is ignored');
+  w.digestInboxSeen(inbox(900, 0));
+  eq(w.digestGet().last.at, 1000, 'older inbox ignored');
+  w.digestInboxSeen(inbox(2000, 2));
+  eq(w.digestGet().last.at, 2000, 'newer inbox applied');
+  eq(w.digestGet().suggestions.length, 3, 'new title added, duplicate skipped');
+  [null, 'x', {}, { at: 1, markdown: '' }, { at: 0, markdown: 'hi' }].forEach(v => w.digestInboxSeen(v));
+  eq(w.digestGet().last.at, 2000, 'garbage inboxes ignored');
+  w.eval('syncOnRemoteValue({ val: () => ({ state: JSON.stringify(gatherState()), updatedAt: 1, client: syncClientId, digestInbox: ' + JSON.stringify(inbox(3000, 3)) + ' }) })');
+  eq(w.digestGet().last.at, 3000, 'listener hook merges digestInbox from the user node');
+  d.getElementById('settingsBtn').click();
+  ok(d.getElementById('digestStatusLine').textContent.startsWith('Last digest:'), 'settings status line shows the last digest');
 }
 
-console.log('\n── 8. Full pipeline against a fake Gmail + fake Ollama ──');
+console.log('\n── 8. Add / Dismiss / Add all against the pool ──');
+{
+  const { w, d } = boot();
+  w.digestLoadSample();
+  const first = w.digestGet().suggestions[0];
+  const before = w.eval('dbdTasks.length');
+  ok(w.digestAddTask(first.id), 'Add returns true');
+  eq(w.eval('dbdTasks.length'), before + 1, 'a Day by Day task was created');
+  eq(w.digestGet().suggestions[0].status, 'added', 'suggestion marked added');
+  ok(d.querySelector('#homeContainer-d .dg-todo.added .dg-todo-added'), 'row shows Added ✓');
+  eq(w.digestAddTask(first.id), false, 'adding twice is a no-op');
+  w.digestAddAllTasks();
+  eq(w.digestVisibleSuggestions().filter(t => !w.digestTaskIsAdded(t)).length, 0, 'Add all clears the remaining ones');
+  w.eval('dbdTasks = dbdTasks.filter(t => t.id !== ' + first.id + ' + 0 * ' + w.digestGet().suggestions[0].dbdId + ')');
+  w.eval('dbdTasks = dbdTasks.filter(t => t.id !== ' + w.digestGet().suggestions[0].dbdId + ')');
+  w.renderHome();
+  ok(d.querySelector(`#homeContainer-d .dg-todo[data-dgt="${first.id}"] .dg-todo-add`), 'deleting the task re-offers the suggestion');
+}
+
+console.log('\n── 9. Run now: token gate, dispatch, watch the run, delivery ends it ──');
 {
   const calls = [];
-  const emails = {
-    m1: { id: 'm1', internalDate: String(Date.now() - 3600e3), payload: { mimeType: 'multipart/alternative', headers: [
-      { name: 'From', value: 'TLDR <dan@tldrnewsletter.com>' }, { name: 'Subject', value: 'TLDR 2026-09-07' }],
-      parts: [{ mimeType: 'text/html', body: { data: b64url('<html><body><h2>Big Story</h2><p>Postgres 18 ships.</p><a href="https://example.com/pg">Read more</a><style>.x{}</style></body></html>') } }] } },
-    m2: { id: 'm2', internalDate: String(Date.now() - 7200e3), payload: { mimeType: 'text/plain', headers: [
-      { name: 'From', value: 'Northwind Recruiting <talent@northwind.example>' }, { name: 'Subject', value: 'Your application: next steps' }],
-      body: { data: b64url('Please complete the assessment by Friday.') } } },
-    m3: { id: 'm3', internalDate: String(Date.now() - 1800e3), payload: { mimeType: 'text/plain', headers: [
-      { name: 'From', value: 'Shop <deals@shop.example>' }, { name: 'Subject', value: '50% off everything — last chance' }],
-      body: { data: b64url('Buy now.') } } },
-    m4: { id: 'm4', internalDate: String(Date.now() - 900e3), payload: { mimeType: 'text/plain', headers: [
-      { name: 'From', value: 'Mom <mom@example.com>' }, { name: 'Subject', value: 'Dinner Sunday?' }],
-      body: { data: b64url('Are you free Sunday at 6?') } } },
+  let runsResponse = { workflow_runs: [] };
+  const fakeFetch = async (url, opts) => {
+    calls.push({ url: String(url), method: (opts && opts.method) || 'GET', auth: opts && opts.headers && opts.headers.Authorization });
+    if (/dispatches$/.test(url)) return { status: 204, ok: true, json: async () => ({}) };
+    if (/\/runs\?/.test(url)) return { status: 200, ok: true, json: async () => runsResponse };
+    return { status: 404, ok: false, json: async () => ({}) };
   };
-  const fetchImpl = async (url, opts = {}) => {
-    calls.push({ url, opts });
-    if (url.includes('/users/me/messages?')) { await sleep(8); return jsonRes({ messages: Object.keys(emails).map(id => ({ id })) }); }
-    const mm = url.match(/\/users\/me\/messages\/(\w+)\?/);
-    if (mm) return mm[1] === 'm3' ? jsonRes(emails.m3) : jsonRes(emails[mm[1]]);
-    if (url.endsWith('/api/tags')) return jsonRes({ models: [{ name: 'qwen2.5:14b' }, { name: 'llama3.1:8b' }] });
-    if (url.endsWith('/api/chat')) {
-      const body = JSON.parse(opts.body);
-      const sys = body.messages[0].content;
-      const user = body.messages[1].content;
-      if (sys.startsWith('Below is today')) return jsonRes({ message: { content: '## 🔝 Top of the inbox\nTwo things matter.\n\n## ✅ Action items\n- [ ] Finish the Northwind assessment by Friday' } });
-      if (sys.startsWith('You turn a daily email digest')) {
-        ok(body.format === 'json', 'tasks call asks Ollama for JSON');
-        ok(/^Today is \d{4}-\d{2}-\d{2} \(\w+\)\./.test(user), 'tasks call is given today\'s date');
-        ok(user.includes('- [ ] Finish the Northwind assessment by Friday'), 'tasks call sees the overview checklist');
-        return jsonRes({ message: { content: '```json\n{"reasoning":"Northwind needs the assessment; Mom needs a reply.","tasks":[{"title":"Finish the Northwind assessment","why":"Due Friday.","due":"friday","section":"jobs"},{"title":"Reply to Mom about Sunday dinner","why":"Dinner Sunday at 6.","due":"1999-01-01","section":"misc"},{"title":"Finish the Northwind assessment","why":"dupe","due":"","section":"jobs"},{"title":"","why":"blank","due":"","section":"misc"}]}\n```' } });
-      }
-      if (sys.includes('Section: 📰')) { ok(user.includes('Read more (https://example.com/pg)') && !user.includes('.x{}'), 'html email became text with links kept, styles dropped'); return jsonRes({ message: { content: '- **Postgres 18 ships** — async I/O. [Read](https://example.com/pg)' } }); }
-      if (sys.includes('Section: 💼')) return jsonRes({ message: { content: '⚠️ **Northwind** assessment due Friday\n\n| Company | Role | Status | Action needed | Deadline |\n|---|---|---|---|---|\n| **Northwind** | — | Assessment | Complete it | Friday |' } });
-      if (sys.includes('Section: 📬')) return jsonRes({ message: { content: '- **Mom** — dinner Sunday at 6 — reply needed' } });
-      return jsonRes({ message: { content: 'unexpected section' } });
-    }
-    return jsonRes({}, 404);
-  };
-  const { w, d } = boot({ storage: { 'focus-gmail-token': token() }, fetchImpl });
-  w.digestGet().enabled = true; w.saveToLocal(); w.renderHome();
-  d.getElementById('settingsBtn').click();
-  await_(async () => {
-    await w.digestTestEngine();
-    const sel = d.getElementById('digestModelSelect');
-    eq(sel.options.length, 2, 'Test lists the models Ollama has');
-    eq(JSON.parse(w.localStorage.getItem('focus-digest-engine')).model, 'qwen2.5:14b', 'first model picked and saved device-locally');
-    ok(d.getElementById('digestEngineStatus').textContent.includes('2 models'), 'status line reports the count');
-    w.closeModal('settingsModal');
+  const { w, d } = boot({ fetchImpl: fakeFetch });
+  w.eval('DIGEST_RUN_POLL_MS = 5');
+  w.digestGet().enabled = true; w.renderHome();
+  w.digestRunNow();
+  eq(calls.length, 0, 'no token → nothing dispatched');
+  ok(d.getElementById('settingsModal').classList.contains('show'), 'no token → Settings opened');
+  ok(d.getElementById('digestRunSettingsBtn').disabled, 'Run button disabled in Settings without a token');
+  const inp = d.getElementById('digestGithubToken');
+  inp.value = 'github_pat_TEST'; d.getElementById('digestGithubSaveBtn').click();
+  eq(JSON.parse(w.localStorage.getItem('focus-digest-github')).token, 'github_pat_TEST', 'token saved device-locally');
+  eq(inp.value, '••••••••••••', 'field shows a mask, not the token');
+  ok(!d.getElementById('digestRunSettingsBtn').disabled, 'Run button enabled with a token');
+  w.closeModal('settingsModal');
+  const t0 = Date.now();
+  const run = w.digestRunNow();
+  run.then(async () => {
+    const disp = calls.find(c => /dispatches$/.test(c.url));
+    ok(disp && disp.method === 'POST', 'workflow_dispatch POSTed');
+    ok(disp && disp.url.includes('/repos/homiejhan/worky/actions/workflows/digest.yml/dispatches'), 'to the right workflow');
+    eq(disp && disp.auth, 'Bearer github_pat_TEST', 'with the token');
+    ok(d.querySelector('#homeContainer-d .dg-run'), 'run status line shown on the card');
+    eq(d.querySelector('#homeContainer-d .dg-btn[onclick="digestRunNow()"]'), null, 'Run now hidden while busy');
+    runsResponse = { workflow_runs: [{ status: 'in_progress', conclusion: null, html_url: 'https://github.com/homiejhan/worky/actions/runs/1', created_at: new Date(t0).toISOString(), run_started_at: new Date(t0).toISOString() }] };
+    await sleep(60);
+    ok(d.querySelector('#homeContainer-d .dg-run').textContent.includes('Running on GitHub'), 'status reflects in_progress');
+    ok(d.querySelector('#homeContainer-d .dg-run a[href="https://github.com/homiejhan/worky/actions/runs/1"]'), 'link to the run');
+    ok(JSON.parse(w.localStorage.getItem('focus-digest-run')).status === 'in_progress', 'watched run persisted for reloads');
+    runsResponse = { workflow_runs: [{ status: 'completed', conclusion: 'success', html_url: 'https://github.com/homiejhan/worky/actions/runs/1', created_at: new Date(t0).toISOString(), run_started_at: new Date(t0).toISOString() }] };
+    await sleep(40);
+    ok(d.querySelector('#homeContainer-d .dg-run').textContent.includes('arriving'), 'success → waiting for delivery');
+    w.eval('syncReconciled = true');
+    w.digestInboxSeen({ at: Date.now(), markdown: '## 🔝 Top of the inbox\nhi', count: 3, model: 'qwen3.5-4b', source: 'github', tasks: [] });
+    eq(d.querySelector('#homeContainer-d .dg-run'), null, 'delivery clears the run status');
+    eq(w.localStorage.getItem('focus-digest-run'), null, 'and the persisted run');
+    ok(d.querySelector('#homeContainer-d .dg-btn[onclick="digestRunNow()"]'), 'Run now back');
 
-    const run = w.digestRunNow();
-    await sleep(5);
-    ok(d.querySelector('.dg-spinner'), 'spinner shows while running');
-    await run;
-    const chat = calls.filter(c => c.url.endsWith('/api/chat'));
-    eq(chat.length, 5, 'three section calls (tldr, jobs, misc) + overview + tasks — promo skipped, empty sections skipped');
-    ok(chat.every(c => JSON.parse(c.opts.body).model === 'qwen2.5:14b'), 'model passed to every call');
-    ok(calls.some(c => c.url.includes('newer_than%3A1d')), 'gmail query covers the past 24 hours');
-    ok(calls.some(c => c.url.includes('maxResults=100')), 'lists in full pages, not capped at 80');
-    ok(calls.filter(c => /messages\/\w+\?format=full/.test(c.url)).every(c => c.opts.headers.Authorization === 'Bearer tok'), 'bearer token sent');
-    const last = savedDigest(w).last;
-    ok(last && last.markdown.includes('## 📰 Tech News (TLDR)') && last.markdown.includes('## 🏗️ ByteByteGo\n_Nothing today_'), 'assembled digest keeps every section, empty ones say Nothing today');
-    ok(last.markdown.startsWith('## 🔝 Top of the inbox'), 'overview first');
-    ok(!last.markdown.includes('## ✅'), 'checklist no longer lives in the markdown (it became suggested tasks)');
-    ok(!('tasks' in last), 'tasks no longer live on last (they are in the pool)');
-    const pool = savedDigest(w).suggestions;
-    eq(pool.length, 2, 'tasks parsed from fenced JSON, duplicate and blank dropped, merged into the pool');
-    eq(pool[0].title, 'Finish the Northwind assessment', 'first task kept in model order');
-    ok(/^\d{4}-\d{2}-\d{2}$/.test(pool[0].due) && new Date(pool[0].due + 'T00:00:00').getDay() === 5, '"friday" resolved to the next Friday');
-    eq(pool[1].due, w.dbdTodayKey(), 'a past due date is clamped to today');
-    eq(pool[1].section, 'misc', 'section preserved');
-    eq(last.source, 'laptop', 'manual run source');
-    eq(d.querySelectorAll('#homeContainer-d .dg-todo').length, 2, 'card lists the suggested tasks');
-    eq(d.querySelectorAll('#homeContainer-d .dg-todo-add').length, 2, 'each has its own Add button');
-    ok(d.querySelector('#homeContainer-d .dg-todo-addall'), 'Add all offered when more than one remains');
-
-    /* add one */
-    const dbdBefore = dbd(w).length;
-    d.querySelector('#homeContainer-d .dg-todo[data-dgt="1"] .dg-todo-add').click();
-    eq(dbd(w).length, dbdBefore + 1, 'Add creates one Day by Day task');
-    const made = dbd(w)[dbd(w).length - 1];
-    eq(made.text, 'Finish the Northwind assessment', 'task text = suggestion title');
-    eq(made.due, pool[0].due, 'task due = suggestion due');
-    eq(made.done, false, 'not done');
-    eq(savedDigest(w).suggestions[0].dbdId, made.id, 'suggestion remembers which dbd task it became (synced)');
-    eq(savedDigest(w).suggestions[0].status, 'added', 'status = added');
-    eq(d.querySelectorAll('#homeContainer-d .dg-todo-add').length, 1, 'that Add button becomes Added ✓');
-    ok(d.querySelector('#homeContainer-d .dg-todo[data-dgt="1"].added'), 'row marked added');
-    eq(d.querySelector('#homeContainer-d .dg-todo-addall'), null, 'Add all hidden with one left');
-    eq(w.digestAddTask(1), false, 'adding the same suggestion twice is a no-op');
-    eq(dbd(w).length, dbdBefore + 1, 'still one task');
-
-    /* delete the dbd task → suggestion is offerable again */
-    w.removeDbdTask(made.id);
-    w.renderHome();
-    eq(d.querySelectorAll('#homeContainer-d .dg-todo-add').length, 2, 'removing the created task re-enables Add');
-
-    /* add all */
-    w.digestAddAllTasks();
-    eq(dbd(w).length, dbdBefore + 2, 'Add all adds every remaining suggestion');
-    eq(d.querySelectorAll('#homeContainer-d .dg-todo-add').length, 0, 'no Add buttons left');
-    ok(d.querySelector('#homeContainer-d .dg-todos-count').textContent.includes('all added'), 'count reads all added');
-
-    /* state round trip keeps tasks and their added links */
-    const raw = w.localStorage.getItem('focus-app-state');
-    const { w: w2, d: d2 } = boot({ storage: { 'focus-app-state': raw } });
-    const t2 = w2.digestGet().suggestions;
-    eq(t2.length, 2, 'suggestions survive reload');
-    ok(t2.every(x => x.status === 'added' && w2.dbdById(x.dbdId)), 'added links survive reload and still resolve');
-    eq(d2.querySelectorAll('#homeContainer-d .dg-todo.added').length, 2, 'reloaded card shows both as added');
-    eq(last.count, 4, 'count = emails processed');
-    eq(last.model, 'qwen2.5:14b', 'model recorded');
-    eq(last.source, 'laptop', 'source recorded');
-    ok(d.querySelector('#homeContainer-d .dg-md table'), 'card shows the rendered result');
-    eq(d.querySelector('.dg-spinner'), null, 'spinner gone');
-
-    /* tasks call breaks (garbage output) → checklist fallback, digest still succeeds */
-    w.fetch = async (url, o = {}) => {
-      if (url.endsWith('/api/chat') && JSON.parse(o.body).messages[0].content.startsWith('You turn a daily')) return jsonRes({ message: { content: 'sorry, no json here' } });
-      return fetchImpl(url, o);
-    };
+    /* failure path */
+    runsResponse = { workflow_runs: [] };
     await w.digestRunNow();
-    const fb = savedDigest(w).suggestions;
-    eq(fb.length, 3, 'fallback: checklist task merged into the pool (the two earlier ones stay)');
-    eq(fb[2].title, 'Finish the Northwind assessment by Friday', 'fallback title = checklist line');
-    eq(fb[2].due, '', 'fallback has no due date');
-    eq(fb[2].status, 'pending', 'pending');
-    ok(fb[0].status === 'added' && fb[1].status === 'added', 'earlier accepted ones untouched by the new run');
-    eq(d.querySelectorAll('#homeContainer-d .dg-todo').length, 1, 'card now shows only the new pending one (added ones from before the run drop off)');
-    w.fetch = fetchImpl;
+    runsResponse = { workflow_runs: [{ status: 'completed', conclusion: 'failure', html_url: 'https://github.com/homiejhan/worky/actions/runs/2', created_at: new Date().toISOString(), run_started_at: new Date().toISOString() }] };
+    await sleep(60);
+    ok(d.querySelector('#homeContainer-d .dg-run.err'), 'failed run shows an error line');
+    ok(d.querySelector('#homeContainer-d .dg-run .dg-run-x'), 'with a dismiss button');
+    w.digestRunDismiss();
+    eq(d.querySelector('#homeContainer-d .dg-run'), null, 'dismiss clears it');
 
-    /* engine unreachable → readable error with a Settings shortcut */
-    w.fetch = async (url) => { if (url.includes('/users/me/messages')) return fetchImpl(url, { headers: {} }); throw new TypeError('Failed to fetch'); };
+    /* rejected token */
+    w.fetch = async (url, opts) => (/dispatches$/.test(url) ? { status: 401, ok: false, json: async () => ({}) } : { status: 200, ok: true, json: async () => ({ workflow_runs: [] }) });
     await w.digestRunNow();
-    ok(d.querySelector('.dg-status.error') && d.querySelector('.dg-status.error').textContent.includes("Can't reach Ollama"), 'engine failure surfaces on the card');
-    ok(d.querySelector('.dg-status.error button[onclick="openSettings()"]'), 'error offers Settings');
-    ok(d.querySelector('#homeContainer-d .dg-md'), 'previous digest still shown under the error');
-    w.digestDismissError();
-    eq(d.querySelector('.dg-status.error'), null, 'error dismissed');
+    ok(d.querySelector('#homeContainer-d .dg-run.err').textContent.includes('rejected the token'), '401 explains the token problem');
+    w.digestRunDismiss();
 
-    /* expired Gmail session → token dropped, Connect offered */
-    w.fetch = async (url) => url.includes('/users/me/messages') ? jsonRes({ error: 'x' }, 401) : jsonRes({});
-    await w.digestRunNow();
-    eq(w.gmailIsConnected(), false, '401 clears the token');
-    ok(d.querySelector('.dg-status.error button[onclick="gmailConnect()"]'), 'error offers Connect Gmail');
-
-    /* classify + clean helpers */
-    eq(w.digestClassify({ from: 'x@bytebytego.com', subject: 'How Discord stores messages', text: '' }), 'bytebytego', 'bytebytego routed');
-    eq(w.digestClassify({ from: 'news@substack.com', subject: 'Weekly', text: '' }), 'newsletter', 'newsletter routed');
-    eq(w.digestClassify({ from: 'a@b.c', subject: 'Hello', listId: '<list.example>', text: '' }), 'newsletter', 'List-Id counts as newsletter');
-    eq(w.digestClassify({ from: 'a@b.c', subject: 'Interview scheduling', text: '' }), 'jobs', 'jobs routed');
-    eq(w.digestClassify({ from: 'a@b.c', subject: 'Flash sale', text: '' }), 'skip', 'promo skipped');
-    eq(w.digestClassify({ from: 'a@b.c', subject: 'Receipt', text: 'thanks' }), 'misc', 'misc default');
-    eq(w.digestChunk([{ text: 'a'.repeat(10000) }, { text: 'b'.repeat(10000) }, { text: 'c'.repeat(100) }], 14000).length, 2, 'chunking respects the per-call budget');
-
-    /* collapse persists device-locally, digest still in state */
-    w.digestLoadSample();
-    d.querySelector('#homeContainer-d .dg-chev').click();
-    eq(d.querySelector('#homeContainer-d .dg-md'), null, 'collapsed hides the body');
-    ok(d.querySelector('#homeContainer-d .dg-chev.closed'), 'chevron rotated');
-    eq(JSON.parse(w.localStorage.getItem('focus-digest-ui')).collapsed, true, 'collapse persisted');
-    ok(savedDigest(w).last, 'digest still in state while collapsed');
-    w.digestClearLast();
-    eq(savedDigest(w).last, null, 'Clear digest removes it');
-    ok(d.querySelector('.dg-empty'), 'empty state returns');
+    /* remove token */
+    d.getElementById('settingsBtn').click();
+    d.getElementById('digestGithubSaveBtn').click();
+    eq(w.localStorage.getItem('focus-digest-github'), null, 'Remove clears the token');
 
     console.log(`\n${pass} passed, ${fail} failed`);
     process.exit(fail ? 1 : 0);
-  });
+  }).catch(e => { console.error(e); process.exit(1); });
 }
-function await_(fn) { streamTests().then(fn).catch(e => { console.error(e); process.exit(1); }); }

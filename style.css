@@ -2666,6 +2666,19 @@ body.format-mode .list-sched-row { display: flex; }
 .dg-empty-text { font-size: 13px; color: var(--ink-2); line-height: 1.5; max-width: 60ch; margin-bottom: 10px; }
 .dg-status-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 
+/* GitHub run status (Run now) */
+.dg-run {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 0 14px 10px; padding: 7px 10px;
+  border-radius: var(--radius-md);
+  background: var(--accent-dim); color: var(--ink);
+  font-size: 12.5px; line-height: 1.4;
+}
+.dg-run.err { background: var(--danger-dim); color: var(--danger); }
+.dg-run a { color: inherit; font-weight: 600; text-decoration: underline; }
+.dg-run-x { margin-left: auto; background: none; border: none; color: inherit; font-size: 15px; line-height: 1; cursor: pointer; opacity: .7; }
+.dg-run-x:hover { opacity: 1; }
+
 .dg-status { padding: 0 14px 12px; }
 .dg-status.error { padding-top: 2px; }
 .dg-status-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
