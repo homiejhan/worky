@@ -482,10 +482,32 @@ def build(llm, emails):
 
 # ── Firebase ─────────────────────────────────────────────────────────────────
 
+def firebase_service_account():
+    """The secret is the downloaded key file pasted whole; also accept it base64-encoded."""
+    raw = (os.environ.get("FIREBASE_SERVICE_ACCOUNT") or "").strip()
+    if not raw:
+        raise DigestError("FIREBASE_SERVICE_ACCOUNT is empty. Add it under Settings → Secrets (not Variables): "
+                          "the whole JSON key file from Firebase → Project settings → Service accounts.")
+    if not raw.startswith("{"):
+        try:
+            raw = base64.b64decode(raw).decode("utf-8").strip()
+        except Exception:
+            pass
+    try:
+        info = json.loads(raw)
+    except Exception:
+        raise DigestError("FIREBASE_SERVICE_ACCOUNT is not valid JSON. Paste the key file's full contents, "
+                          "starting with { and ending with }.")
+    for k in ("type", "project_id", "private_key", "client_email"):
+        if k not in info:
+            raise DigestError(f"FIREBASE_SERVICE_ACCOUNT is missing '{k}' — is it the service-account key file?")
+    return info
+
+
 def firebase_token():
     from google.oauth2 import service_account
     import google.auth.transport.requests
-    info = json.loads(os.environ["FIREBASE_SERVICE_ACCOUNT"])
+    info = firebase_service_account()
     creds = service_account.Credentials.from_service_account_info(info, scopes=[
         "https://www.googleapis.com/auth/userinfo.email",
         "https://www.googleapis.com/auth/firebase.database",
@@ -494,8 +516,9 @@ def firebase_token():
     return creds.token, info["project_id"]
 
 
-def firebase_deliver(payload):
-    token, project = firebase_token()
+def firebase_deliver(payload, token=None, project=None):
+    if not token:
+        token, project = firebase_token()
     db = os.environ.get("FIREBASE_DB_URL") or f"https://{project}-default-rtdb.firebaseio.com"
     uid = os.environ["WORKY_UID"]
     r = requests.put(f"{db}/users/{uid}/digestInbox.json", params={"access_token": token},
@@ -511,6 +534,17 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="skip the Firebase write; save digest.md locally")
     ap.add_argument("--out", default="digest.md")
     args = ap.parse_args()
+
+    # Check everything that can be checked cheaply BEFORE spending 30 minutes on the model.
+    missing = [k for k in ("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN") if not os.environ.get(k)]
+    if not args.dry_run:
+        missing += [k for k in ("FIREBASE_SERVICE_ACCOUNT", "WORKY_UID") if not os.environ.get(k)]
+    if missing:
+        raise DigestError("Missing secrets: " + ", ".join(missing) + " (Settings → Secrets and variables → Actions → Secrets tab).")
+    fb_token = fb_project = None
+    if not args.dry_run:
+        fb_token, fb_project = firebase_token()
+        log(f"firebase: service account ok (project {fb_project}, uid …{os.environ['WORKY_UID'][-4:]})")
 
     llm = LLM(os.environ.get("LLM_URL", "http://127.0.0.1:8080"), os.environ.get("LLM_MODEL"))
     log(f"model: {llm.model}")
@@ -540,7 +574,7 @@ def main():
             f.write(markdown + "\n\n<!-- tasks: " + json.dumps(tasks, ensure_ascii=False) + " -->\n")
         log(f"dry run — wrote {args.out}, skipped Firebase")
         return
-    firebase_deliver(payload)
+    firebase_deliver(payload, fb_token, fb_project)
     log("delivered to Firebase ✓")
 
 
