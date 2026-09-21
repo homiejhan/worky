@@ -272,7 +272,7 @@ function calPxToMins(px) { return Math.round((px/CAL_HOUR_PX)*60/15)*15; }
  *   calEvent: id→i title→ti start→s end→e color→c type→tp
  *     fromTemplate→ft templateId→tid repeatDays→rd gcalId→gi gcalCalId→gc
  *     linkTaskId→tk linkDbdId→dk   (task ↔ event link, see TASK↔CALENDAR LINKS)
- *   digest: enabled→en last→l {at, md, n, m, s}   (see EMAIL DIGEST)
+ *   digest: enabled→en last→l {at, md, n, m, s} clearedAt→ca   (see EMAIL DIGEST)
  */
 function compressState(st) {
   const cTimer = t => {
@@ -4952,6 +4952,7 @@ let syncLastSeenFp  = null;   // fingerprint at the previous local save
 let syncPushTimer   = null;
 let syncLastSyncAt  = null;   // for the settings status line
 let syncBooting     = true;   // true during init: nothing saved then is a user edit
+let syncQuietSave   = false;  // true while saving a backend delivery: pushable, but not a user edit
 let syncReconciled  = false;  // true once this connection has seen the cloud copy
 let syncDeferredRemote = null; // foreign cloud value that arrived while Formats was open
 let syncCommitPending  = 0;    // >0 while a Done push awaits server ack (priority window)
@@ -5044,9 +5045,14 @@ function syncOnLocalSave(state) {
    * are not user edits: they must not bump editAt, or every app launch
    * would look like "fresh local edits" and win the reconcile. */
   if (syncBooting) return;
-  const meta = syncLoadMeta();
-  meta.editAt = Date.now();
-  syncSaveMeta(meta);
+  /* A delivered digest merging in is not a user edit either: if it bumped
+   * editAt, a phone opened in the morning would merge the digest, look
+   * "freshly edited", and win the reconcile over real edits made elsewhere. */
+  if (!syncQuietSave) {
+    const meta = syncLoadMeta();
+    meta.editAt = Date.now();
+    syncSaveMeta(meta);
+  }
   if (syncHeld()) return;                     // Formats open — Done will push
   if (syncUser && syncRef) syncSchedulePush();
 }
@@ -5074,7 +5080,10 @@ function syncPushNow(opts) {
     client: syncClientId,
   };
   if (priority) syncCommitPending = Math.max(1, syncCommitPending);   // open (or keep) the priority window
-  syncRef.set(payload)
+  /* update(), not set(): only state / updatedAt / client are rewritten, so the
+   * backend's users/<uid>/digestInbox sibling survives every push and stays
+   * available to devices that open later (see EMAIL DIGEST → delivery). */
+  syncRef.update(payload)
     .then(() => {
       syncAgree(fp, { pushedAt: Date.now() });
       syncCommitPending = 0;                  // server has it — priority window closes
@@ -5174,10 +5183,18 @@ function syncApplyRemote(remoteStr, remoteUpdatedAt) {
   }
 }
 
-/* Realtime listener — also performs the initial reconcile on connect. */
+/* Realtime listener — also performs the initial reconcile on connect.
+ * The state blob settles FIRST; only then is the delivered digest checked
+ * against whatever state won. That order matters twice over: a cloud copy
+ * that already carries the digest makes the merge a no-op, and a stale copy
+ * that won the reconcile (and so dropped the digest) gets it merged back in. */
 function syncOnRemoteValue(snap) {
   const v = snap.val();
-  digestInboxSeen(v && v.digestInbox);        // backend-delivered digest, if any
+  digestInboxLatest = (v && v.digestInbox) || null;
+  syncReconcileRemote(v);
+  digestInboxSeen(digestInboxLatest);         // backend-delivered digest, if any
+}
+function syncReconcileRemote(v) {
   const localFp = syncFingerprint(gatherState());
   syncReconciled = true;                      // from here on pushes are allowed
 
@@ -5270,6 +5287,8 @@ function syncStop() {
   syncPendingRemote = null;
   syncDeferredRemote = null;
   syncCommitPending = 0;
+  digestInboxLatest = null;
+  digestInboxPending = null;
   $('syncChoiceModal')?.classList.remove('show');
 }
 
@@ -5295,14 +5314,14 @@ function syncChooseImport() {
   syncPendingRemote = null;
   $('syncChoiceModal')?.classList.remove('show');
   if (pending) syncApplyRemote(pending.state, pending.updatedAt);
-  digestInboxFlush();
+  digestInboxSeen(digestInboxLatest);          // the imported copy may predate the delivered digest
   syncUpdateUI();
   if (tourReoffer) { tourReoffer = false; tourMarkSeen(); }   // cloud data → returning user
 }
 function syncChooseExport() {
   syncPendingRemote = null;
   $('syncChoiceModal')?.classList.remove('show');
-  digestInboxFlush();                          // merge before the push rewrites the user node
+  digestInboxSeen(digestInboxLatest);          // this device's copy may predate the delivered digest
   syncPushNow();
   showToast('Exported to cloud ✓');
   syncUpdateUI();
@@ -5348,6 +5367,7 @@ function syncSignOut() {
 
 /* ── Settings UI ── */
 function syncUpdateUI() {
+  digestRenderSettings();                      // its "receives digests as …" line follows sign-in state
   const line = $('syncStatusLine');
   const btn  = $('syncConnectBtn');
   if (!line || !btn) return;
@@ -5957,6 +5977,7 @@ let digest = null;
 
 /* digest = {
  *   enabled, last {at, markdown, count, model, source},
+ *   clearedAt,   (optional) deliveries up to this time were cleared by the user
  *   suggestions [ {id, title, why, due, section, status, at, dbdId} ],   pool, survives runs
  *   sugIdCounter,
  * } — all synced. The suggestion pool only shrinks when the user accepts
@@ -5970,6 +5991,10 @@ function normalizeDigest(v) {
   const out = { enabled: false, last: null, suggestions: [], sugIdCounter: 1 };
   if (!v || typeof v !== 'object') return out;
   out.enabled = !!v.enabled;
+  /* only present once the user has cleared a digest, so states that never did
+   * keep the exact shape (and fingerprint) they had before this field existed */
+  const clearedAt = Math.max(0, Number(v.clearedAt) || 0);
+  if (clearedAt) out.clearedAt = clearedAt;
   const l = v.last;
   if (l && typeof l === 'object' && typeof l.markdown === 'string' && l.markdown.trim()) {
     out.last = {
@@ -6285,17 +6310,31 @@ function digestDupLabel(m) {
 
 /* ── delivery: users/<uid>/digestInbox ──
  * The backend never edits the synced state blob — that would race this
- * device's own edits. It leaves its result in a sibling node instead. The
- * realtime listener hands it here; we merge it into digest.last and the
- * suggestion pool, save, and the next push (which rewrites the whole user
- * node) clears the inbox. If it arrives before this connection has a settled
+ * device's own edits. It leaves its result in a sibling node instead, and
+ * that node STAYS there until the next delivery overwrites it (state pushes
+ * use update(), which leaves siblings alone).
+ *
+ * Every device merges the inbox for itself, whenever it sees one newer than
+ * the digest it holds. So the digest no longer depends on riding inside the
+ * state blob from the first device that saw it: a phone opened hours later,
+ * or a device whose stale copy just won a sync conflict and wiped the digest,
+ * reads the same inbox and lands on the same result. Merging is idempotent
+ * (same inbox + same state → same digest, same fingerprint), so two devices
+ * merging at once agree instead of ping-ponging.
+ *
+ * `clearedAt` is what keeps a durable inbox from resurrecting a digest the
+ * user cleared. If the inbox arrives before this connection has a settled
  * baseline (Import/Export modal open, Formats mode), it waits in memory. */
+let digestInboxLatest  = null;   // the inbox node as last seen by the realtime listener
 let digestInboxPending = null;
+function digestInboxHandledAt() {
+  const d = digestGet();
+  return Math.max(d.last ? d.last.at : 0, d.clearedAt || 0);
+}
 function digestInboxSeen(inbox) {
   if (!inbox || typeof inbox !== 'object' || typeof inbox.markdown !== 'string' || !inbox.markdown.trim()) return;
   const at = Number(inbox.at) || 0;
-  const last = digestGet().last;
-  if (!at || (last && at <= last.at)) return;   // already merged (or something newer)
+  if (!at || at <= digestInboxHandledAt()) return;   // already merged, cleared, or something newer is showing
   digestInboxPending = inbox;
   digestInboxFlush();
 }
@@ -6305,7 +6344,7 @@ function digestInboxFlush() {
   digestInboxPending = null;
   const at = Number(inbox.at) || 0;
   const d = digestGet();
-  if (d.last && at <= d.last.at) return;
+  if (at <= digestInboxHandledAt()) return;
   d.enabled = true;                   // a delivery means the feature is in use; show the card
   d.last = {
     at,
@@ -6319,7 +6358,8 @@ function digestInboxFlush() {
   digest = normalizeDigest(digest);   // canonical shape, same as after a reload
   digestCollapsed = false;
   digestRunDelivered(at);             // a watched GitHub run is now complete end to end
-  saveToLocal();
+  syncQuietSave = true;               // pushable, but must not look like a fresh user edit
+  try { saveToLocal(); } finally { syncQuietSave = false; }
   renderSettings();
   renderHome();
   const dupes = fresh ? digestDupMap(digestGet().suggestions.filter(x => x.status === 'pending' && x.at === at)).size : 0;
@@ -6381,6 +6421,7 @@ function digestRecord() {
     last: d.last ? { ...d.last } : null,
     suggestions: d.suggestions.map(x => ({ ...x })),
     sugIdCounter: d.sugIdCounter,
+    ...(d.clearedAt ? { clearedAt: d.clearedAt } : {}),
   };
 }
 function compressDigest(d) {
@@ -6389,6 +6430,7 @@ function compressDigest(d) {
   if (n.last) o.l = { at: n.last.at, md: n.last.markdown, n: n.last.count, m: n.last.model, s: n.last.source };
   if (n.suggestions.length) o.sg = n.suggestions.map(x => { const c = { i: x.id, t: x.title, w: x.why, d: x.due, s: x.section, st: x.status, at: x.at }; if (x.dbdId) c.a = x.dbdId; return c; });
   if (n.sugIdCounter > 1) o.sn = n.sugIdCounter;
+  if (n.clearedAt) o.ca = n.clearedAt;
   return o;
 }
 function decompressDigest(c) {
@@ -6399,6 +6441,7 @@ function decompressDigest(c) {
                   tasks: Array.isArray(c.l.tk) ? c.l.tk.map(t => ({ id: t.i, title: t.t, why: t.w, due: t.d, section: t.s, added: t.a })) : undefined } : null,
     suggestions: Array.isArray(c.sg) ? c.sg.map(x => ({ id: x.i, title: x.t, why: x.w, due: x.d, section: x.s, status: x.st, at: x.at, dbdId: x.a })) : undefined,
     sugIdCounter: c.sn,
+    clearedAt: c.ca,
     /* c.sc / c.ls / c.rq from older builds are ignored */
   });
 }
@@ -6571,7 +6614,12 @@ function digestLoadSample() {
   showToast('Sample digest loaded');
 }
 function digestClearLast() {
-  digestGet().last = null;
+  const d = digestGet();
+  /* remember how far we've cleared: the delivered copy stays in the cloud
+   * inbox until the next run, and must not pop straight back in */
+  const upTo = Math.max(d.clearedAt || 0, d.last ? d.last.at : 0, Number(digestInboxLatest && digestInboxLatest.at) || 0);
+  if (upTo) d.clearedAt = upTo;
+  d.last = null;
   saveToLocal();
   renderSettings();
   renderHome();
@@ -6820,6 +6868,16 @@ function digestRenderSettings() {
   if (status) status.textContent = d.last
     ? (d.last.source === 'sample' ? 'Showing the sample digest.' : `Last digest: ${digestMetaLine(d.last)}.`)
     : 'No digest delivered yet.';
+  /* which account this device receives digests through — the usual reason a
+   * digest shows on one device and not another is that this differs */
+  const via = $('digestSyncHint');
+  if (via) {
+    const signedIn = !!(typeof syncUser !== 'undefined' && syncUser);
+    via.classList.toggle('warn', !signedIn);
+    via.textContent = signedIn
+      ? `This device receives digests through cloud sync as ${syncUser.email || 'your Google account'}. Every device signed in to that same account shows the same digest.`
+      : 'This device is not signed in to cloud sync, so digests cannot reach it. Sign in under Settings → Cloud sync with the same Google account as your other devices.';
+  }
   const tokIn = $('digestGithubToken');
   const hasToken = !!digestGithubGet().token;
   if (tokIn && document.activeElement !== tokIn) tokIn.value = hasToken ? '••••••••••••' : '';

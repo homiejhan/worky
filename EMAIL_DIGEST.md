@@ -9,11 +9,36 @@ GitHub Actions (daily 6:30 am CT, or "Run now")
        ├─ llama-server + Qwen3.5-4B (GGUF, cached on the runner)
        └─ Firebase  → users/<uid>/digestInbox
                           │
-Worky (any device)  ◄─────┘  digestInboxSeen → digestInboxFlush
-  ├─ merges into digest.last + the suggestion pool (synced state)
-  ├─ next sync push rewrites the user node, clearing the inbox
+Worky (every device) ◄────┘  digestInboxSeen → digestInboxFlush
+  ├─ each device merges the inbox itself when it is newer than the digest it holds
+  ├─ the inbox stays in the cloud until the next run overwrites it
+  │    (state pushes use update(), so they never touch it)
   └─ Home card: summary + Suggested tasks (Add / Dismiss / Add all)
 ```
+
+## Same digest on every device
+
+A digest reaches a device through **cloud sync**, so the rule is simply: every
+device signed in to the same Worky cloud-sync account shows the same digest.
+Settings → Email Digest names the account this device receives through (or says
+it isn't signed in). The GitHub token plays no part in receiving a digest — it
+only powers *Run now* — so the phone doesn't need one.
+
+How it stays consistent:
+
+- The delivered digest is **durable**. It used to be consumed by the first device
+  that saw it and then travelled inside the last-write-wins state blob; if a
+  device opened later with newer edits of its own, its copy won and the digest
+  disappeared everywhere with nothing left to restore it. Now any device, whenever
+  it opens, reads the same inbox.
+- The state blob reconciles **first**, then the inbox is checked against whatever
+  won. A cloud copy that already has the digest makes the merge a no-op; a stale
+  copy that won gets the digest merged back in.
+- Merging a delivery is **not a user edit** (it doesn't bump `editAt`), so a phone
+  that merges the morning digest can't out-rank real edits made on the laptop.
+- Merging is idempotent — same inbox + same state gives the same fingerprint — so
+  two devices merging at once agree instead of ping-ponging.
+- **Clear digest** records `clearedAt`, so the inbox copy doesn't pop back in.
 
 Nothing in the browser reads mail or talks to a model. Setup, secrets, and the
 workflow are documented in [`backend/README.md`](backend/README.md).
@@ -40,7 +65,7 @@ workflow are documented in [`backend/README.md`](backend/README.md).
 ## State
 
 Synced (`digest` in app state): `enabled`, `last {at, markdown, count, model, source}`,
-`suggestions[]`, `sugIdCounter`. Older builds also stored `schedule`, `lastScheduled`
+`suggestions[]`, `sugIdCounter`, and `clearedAt` (only once a digest has been cleared). Older builds also stored `schedule`, `lastScheduled`
 and `request` for the laptop runner; those are dropped on load.
 
 Device-local (localStorage): `focus-digest-ui` (collapsed), `focus-digest-github`
@@ -49,7 +74,7 @@ Device-local (localStorage): `focus-digest-ui` (collapsed), `focus-digest-github
 ## Tests
 
 ```
-npm install jsdom          # once
-node test_digest.js        # state, pool, rendering, delivery merge, Run now against a fake GitHub API
-node test_sync.js          # two devices converging, including a backend delivery
+npm install                      # once (jsdom)
+node tests/test_digest.js        # state, pool, rendering, delivery merge, Run now against a fake GitHub API
+node tests/test_sync.js          # two devices converging: deliveries, a phone opening late, Clear, Import
 ```

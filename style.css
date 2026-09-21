@@ -2923,6 +2923,8 @@ body.format-mode .list-sched-row { display: flex; }
 .dg-fields { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 .dg-fields .modal-sub { margin-top: 0; }
 .dg-field-label { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+.dg-sync-hint { margin: 6px 0 8px; }
+.dg-sync-hint.warn { color: var(--danger); }
 .dg-fields .theme-bg-actions { flex-wrap: wrap; }
 .dg-fields .theme-bg-actions .modal-file-btn { flex: 1 1 30%; }
 .tour-next:active { transform: translateY(1px); }
