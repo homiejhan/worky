@@ -6,7 +6,7 @@ const { JSDOM } = require('jsdom');
 const fs = require('fs');
 const path = require('path');
 
-const DIR = __dirname;
+const DIR = path.join(__dirname, '..');   // repo root (tests live in tests/)
 const html = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8')
   .replace(/<script src="[^"]*"><\/script>/g, '')
   .replace(/<link[^>]*fonts\.googleapis[^>]*>/g, '');
@@ -186,6 +186,26 @@ console.log('\n── 7. Delivered digest (users/<uid>/digestInbox) merges like 
   eq(w.digestGet().last.at, 3000, 'listener hook merges digestInbox from the user node');
   d.getElementById('settingsBtn').click();
   ok(d.getElementById('digestStatusLine').textContent.startsWith('Last digest:'), 'settings status line shows the last digest');
+
+  /* the inbox now stays in the cloud, so Clear has to remember how far it cleared */
+  ok(!('clearedAt' in w.gatherState().digest), 'no clearedAt until something is cleared (older states keep their fingerprint)');
+  w.digestClearLast();
+  eq(w.digestGet().last, null, 'Clear digest empties the card');
+  eq(w.digestGet().clearedAt, 3000, 'and records how far it cleared');
+  w.digestInboxSeen(inbox(3000, 3));
+  eq(w.digestGet().last, null, 'the same delivery does not come back');
+  const rt = w.decompressState(JSON.parse(JSON.stringify(w.compressState(w.gatherState())))).digest;
+  eq(rt.clearedAt, 3000, 'clearedAt survives compress → decompress');
+  eq(savedDigest(w).clearedAt, 3000, 'and is saved with the state');
+  w.digestInboxSeen(inbox(4000, 4));
+  eq(w.digestGet().last.at, 4000, 'a newer delivery still lands');
+
+  /* Settings says which account digests arrive through */
+  const hint = d.getElementById('digestSyncHint');
+  ok(hint && /not signed in/i.test(hint.textContent) && hint.classList.contains('warn'), 'signed out: the hint says digests cannot reach this device');
+  w.eval("syncUser = { uid: 'u1', email: 'me@example.com' }; digestRenderSettings();");
+  ok(/me@example\.com/.test(hint.textContent) && !hint.classList.contains('warn'), 'signed in: the hint names the sync account');
+  w.eval('syncUser = null');
 }
 
 console.log('\n── 8. Add / Dismiss / Add all against the pool ──');

@@ -1,11 +1,11 @@
-/* Cloud sync — headless tests (node test_sync.js; needs `npm i jsdom`).
+/* Cloud sync — headless tests (node tests/test_sync.js; needs `npm i jsdom`).
  * Two simulated devices share a fake Realtime Database node. Also simulates
  * an "older build" device that strips fields it does not know about — the
  * situation that made the digest revert and sync bounce forever. */
 const { JSDOM } = require('jsdom');
 const fs = require('fs');
 const path = require('path');
-const DIR = __dirname;
+const DIR = path.join(__dirname, '..');   // repo root (tests live in tests/)
 const html = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8').replace(/<script[^>]*src="[^"]*"[^>]*><\/script>/g, '');
 const src = fs.readFileSync(path.join(DIR, 'app.js'), 'utf8');
 
@@ -20,8 +20,9 @@ function makeRef() {
   return {
     on(ev, cb) { cloud.listeners.push(cb); setTimeout(() => cb({ val: () => cloud.val }), 0); },
     off() {},
-    set(payload) {
-      cloud.val = payload; cloud.writes++;
+    /* update(): rewrites only the children it names — siblings (digestInbox) survive */
+    update(payload) {
+      cloud.val = { ...(cloud.val || {}), ...payload }; cloud.writes++;
       return new Promise(res => setTimeout(() => {
         res();
         cloud.hooks.forEach(h => h());                                  // "other" writers react first
@@ -43,7 +44,7 @@ function boot(name, storage = {}) {
   const s = w.document.createElement('script');
   s.textContent = src
     .replace('function syncApplyRemote(remoteStr, remoteUpdatedAt) {', 'function syncApplyRemote(remoteStr, remoteUpdatedAt) { window.__stats.applies++;')
-    .replace('  syncRef.set(payload)', '  window.__stats.pushes++;\n  syncRef.set(payload)');
+    .replace('  syncRef.update(payload)', '  window.__stats.pushes++;\n  syncRef.update(payload)');
   w.document.body.appendChild(s);
   w.document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
   w.__signIn = () => authCb({ uid: 'u1', email: 'me@example.com', getIdToken: async () => 't' });
@@ -122,7 +123,7 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
   ok(!!A.w.digestGet().last, 'A still has the digest after the loop stopped');
   cloud.hooks.length = 0;
 
-  console.log('\n── 4. Backend delivers to digestInbox; both devices merge it; the next push clears it ──');
+  console.log('\n── 4. Backend delivers to digestInbox; both devices merge it; pushes leave the inbox in place ──');
   {
     cloud.val = null; cloud.listeners.length = 0; cloud.hooks.length = 0;
     const L = boot('laptop', { 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }) });
@@ -146,7 +147,8 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
     eq(L.w.digestGet().suggestions.length, 1, 'laptop pool has the suggestion');
     eq(P.w.digestGet().suggestions.length, 1, 'phone pool has the suggestion');
     ok(P.d.querySelector('#homeContainer-d .dg-todo-add'), 'phone shows Add on the card');
-    eq(cloud.val.digestInbox, undefined, 'the next push rewrote the user node and cleared the inbox');
+    await sleep(1500);   // let the debounced push land
+    ok(!!cloud.val.digestInbox && cloud.val.digestInbox.at === at, 'the push left the inbox in place for devices that open later');
     ok(typeof cloud.val.state === 'string' && JSON.parse(cloud.val.state).digest.last.at === at, 'cloud state now carries the digest itself');
     ok(fpOf(L.w) === fpOf(P.w), 'both devices agree on the fingerprint (no ping-pong)');
     const pushesBefore = L.w.__stats.pushes + P.w.__stats.pushes;
@@ -167,7 +169,112 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
     eq(L.w.digestGet().last.at, at2, 'second delivery replaced the first');
     eq(L.w.digestGet().suggestions.length, 2, 'repeated title skipped, new one added');
     eq(P.w.digestGet().suggestions.length, 2, 'phone converged');
-    eq(cloud.val.digestInbox, undefined, 'inbox cleared again');
+    ok(!!cloud.val.digestInbox && cloud.val.digestInbox.at === at2, 'inbox still holds the newest delivery');
+  }
+
+  const INBOX = (at, n) => ({ at, markdown: '## 🔝 Top of the inbox\nRun ' + n + '.', count: n, model: 'qwen3.5-4b', source: 'github',
+    tasks: [{ title: 'Reply to Mom about Sunday dinner', why: 'Dinner at 6.', due: '', section: 'misc' }] });
+  const deliver = inbox => { cloud.val = { ...cloud.val, digestInbox: inbox }; cloud.listeners.forEach(cb => cb({ val: () => cloud.val })); };
+  const reset = () => { cloud.val = null; cloud.listeners.length = 0; cloud.hooks.length = 0; };
+  const hashOf = w => w.eval('syncHash(syncFingerprint(gatherState()))');
+
+  console.log('\n── 5. Laptop → phone: the phone was closed at delivery and opens with a fresh edit of its own ──');
+  /* Before: the laptop consumed the inbox, the phone's newer-edit copy won the
+   * reconcile, and the digest vanished from BOTH devices with nothing to restore it. */
+  {
+    reset();
+    const L = boot('laptop', { 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }) });
+    L.w.__signIn(); await sleep(80);
+    const base = cloud.val.state, baseHash = hashOf(L.w);
+    const at = Date.now();
+    deliver(INBOX(at, 1)); await sleep(1800);
+    ok(!!L.w.digestGet().last, 'laptop (the only device open) merged the digest');
+    ok(!!JSON.parse(cloud.val.state).digest.last, 'and pushed it');
+
+    const P = boot('phone', { 'focus-app-state': base, 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: baseHash, editAt: 1 }) });
+    await sleep(30);
+    P.w.eval("dbdTasks.push({ id: 9999, text: 'typed on the phone before sync connected', date: '2026-09-21', done: false }); saveToLocal();");
+    P.w.__signIn(); await sleep(3200);
+    ok(!!P.w.digestGet().last && P.w.digestGet().last.at === at, 'phone shows the digest');
+    ok(!!L.w.digestGet().last && L.w.digestGet().last.at === at, 'laptop still shows the digest');
+    ok(P.w.eval("dbdTasks.some(t => t.id === 9999)") && L.w.eval("dbdTasks.some(t => t.id === 9999)"), "the phone's own edit reached both");
+    ok(!!JSON.parse(cloud.val.state).digest.last, 'cloud state carries the digest');
+    ok(fpOf(L.w) === fpOf(P.w), 'devices agree');
+    const n = L.w.__stats.pushes + P.w.__stats.pushes; await sleep(2500);
+    eq(L.w.__stats.pushes + P.w.__stats.pushes, n, 'and settle (no ping-pong)');
+  }
+
+  console.log('\n── 6. Merging a delivery is not a user edit: a stale phone must not stomp the laptop ──');
+  {
+    reset();
+    const L = boot('laptop', { 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }) });
+    L.w.__signIn(); await sleep(80);
+    const base = cloud.val.state, baseHash = hashOf(L.w);
+    /* overnight: the laptop adds a task; the backend delivers while the laptop is in Formats (so it cannot merge yet) */
+    L.w.eval("dbdTasks.push({ id: 4242, text: 'added on the laptop last night', date: '2026-09-21', done: false }); saveToLocal();");
+    await sleep(1800);
+    ok(/4242/.test(cloud.val.state), 'laptop edit pushed');
+    L.w.eval('formatMode = true');
+    const at = Date.now();
+    deliver(INBOX(at, 1)); await sleep(200);
+    eq(L.w.digestGet().last, null, 'laptop holds the delivery while Formats is open');
+    /* morning: the phone opens from yesterday's state; the inbox is newer than anything it has */
+    const P = boot('phone', { 'focus-app-state': base, 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: baseHash, editAt: 1 }) });
+    P.w.__signIn(); await sleep(2500);
+    ok(P.w.eval("dbdTasks.some(t => t.id === 4242)"), "phone took the laptop's task instead of overwriting it");
+    ok(!!P.w.digestGet().last && P.w.digestGet().last.at === at, 'and merged the digest on top');
+    eq(JSON.parse(P.w.localStorage.getItem('focus-sync-meta')).editAt < at, true, 'the merge did not bump editAt');
+    ok(JSON.parse(cloud.val.state).digest.last && /4242/.test(cloud.val.state), "cloud has the laptop's task AND the digest");
+    L.w.eval('formatMode = false'); L.w.digestInboxFlush(); await sleep(2500);
+    ok(!!L.w.digestGet().last && L.w.eval("dbdTasks.some(t => t.id === 4242)"), 'laptop ends with both too');
+    ok(fpOf(L.w) === fpOf(P.w), 'devices agree');
+  }
+
+  console.log('\n── 7. Clear digest stays cleared even though the inbox is still in the cloud ──');
+  {
+    reset();
+    const L = boot('laptop', { 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }) });
+    L.w.__signIn(); await sleep(80);
+    const P = boot('phone', { 'focus-app-state': cloud.val.state, 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: hashOf(L.w) }) });
+    P.w.__signIn(); await sleep(120);
+    const at = Date.now();
+    deliver(INBOX(at, 1)); await sleep(1800);
+    ok(!!L.w.digestGet().last && !!P.w.digestGet().last, 'both show the digest');
+    L.w.digestClearLast(); await sleep(2500);
+    eq(L.w.digestGet().last, null, 'laptop cleared');
+    eq(P.w.digestGet().last, null, 'phone cleared through sync');
+    ok(!!cloud.val.digestInbox, 'inbox is still there');
+    cloud.listeners.forEach(cb => cb({ val: () => cloud.val })); await sleep(300);
+    eq(L.w.digestGet().last, null, 'a later cloud event does not bring it back on the laptop');
+    eq(P.w.digestGet().last, null, 'nor on the phone');
+    /* a device reopened from its saved state */
+    const P2 = boot('phone-reopened', { 'focus-app-state': JSON.stringify(P.w.gatherState()), 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: hashOf(P.w) }) });
+    P2.w.__signIn(); await sleep(300);
+    eq(P2.w.digestGet().last, null, 'nor after reopening the app');
+    /* the next real delivery still arrives everywhere */
+    deliver(INBOX(at + 5000, 2)); await sleep(1800);
+    ok(L.w.digestGet().last && L.w.digestGet().last.at === at + 5000, 'next delivery shows on the laptop');
+    ok(P.w.digestGet().last && P.w.digestGet().last.at === at + 5000, 'and on the phone');
+    ok(P2.w.digestGet().last && P2.w.digestGet().last.at === at + 5000, 'and on the reopened phone');
+  }
+
+  console.log('\n── 8. A device that signs in later (Import) still gets the delivered digest ──');
+  {
+    reset();
+    const L = boot('laptop', { 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }) });
+    L.w.eval("dbdTasks.push({ id: 77, text: 'laptop task', date: '2026-09-21', done: false }); saveToLocal();");
+    L.w.__signIn(); await sleep(80);
+    const stateBefore = cloud.val.state;
+    const at = Date.now();
+    /* the delivery sits in the inbox but no open device has folded it into the state blob */
+    cloud.val = { state: stateBefore, updatedAt: cloud.val.updatedAt, client: cloud.val.client, digestInbox: INBOX(at, 1) };
+    const N = boot('new-phone');                      // fresh install: no baseline → Import/Export modal
+    N.w.__signIn(); await sleep(200);
+    ok(N.d.getElementById('syncChoiceModal').classList.contains('show'), 'new device is asked Import / Export');
+    eq(N.w.digestGet().last, null, 'nothing merged while the choice is open');
+    N.w.syncChooseImport(); await sleep(300);
+    ok(N.w.eval("dbdTasks.some(t => t.id === 77)"), 'imported the cloud copy');
+    ok(N.w.digestGet().last && N.w.digestGet().last.at === at, 'and the delivered digest on top of it');
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);
