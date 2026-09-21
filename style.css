@@ -2724,6 +2724,16 @@ body.format-mode .list-sched-row { display: flex; }
 .dg-todo-add { flex-shrink: 0; padding: 5px 12px; }
 .dg-todo-added { flex-shrink: 0; font-size: 11.5px; font-weight: 600; color: var(--accent); white-space: nowrap; }
 .dg-todo.added .dg-todo-title { color: var(--ink-2); text-decoration: line-through; text-decoration-color: var(--border-strong); }
+/* a suggestion that repeats a task already in the lists: quieter, and it says which task */
+.dg-todo.dup .dg-todo-title { color: var(--ink-2); }
+.dg-todo.dup .dg-todo-due { background: var(--bg-hover); color: var(--ink-2); }
+.dg-todo-dup {
+  display: flex; align-items: baseline; gap: 5px;
+  margin-top: 4px; font-size: 11.5px; line-height: 1.35; color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+.dg-todo-dup::before { content: '\2248'; font-weight: 700; color: var(--ink-2); flex-shrink: 0; }
+.dg-todo.dup .dg-todo-add { padding: 5px 10px; white-space: nowrap; }
 .dg-todo-addall { flex-shrink: 0; }
 .dg-todo-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .dg-todo-dismiss {
@@ -2849,7 +2859,7 @@ body.format-mode .list-sched-row { display: flex; }
 /* Type: nothing below 11.5px. The 10.5px labels read as machine text. */
 .budget-field-hint, .dg-todo-counts, .fmt-tpl-counts, .fmt-tpl-chip, .dg-todo-due, .dg-todos-count, .home-dbd-cal { font-size: 11.5px; }
 .timer-sub { font-size: 11.5px; }
-.dg-todo-sub { font-size: 12px; }
+.dg-todo-sub, .dg-todo-dup { font-size: 12px; }
 .dg-todo-title { font-size: 13.5px; }
 
 /* Cards: a hair more breathing room and a soft top highlight so they

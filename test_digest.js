@@ -207,6 +207,142 @@ console.log('\n── 8. Add / Dismiss / Add all against the pool ──');
   ok(d.querySelector(`#homeContainer-d .dg-todo[data-dgt="${first.id}"] .dg-todo-add`), 'deleting the task re-offers the suggestion');
 }
 
+console.log('\n── 8a. Redundancy: how two titles are scored ──');
+{
+  const { w } = boot();
+  const sc = (a, b) => w.digestDupScore(a, b);
+  const FLAG = w.eval('DIGEST_DUP_FLAG');
+  [ ['Finish the Northwind Labs online assessment', 'Northwind OA'],
+    ['Pay the water bill', 'water bill'],
+    ['Confirm Fabrikam recruiter screen', 'Fabrikam interview'],
+    ['Submit ECE 460 homework 3', 'ECE 460 HW 3'],
+    ['Respond to the Saturday study group invite', 'RSVP study group'],
+    ['Renew Autodesk ambassador agreement', 'Autodesk ambassador renewal'],
+    ['Email Acme', 'Acme'],
+  ].forEach(([a, b]) => ok(sc(a, b) >= FLAG, `same task: "${a}" ↔ "${b}" (${sc(a, b).toFixed(2)})`));
+  [ ['Submit ECE 460 homework 3', 'ECE 460 HW 4'],
+    ['Reply to Acme recruiter 1', 'Reply to Acme recruiter 2'],
+    ['Renew gym membership', 'Gym'],
+    ['Pay the water bill', 'Pay the electric bill'],
+    ['Complete Northwind Labs assessment', 'Complete Fabrikam Labs assessment'],
+    ['Schedule Northwind interview', 'Confirm Northwind interview time'],
+    ['Accept the Contoso offer', 'Decline the Contoso offer'],
+    ['Confirm Fabrikam recruiter screen', 'Fabrikam interview prep'],
+    ['Reply to Acme recruiter', 'Morning Workout/Stretch'],
+  ].forEach(([a, b]) => ok(sc(a, b) < FLAG, `different task: "${a}" ↔ "${b}" (${sc(a, b).toFixed(2)})`));
+  eq(sc('Pay the water bill!', '  pay the   WATER bill'), 1, 'same words → 1');
+  ok(sc('Finish the assessment by Sep 24 at 5pm', 'Finish the assessment by 9/30 at 11:59 PM') > 0.99, 'dates and times inside a title are ignored');
+  const c = w.digestDupCompare('Complete Northwind assessment', 'Complete Northwind assessment round 2');
+  ok(c.score >= FLAG && c.both < w.eval('DIGEST_DUP_POOL'), 'a longer title that contains a shorter one: flaggable, but never merged silently');
+}
+
+console.log('\n── 8b. Redundancy: a suggestion that repeats an existing task is flagged, not added ──');
+{
+  const { w, d } = boot();
+  const day = n => { const x = new Date(); x.setDate(x.getDate() + n); return w.digestDateKey(x); };
+  w.eval(`dbdTasks.push({ id: dbdIdCounter++, text: 'Northwind OA', due: '${day(1)}', done: false })`);
+  w.eval(`todoLists.push({ id: todoIdCounter++, title: 'Bills', color: '#378ADD', isDefault: false, tasks: [{ id: taskIdCounter++, text: 'water bill', done: false }] })`);
+  w.eval('syncReconciled = true');
+  w.digestInboxSeen({ at: 5000, markdown: '## 🔝 Top of the inbox\nhi', count: 9, model: 'qwen3.5-4b', source: 'github', tasks: [
+    { title: 'Finish the Northwind Labs online assessment', why: 'Closes tomorrow at 5pm.', due: day(1), section: 'jobs' },
+    { title: 'Pay the water bill', why: 'Due Friday.', due: '', section: 'misc' },
+    { title: 'Confirm Fabrikam recruiter screen', why: 'Thursday 10am.', due: '', section: 'jobs' },
+    { title: 'Reply to Dr. Patel', why: 'Appointment confirmation.', due: '', section: 'misc' },
+  ] });
+  const sug = w.digestGet().suggestions;
+  eq(sug.length, 4, 'all four still enter the pool — nothing is hidden');
+  ok(d.getElementById('toast').textContent.includes('2 already on your lists'), 'delivery toast says how many already exist');
+  const H = '#homeContainer-d ';
+  eq(d.querySelectorAll(H + '.dg-todo.dup').length, 2, 'two rows flagged');
+  const rows = [...d.querySelectorAll(H + '.dg-todo')];
+  ok(!rows[0].classList.contains('dup') && !rows[1].classList.contains('dup') && rows[2].classList.contains('dup') && rows[3].classList.contains('dup'), 'flagged rows sink below the new ones');
+  const nw = d.querySelector(H + `.dg-todo[data-dgt="${sug[0].id}"]`);
+  ok(nw.querySelector('.dg-todo-dup').textContent.includes('\u201cNorthwind OA\u201d'), 'flag names the existing task');
+  ok(nw.querySelector('.dg-todo-dup').textContent.includes('Day by Day') && nw.querySelector('.dg-todo-dup').textContent.includes('Tomorrow'), 'and where / when it is');
+  eq(nw.querySelector('.dg-todo-add').textContent, 'Add anyway', 'its button reads Add anyway');
+  const wb = d.querySelector(H + `.dg-todo[data-dgt="${sug[1].id}"] .dg-todo-dup`).textContent;
+  ok(wb.startsWith('Already on your list:') && wb.includes('Bills'), 'near-identical title in a custom list → "Already on your list" + the list name');
+  eq(d.querySelector(H + '.dg-todos-count').textContent, '2', 'count badge only counts the new ones');
+  ok(d.querySelector(H + '.dg-todo-addall').textContent.includes('(2)'), 'Add all (2)');
+  const before = dbd(w).length;
+  w.digestAddAllTasks();
+  eq(dbd(w).length, before + 2, 'Add all adds only the two new ones');
+  eq(dbd(w).filter(t => /northwind/i.test(t.text)).length, 1, 'no second Northwind task');
+  ok(d.getElementById('toast').textContent.includes('skipped 2'), 'toast says what was skipped');
+  eq(d.querySelector(H + '.dg-todos-count').textContent, 'nothing new', 'badge: nothing new');
+  eq(d.querySelector(H + '.dg-todo-addall'), null, 'Add all gone');
+  w.digestAddAllTasks();
+  eq(dbd(w).length, before + 2, 'Add all again still adds nothing');
+
+  ok(w.digestAddTask(sug[0].id), 'Add anyway still works');
+  eq(dbd(w).filter(t => /northwind/i.test(t.text)).length, 2, 'it created the task the user asked for');
+  ok(d.querySelector(H + `.dg-todo[data-dgt="${sug[0].id}"].added`), 'and the row is Added ✓');
+
+  w.eval(`todoLists.find(l => l.title === 'Bills').tasks = []`);
+  w.renderHome();
+  eq(d.querySelector(H + `.dg-todo[data-dgt="${sug[1].id}"].dup`), null, 'deleting the existing task clears the flag (nothing is stored)');
+  eq(d.querySelector(H + `.dg-todo[data-dgt="${sug[1].id}"] .dg-todo-add`).textContent, 'Add', 'button back to Add');
+  eq(savedDigest(w).suggestions.every(x => !('dup' in x) && !('match' in x)), true, 'no match data in synced state');
+}
+
+console.log('\n── 8c. Redundancy: finished tasks only count while they are recent ──');
+{
+  const { w, d } = boot();
+  const day = n => { const x = new Date(); x.setDate(x.getDate() + n); return w.digestDateKey(x); };
+  w.eval(`dbdTasks.push({ id: dbdIdCounter++, text: 'Pay the water bill', due: '${day(-31)}', done: true, doneOn: '${day(-30)}' })`);
+  w.eval(`dbdTasks.push({ id: dbdIdCounter++, text: 'Fabrikam phone screen', due: '${day(-1)}', done: true, doneOn: '${day(-1)}' })`);
+  w.eval('syncReconciled = true');
+  w.digestInboxSeen({ at: 6000, markdown: '## 🔝 Top of the inbox\nhi', count: 2, model: 'm', source: 'github', tasks: [
+    { title: 'Pay the water bill', why: '', due: '', section: 'misc' },
+    { title: 'Confirm Fabrikam recruiter screen', why: '', due: '', section: 'jobs' } ] });
+  const sug = w.digestGet().suggestions;
+  eq(d.querySelector(`#homeContainer-d .dg-todo[data-dgt="${sug[0].id}"].dup`), null, "last month's finished bill does not block this month's");
+  const f = d.querySelector(`#homeContainer-d .dg-todo[data-dgt="${sug[1].id}"] .dg-todo-dup`);
+  ok(f && f.textContent.startsWith('Looks like') && f.textContent.includes('done \u2713'), "yesterday's finished task does — a loose match only says \"Looks like … done ✓\"");
+  w.eval(`dbdTasks.push({ id: dbdIdCounter++, text: 'pay the water bill', due: '${day(0)}', done: true, doneOn: '${day(0)}' })`);
+  w.renderHome();
+  const g = d.querySelector(`#homeContainer-d .dg-todo[data-dgt="${sug[0].id}"] .dg-todo-dup`);
+  ok(g && g.textContent.startsWith('Already done:'), 'the same title ticked off today → "Already done"');
+}
+
+console.log('\n── 8d. Redundancy: the same suggestion in other words does not enter the pool twice ──');
+{
+  const { w } = boot();
+  w.eval('syncReconciled = true');
+  const send = (at, tasks) => w.digestInboxSeen({ at, markdown: '## 🔝 Top of the inbox\nrun ' + at, count: 5, model: 'm', source: 'github', tasks });
+  send(1000, [{ title: 'Finish the Northwind Labs online assessment', why: '', due: '', section: 'jobs' }]);
+  send(2000, [{ title: 'Complete Northwind Labs HackerRank assessment', why: 'Closes Friday.', due: '2026-09-25', section: 'jobs' }]);
+  let pool = w.digestGet().suggestions;
+  eq(pool.length, 1, 'reworded repeat skipped while the first is pending');
+  eq(pool[0].title, 'Finish the Northwind Labs online assessment', 'the original wording stays');
+  eq(pool[0].due, '2026-09-25', 'but it picks up the due date the repeat knew');
+  eq(pool[0].why, 'Closes Friday.', 'and the reason');
+  w.digestDismissTask(pool[0].id);
+  send(3000, [{ title: 'Complete the Northwind Labs online assessment', why: '', due: '', section: 'jobs' }]);
+  eq(w.digestGet().suggestions.length, 1, 'a dismissed suggestion does not come back reworded');
+  send(4000, [{ title: 'Schedule Northwind Labs interview', why: '', due: '', section: 'jobs' },
+              { title: 'Complete Northwind Labs assessment round 2', why: '', due: '', section: 'jobs' }]);
+  eq(w.digestGet().suggestions.length, 3, 'a different step with the same company, and a "round 2", are both new');
+  send(5000, [{ title: 'Pay the water bill', why: '', due: '', section: 'misc' }, { title: 'Pay water bill to City of Austin', why: '', due: '', section: 'misc' }]);
+  eq(w.digestGet().suggestions.filter(x => /water/i.test(x.title)).length, 2, 'only near-identical wording merges silently; the rest stays visible');
+}
+
+console.log('\n── 8e. Redundancy: tagging an added task into a list keeps it Added ✓ ──');
+{
+  const { w, d } = boot();
+  w.digestLoadSample();
+  const first = w.digestGet().suggestions[0];
+  w.digestAddTask(first.id);
+  w.eval(`todoLists.push({ id: todoIdCounter++, title: 'Job hunt', color: '#378ADD', isDefault: false, tasks: [] })`);
+  w.tagDbdTask(first.dbdId, String(w.eval('todoLists[todoLists.length - 1].id')));
+  eq(w.eval('dbdById(' + first.dbdId + ')'), undefined, 'tagging moved the task out of dbdTasks');
+  ok(w.digestTaskIsAdded(first), 'still counts as added');
+  eq(d.querySelector(`#homeContainer-d .dg-todo[data-dgt="${first.id}"] .dg-todo-add`), null, 'no Add button offered for it');
+  w.eval(`todoLists[todoLists.length - 1].tasks = []`);
+  w.renderHome();
+  ok(d.querySelector(`#homeContainer-d .dg-todo[data-dgt="${first.id}"] .dg-todo-add`), 'deleting the moved task re-offers it, as before');
+}
+
 console.log('\n── 9. Run now: token gate, dispatch, watch the run, delivery ends it ──');
 {
   const calls = [];

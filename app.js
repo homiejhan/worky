@@ -5928,9 +5928,10 @@ function digestNormalizeSuggestions(arr) {
 function digestSugKey(title) {
   return String(title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
-/* Merge a digest's tasks into the pool: anything with a title the pool already
- * holds (pending, added, or recently dismissed) is skipped, the rest become
- * pending. Old accepted/dismissed entries fall out of the memory window. */
+/* Merge a digest's tasks into the pool: anything the pool already holds
+ * (pending, added, or recently dismissed) is skipped — same title, or the same
+ * task in other words (see REDUNDANCY CHECK) — and the rest become pending.
+ * Old accepted/dismissed entries fall out of the memory window. */
 function digestMergeSuggestions(tasks, at) {
   const d = digestGet();
   const now = at || Date.now();
@@ -5940,6 +5941,15 @@ function digestMergeSuggestions(tasks, at) {
   (tasks || []).forEach(t => {
     const key = digestSugKey(t.title);
     if (!key || keys.has(key)) return;
+    const twin = digestDupInPool(t.title, d.suggestions);
+    if (twin) {
+      /* a reworded repeat can still know something the first one didn't */
+      if (twin.status === 'pending') {
+        if (!twin.due && t.due) twin.due = t.due;
+        if (!twin.why && t.why) twin.why = t.why;
+      }
+      return;
+    }
     keys.add(key);
     d.suggestions.push({ id: d.sugIdCounter++, title: t.title, why: t.why || '', due: t.due || '', section: t.section || 'misc', status: 'pending', at: now, dbdId: 0 });
     added++;
@@ -5951,6 +5961,233 @@ function digestMergeSuggestions(tasks, at) {
     d.suggestions = keep.concat(rest).slice(0, DIGEST_SUG_MAX).sort((a, b) => a.id - b.id);
   }
   return added;
+}
+
+/* ── REDUNDANCY CHECK: suggestions vs. what already exists ──
+ * Titles are compared as weighted word sets. No model is involved, so it works
+ * offline and re-evaluates on every render. It answers two questions:
+ *   1. Is an incoming suggestion one the pool already holds, just worded
+ *      differently ("Finish the Northwind assessment" / "Complete Northwind
+ *      Labs HackerRank")?  → digestMergeSuggestions skips it.
+ *   2. Does an open suggestion look like a task that is already in Day by Day
+ *      or a list ("Northwind OA")?  → the row is flagged, offers "Add anyway",
+ *      and is left out of Add all.
+ * (1) drops silently, so it is the strict one: the two titles must be alike in
+ * BOTH directions (a longer title that merely contains a shorter one is kept).
+ * (2) is only a flag, so a terse task is allowed to match a wordy suggestion.
+ * Nothing is persisted — like the Daily name-sync it is derived from the live
+ * lists, so deleting or renaming the task clears the flag by itself.
+ *
+ * How two titles are scored:
+ *   • words that say WHEN (dates, times, weekdays) or nothing (a, the, to) are dropped
+ *   • generic verbs and filler ("complete", "reply", "online", "Labs") weigh 0.2
+ *   • nouns half the inbox shares ("assessment", "interview", "bill") weigh 0.5
+ *   • everything else — company, person, course — weighs 1 and is what really decides
+ *   • score = 0.6 × (shared weight ÷ the shorter title) + 0.4 × (shared ÷ combined)
+ *   • two vetoes: different numbers ("HW 3" / "HW 4") and different kinds of
+ *     action ("Schedule the Acme interview" / "Confirm the Acme interview",
+ *     "Accept the offer" / "Decline the offer") are never the same task */
+const DIGEST_DUP_FLAG      = 0.66;   // suggestion ↔ existing task (score): flag the row
+const DIGEST_DUP_POOL      = 0.60;   // incoming ↔ pending suggestion (shared ÷ combined): skip it
+const DIGEST_DUP_SETTLED   = 0.72;   // incoming ↔ added / dismissed suggestion (shared ÷ combined): skip it
+const DIGEST_DUP_EXACT     = 0.95;   // flag wording: "Already on your list" vs "Looks like"
+const DIGEST_DUP_DONE_DAYS = 7;      // a finished task only counts if it was due / done this recently
+
+const DIGEST_DUP_STOP = new Set(`a an the to for of on in at by with from and or but if so as is are be was it its this that these those
+  i me my we our you your their his her them re fw fwd about up out off into over via per
+  before after until till due asap now soon please kindly
+  today tonight tomorrow yesterday week weekend month morning afternoon evening noon eod eow
+  mon tue tues wed thu thur thurs fri sat sun monday tuesday wednesday thursday friday saturday sunday
+  jan feb mar apr jun jul aug sep sept oct nov dec january february march april june july august september october november december
+  am pm ct cst cdt et est edt pt pst pdt utc`.split(/\s+/).filter(Boolean));
+/* abbreviations and near-synonyms → one spelling, before stemming */
+const DIGEST_DUP_CANON = {
+  oa: 'assessment', hackerrank: 'assessment', codesignal: 'assessment', codility: 'assessment',
+  screen: 'interview', screening: 'interview',
+  hw: 'homework', hmwk: 'homework', pset: 'homework',
+  mtg: 'meeting', appt: 'appointment', msg: 'message', app: 'application', apps: 'application',
+  doc: 'document', docs: 'document', cv: 'resume', sub: 'subscription',
+  renewal: 'renew', registration: 'register', submission: 'submit', confirmation: 'confirm',
+};
+const DIGEST_DUP_WEAK = new Set(`complete finish do take start begin make get go check review read look see view open try
+  reply respond response answer email mail message send write draft forward
+  confirm accept decline rsvp schedule reschedule book set setup arrange plan pick choose select
+  submit fill sign signup register upload download update renew pay follow followup call phone contact reach ask tell let know
+  turn return bring give add create join attend verify activate
+  new online form link request reminder invite invitation notice notification info information details yes no
+  inc llc ltd corp co company labs group technologies systems team`.split(/\s+/).filter(Boolean).map(digestDupStem));
+const DIGEST_DUP_MID = new Set(`assessment interview application recruiter offer position role job internship career
+  meeting appointment bill payment invoice receipt statement subscription account order
+  homework assignment quiz exam midterm final project report paper essay class course lecture
+  document letter resume survey feedback`.split(/\s+/).filter(Boolean).map(digestDupStem));
+/* What KIND of action a verb is. Verbs barely count toward the score (models
+ * reword them freely), but two titles that both name an action, of different
+ * kinds, are different steps: scheduling an interview is not confirming it. */
+const DIGEST_DUP_ACTS = (() => {
+  const m = new Map();
+  Object.entries({
+    act:      'complete finish do take start begin submit fill sign signup register upload turn return',
+    respond:  'reply respond response answer email mail message send write draft forward confirm accept rsvp',
+    schedule: 'schedule reschedule book arrange pick choose select',
+    pay:      'pay renew',
+    review:   'review read check look see view open verify',
+    refuse:   'decline cancel reject unsubscribe dispute',
+  }).forEach(([cls, words]) => words.split(' ').forEach(x => m.set(digestDupStem(x), cls)));
+  return m;
+})();
+
+/* plural / -ing / -ed / trailing e, so "scheduling", "scheduled" and "schedule" meet */
+function digestDupStem(w) {
+  if (/\d/.test(w)) return w;
+  if (w.length > 4 && w.endsWith('ies')) w = w.slice(0, -3) + 'y';
+  else if (w.length > 4 && w.endsWith('sses')) w = w.slice(0, -2);
+  else if (w.length > 3 && w.endsWith('s') && !/(ss|us|is)$/.test(w)) w = w.slice(0, -1);
+  let cut = false;
+  if (w.length > 5 && w.endsWith('ing')) { w = w.slice(0, -3); cut = true; }
+  else if (w.length > 4 && w.endsWith('ied')) w = w.slice(0, -3) + 'y';
+  else if (w.length > 4 && w.endsWith('ed')) { w = w.slice(0, -2); cut = true; }
+  if (cut && /([b-df-hj-np-tv-z])\1$/.test(w) && !/(ll|ss|ff|zz)$/.test(w)) w = w.slice(0, -1);   // submitt → submit
+  if (w.length > 4 && w.endsWith('e')) w = w.slice(0, -1);
+  return w;
+}
+
+/* title → { w: Map(word → weight), total, count, nums: Set, acts: Set, key }; cached by text */
+const _digestDupCache = new Map();
+function digestDupTokens(text) {
+  const raw = String(text || '');
+  const hit = _digestDupCache.get(raw);
+  if (hit) return hit;
+  let s = raw.toLowerCase();
+  try { s = s.normalize('NFKD').replace(/[\u0300-\u036f]/g, ''); } catch(e) {}
+  s = s.replace(/['\u2019]s\b/g, '')                                   // Patel's → patel
+    .replace(/\b\d{4}-\d{2}-\d{2}\b/g, ' ')                            // dates and times say when, not what
+    .replace(/\b\d{1,2}\/\d{1,2}(\/\d{2,4})?\b/g, ' ')
+    .replace(/\b\d{1,2}(:\d{2})?\s*[ap]\.?m\b\.?/g, ' ')
+    .replace(/\b\d{1,2}:\d{2}\b/g, ' ')
+    .replace(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(st|nd|rd|th)?\b/g, ' ')
+    .replace(/\b\d{1,2}(st|nd|rd|th)\b/g, ' ');
+  const w = new Map();
+  const nums = new Set();
+  const acts = new Set();
+  s.replace(/[^a-z0-9]+/g, ' ').split(' ').forEach(tok => {
+    if (!tok || DIGEST_DUP_STOP.has(tok)) return;
+    if (/\d/.test(tok)) {
+      const n = tok.replace(/^0+(?=\d)/, '');
+      nums.add(n);
+      w.set(n, 0.5);
+      return;
+    }
+    if (tok.length < 2) return;
+    tok = digestDupStem(DIGEST_DUP_CANON[tok] || tok);
+    if (DIGEST_DUP_ACTS.has(tok)) acts.add(DIGEST_DUP_ACTS.get(tok));
+    const wt = (DIGEST_DUP_WEAK.has(tok) || DIGEST_DUP_ACTS.has(tok)) ? 0.2 : DIGEST_DUP_MID.has(tok) ? 0.5 : 1;
+    w.set(tok, Math.max(w.get(tok) || 0, wt));
+  });
+  let total = 0;
+  w.forEach(v => { total += v; });
+  const out = { w, total, count: w.size, nums, acts, key: digestSugKey(raw) };
+  if (_digestDupCache.size > 800) _digestDupCache.clear();
+  _digestDupCache.set(raw, out);
+  return out;
+}
+
+/* How alike two titles are → { score, both }, each 0 … 1.
+ *   score — forgiving: a terse title fully inside a wordy one still scores high
+ *   both  — strict: shared ÷ combined, high only when neither says much the other doesn't */
+function digestDupCompare(textA, textB) {
+  const NONE = { score: 0, both: 0 };
+  const a = digestDupTokens(textA), b = digestDupTokens(textB);
+  if (a.key && a.key === b.key) return { score: 1, both: 1 };
+  if (!a.total || !b.total) return NONE;
+  let aOnly = false, bOnly = false;
+  a.nums.forEach(n => { if (!b.nums.has(n)) aOnly = true; });
+  b.nums.forEach(n => { if (!a.nums.has(n)) bOnly = true; });
+  if (aOnly && bOnly) return NONE;                  // "HW 3" vs "HW 4", "round 1" vs "round 2"
+  if (a.acts.size && b.acts.size && ![...a.acts].some(c => b.acts.has(c))) return NONE;   // schedule vs confirm, accept vs decline
+  let inter = 0, anchor = false;
+  a.w.forEach((wt, tok) => { if (b.w.has(tok)) { inter += wt; if (wt >= 1) anchor = true; } });
+  if (!inter) return NONE;
+  const contain = inter / Math.min(a.total, b.total);
+  const both = inter / (a.total + b.total - inter);
+  /* a one-word title ("Gym") only matches something that is nearly that one word
+   * ("Go to the gym"), never every sentence that happens to contain it */
+  if (Math.min(a.count, b.count) === 1) { if (both < 0.6) return NONE; }
+  /* sharing only generic words counts when the shorter title is fully covered */
+  else if (!anchor && contain < 0.999) return NONE;
+  return { score: 0.6 * contain + 0.4 * both, both };
+}
+function digestDupScore(textA, textB) { return digestDupCompare(textA, textB).score; }
+
+/* incoming title vs the pool → the pool entry it repeats, or null */
+function digestDupInPool(title, pool) {
+  let best = null, bestScore = 0;
+  (pool || []).forEach(x => {
+    const sc = digestDupCompare(title, x.title).both;
+    /* a pending twin stays on the card, so skipping costs nothing; an added or
+     * dismissed one is out of sight, so the incoming title must be closer still */
+    const bar = x.status === 'pending' ? DIGEST_DUP_POOL : DIGEST_DUP_SETTLED;
+    if (sc >= bar && sc > bestScore) { best = x; bestScore = sc; }
+  });
+  return best;
+}
+
+/* Every task a suggestion could be repeating: Day by Day plus every list.
+ * A finished dated task only counts for a week — last month's "Pay the water
+ * bill ✓" must not block this month's. Daily lists recur, so their done flag
+ * (which resets every day) is ignored. */
+function digestDupCandidates() {
+  const today = calToday();
+  const recent = key => {
+    if (!key) return false;
+    const [y, m, d] = String(key).split('-').map(Number);
+    return Math.abs(Math.round((new Date(y, m - 1, d) - today) / 86400000)) <= DIGEST_DUP_DONE_DAYS;
+  };
+  const stale = t => t.done && t.due && !(recent(t.doneOn) || recent(t.due));
+  const out = [];
+  dbdTasks.forEach(t => { if (!stale(t)) out.push({ kind: 'dbd', task: t, list: null }); });
+  todoLists.forEach(l => l.tasks.forEach(t => {
+    if (!l.isDefault && stale(t)) return;
+    out.push({ kind: 'list', task: t, list: l });
+  }));
+  return out;
+}
+/* best existing task for one suggestion: { kind, task, list, score } or null */
+function digestFindExisting(sug, candidates) {
+  let best = null;
+  (candidates || digestDupCandidates()).forEach(c => {
+    const sc = digestDupScore(sug.title, c.task.text);
+    if (sc >= DIGEST_DUP_FLAG && (!best || sc > best.score)) best = { ...c, score: sc };
+  });
+  return best;
+}
+/* Map(suggestion id → match) for the open suggestions in `list` */
+function digestDupMap(list) {
+  const out = new Map();
+  const open = (list || []).filter(t => t.status !== 'dismissed' && !digestTaskIsAdded(t));
+  if (!open.length) return out;
+  const cands = digestDupCandidates();
+  open.forEach(t => { const m = digestFindExisting(t, cands); if (m) out.set(t.id, m); });
+  return out;
+}
+/* same title, word for word, anywhere in Day by Day or a custom list */
+function digestDupHasExact(title) {
+  const key = digestSugKey(title);
+  if (!key) return false;
+  return dbdTasks.some(t => digestDupTokens(t.text).key === key) ||
+    todoLists.some(l => !l.isDefault && l.tasks.some(t => digestDupTokens(t.text).key === key));
+}
+/* "Looks like “Northwind OA” · Day by Day · Tomorrow". Only a near-identical
+ * title gets the confident wording; a looser match never claims more than "looks like". */
+function digestDupLabel(m) {
+  const t = m.task;
+  const done = t.done && !(m.list && m.list.isDefault);   // a Daily task's tick resets every day
+  const sure = m.score >= DIGEST_DUP_EXACT;
+  const lead = sure ? (done ? 'Already done:' : 'Already on your list:') : 'Looks like';
+  const where = m.kind === 'dbd' ? 'Day by Day' : ((m.list && m.list.title) || 'Untitled list');
+  const bits = [where];
+  if (t.due) bits.push(dbdLabelFor(t.due));
+  if (done && !sure) bits.push('done \u2713');
+  return `${lead} \u201c${t.text}\u201d \u00b7 ${bits.join(' \u00b7 ')}`;
 }
 
 /* ── delivery: users/<uid>/digestInbox ──
@@ -5992,7 +6229,10 @@ function digestInboxFlush() {
   saveToLocal();
   renderSettings();
   renderHome();
-  showToast(fresh ? `Email digest ready ✓ ${fresh} new suggestion${fresh === 1 ? '' : 's'}` : 'Email digest ready ✓');
+  const dupes = fresh ? digestDupMap(digestGet().suggestions.filter(x => x.status === 'pending' && x.at === at)).size : 0;
+  showToast(fresh
+    ? `Email digest ready ✓ ${fresh} new suggestion${fresh === 1 ? '' : 's'}${dupes ? ` · ${dupes} already on your lists` : ''}`
+    : 'Email digest ready ✓');
 }
 
 /* Suggested tasks: { id, title, why, due:'YYYY-MM-DD'|'', section, added:<dbd id>|0 } */
@@ -6375,7 +6615,12 @@ function homeDigestHtml() {
  * stay visible (struck through) so the feedback is obvious; they drop off
  * the card on the next one. An added suggestion whose task the user later
  * deleted is offered again. */
-function digestTaskIsAdded(t) { return t.status === 'added' && !!(t.dbdId && dbdById(t.dbdId)); }
+function digestTaskIsAdded(t) {
+  if (t.status !== 'added') return false;
+  if (t.dbdId && dbdById(t.dbdId)) return true;
+  /* tagging MOVES the task into a list under a new id — the same title there still counts as added */
+  return digestDupHasExact(t.title);
+}
 function digestVisibleSuggestions() {
   const d = digestGet();
   const lastAt = d.last ? d.last.at : 0;
@@ -6386,32 +6631,39 @@ function digestVisibleSuggestions() {
   });
 }
 function digestTasksHtml() {
-  const tasks = digestVisibleSuggestions();
-  if (!tasks.length && !(digestGet().last)) return '';
-  const remaining = tasks.filter(t => !digestTaskIsAdded(t));
+  const all = digestVisibleSuggestions();
+  if (!all.length && !(digestGet().last)) return '';
+  const dupes = digestDupMap(all);                                   // open suggestions that repeat an existing task
+  const tasks = all.filter(t => !dupes.has(t.id)).concat(all.filter(t => dupes.has(t.id)));   // those sink to the bottom
+  const remaining = tasks.filter(t => !digestTaskIsAdded(t) && !dupes.has(t.id));
   const rows = tasks.map(t => {
     const added = digestTaskIsAdded(t);
+    const dup = dupes.get(t.id);
     const due = t.due ? `<span class="dg-todo-due">${digestEsc(dbdLabelFor(t.due))}</span>` : '';
     const why = t.why ? `<span class="dg-todo-why">${digestEsc(t.why)}</span>` : '';
     return `
-      <div class="dg-todo ${added ? 'added' : ''}" data-dgt="${t.id}">
+      <div class="dg-todo ${added ? 'added' : ''} ${dup ? 'dup' : ''}" data-dgt="${t.id}">
         <div class="dg-todo-main">
           <div class="dg-todo-title">${digestEsc(t.title)}</div>
           ${(why || due) ? `<div class="dg-todo-sub">${due}${why}</div>` : ''}
+          ${dup ? `<div class="dg-todo-dup">${digestEsc(digestDupLabel(dup))}</div>` : ''}
         </div>
         ${added
-          ? `<span class="dg-todo-added" title="It's in Day by Day">Added ✓</span>`
+          ? `<span class="dg-todo-added" title="It's in your lists">Added ✓</span>`
           : `<span class="dg-todo-actions">
-               <button class="dg-btn dg-todo-add" onclick="digestAddTask(${t.id})" title="Add to Day by Day">Add</button>
+               ${dup
+                 ? `<button class="dg-btn ghost dg-todo-add" onclick="digestAddTask(${t.id})" title="Add it to Day by Day even though something similar is already there">Add anyway</button>`
+                 : `<button class="dg-btn dg-todo-add" onclick="digestAddTask(${t.id})" title="Add to Day by Day">Add</button>`}
                <button class="dg-todo-dismiss" onclick="digestDismissTask(${t.id})" title="Dismiss — won't be suggested again" aria-label="Dismiss">×</button>
              </span>`}
       </div>`;
   }).join('');
   const addAll = remaining.length > 1 ? `<button class="dg-btn ghost dg-todo-addall" onclick="digestAddAllTasks()">Add all (${remaining.length})</button>` : '';
+  const countLabel = remaining.length ? remaining.length : dupes.size ? 'nothing new' : 'all added';
   return `
     <div class="dg-todos">
       <div class="dg-todos-head">
-        <div class="dg-todos-title">✅ Suggested tasks${tasks.length ? ` <span class="dg-todos-count">${remaining.length ? remaining.length : 'all added'}</span>` : ''}</div>
+        <div class="dg-todos-title">✅ Suggested tasks${tasks.length ? ` <span class="dg-todos-count">${countLabel}</span>` : ''}</div>
         ${addAll}
       </div>
       ${tasks.length ? rows : '<div class="dg-todos-empty">No open suggestions.</div>'}
@@ -6449,12 +6701,17 @@ function digestDismissTask(id) {
   saveToLocal();
   return true;
 }
+/* Add all never creates a repeat: flagged suggestions stay put (Add anyway is one tap away).
+ * The flags are taken before the first add so a just-added task can't flag its neighbour. */
 function digestAddAllTasks() {
-  const n = digestVisibleSuggestions().reduce((c, t) => c + (digestAddTask(t.id, { batch: true }) ? 1 : 0), 0);
+  const list = digestVisibleSuggestions();
+  const dupes = digestDupMap(list);
+  const n = list.reduce((c, t) => c + (!dupes.has(t.id) && digestAddTask(t.id, { batch: true }) ? 1 : 0), 0);
   renderDbd();
   renderHome();
   saveToLocal();
-  showToast(n ? `Added ${n} task${n === 1 ? '' : 's'} to Day by Day` : 'Everything is already added');
+  const skipped = dupes.size ? ` · skipped ${dupes.size} already on your lists` : '';
+  showToast(n ? `Added ${n} task${n === 1 ? '' : 's'} to Day by Day${skipped}` : (dupes.size ? 'Nothing new — the rest is already on your lists' : 'Everything is already added'));
 }
 
 /* ── Settings section ── */
