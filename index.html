@@ -57,11 +57,17 @@
         </span>
         Home
       </button>
-      <button class="cal-nav-tab nav-lists" id="listsDesktopNavTab">
+      <button class="cal-nav-tab nav-lists" id="listsDesktopNavTab" data-view="lists">
         <span class="nav-ico" aria-hidden="true">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M5.5 4h8M5.5 8h8M5.5 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="2.6" cy="4" r="1.1" fill="currentColor"/><circle cx="2.6" cy="8" r="1.1" fill="currentColor"/><circle cx="2.6" cy="12" r="1.1" fill="currentColor"/></svg>
         </span>
         Lists
+      </button>
+      <button class="cal-nav-tab nav-daily" id="dailyDesktopNavTab" data-view="daily">
+        <span class="nav-ico" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3.2" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </span>
+        Daily
       </button>
       <button class="cal-nav-tab nav-calendar" id="calDesktopNavTab" data-view="calendar">
         <span class="nav-ico" aria-hidden="true">
@@ -93,13 +99,15 @@
     <div class="left-panel-spacer"></div>
   </aside>
 
-  <main class="right-panel" id="rightPanel">
-    <div class="page-head">
+  <!-- Lists and Daily are separate pages sharing this panel; data-page
+       (set by desktopNavSync) picks which .page-* blocks are shown. -->
+  <main class="right-panel" id="rightPanel" data-page="lists">
+    <div class="page-head page-lists" data-view="lists">
       <h1 class="page-title">Lists</h1>
-      <p class="page-sub">Dated tasks, your lists, and daily routines.</p>
+      <p class="page-sub">Dated tasks and your own lists.</p>
     </div>
 
-    <div id="listsSection-d" data-view="lists" class="page-block">
+    <div id="listsSection-d" data-view="lists" class="page-block page-lists">
       <div class="panel-header">
         <span class="section-label section-label-lists"><span class="section-dot"></span>My lists</span>
       </div>
@@ -121,10 +129,14 @@
       <div class="lists-grid" id="todoContainer-d">
         <div class="empty-state" id="emptyState-d">No lists yet.<br>Click “+ New list” to get started.</div>
       </div>
-      <hr class="section-divider">
     </div>
 
-    <div id="dailySection-d" data-view="daily" class="page-block">
+    <div class="page-head page-daily" data-view="daily">
+      <h1 class="page-title">Daily</h1>
+      <p class="page-sub">Routines that reset every day.</p>
+    </div>
+
+    <div id="dailySection-d" data-view="daily" class="page-block page-daily">
       <div class="panel-header">
         <span class="section-label section-label-daily"><span class="section-dot"></span>Daily</span>
         <button class="fmt-add-daily" id="addDailyBtn">+ Add list</button>
@@ -149,11 +161,15 @@
       <span class="tab-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M5.5 4h8M5.5 8h8M5.5 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="2.6" cy="4" r="1.1" fill="currentColor"/><circle cx="2.6" cy="8" r="1.1" fill="currentColor"/><circle cx="2.6" cy="12" r="1.1" fill="currentColor"/></svg></span>
       <span class="tab-lbl">Lists</span>
     </button>
-    <button class="tab-btn tab-calendar" id="tab-3" data-view="calendar">
+    <button class="tab-btn tab-daily" id="tab-3" data-view="daily">
+      <span class="tab-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3.2" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+      <span class="tab-lbl">Daily</span>
+    </button>
+    <button class="tab-btn tab-calendar" id="tab-4" data-view="calendar">
       <span class="tab-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 6.5h12" stroke="currentColor" stroke-width="1.5"/><path d="M5 1.5v3M11 1.5v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
       <span class="tab-lbl">Calendar</span>
     </button>
-    <button class="tab-btn tab-budget" id="tab-4" data-view="budget">
+    <button class="tab-btn tab-budget" id="tab-5" data-view="budget">
       <span class="tab-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="4" width="13" height="9.5" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M1.5 7h13" stroke="currentColor" stroke-width="1.5"/><circle cx="11" cy="10.4" r="1.1" fill="currentColor"/></svg></span>
       <span class="tab-lbl">Budget</span>
     </button>
@@ -190,11 +206,11 @@
         </button>
       </section>
 
-      <!-- Tab 2: Lists (My Lists on top, Daily below — mirrors the desktop right panel) -->
+      <!-- Tab 2: Lists (Day by Day + custom lists) -->
       <section class="swipe-panel" data-view="lists">
         <div class="page-head page-head-lists">
           <h1 class="page-title">Lists</h1>
-          <p class="page-sub">Dated tasks, your lists, and daily routines.</p>
+          <p class="page-sub">Dated tasks and your own lists.</p>
         </div>
 
         <div id="listsSection-m" data-view="lists" class="page-block">
@@ -219,7 +235,14 @@
           <div id="todoContainer-m" class="lists-stack">
             <div class="empty-state" id="emptyState-m">No lists yet.<br>Tap “+ New list” to get started.</div>
           </div>
-          <hr class="section-divider">
+        </div>
+      </section>
+
+      <!-- Tab 3: Daily -->
+      <section class="swipe-panel" data-view="daily">
+        <div class="page-head page-head-daily">
+          <h1 class="page-title">Daily</h1>
+          <p class="page-sub">Routines that reset every day.</p>
         </div>
 
         <div id="dailySection-m" data-view="daily" class="page-block">
@@ -231,7 +254,7 @@
         </div>
       </section>
 
-      <!-- Tab 3: Calendar -->
+      <!-- Tab 4: Calendar -->
       <section class="swipe-panel cal-swipe-panel" id="mobileCalPanel" data-view="calendar">
         <div class="cal-mobile-header">
           <button class="cal-nav-btn" id="calNavPrev" aria-label="Previous day">
@@ -246,7 +269,7 @@
         <div class="cal-grid-wrap" id="calMobileGrid"></div>
       </section>
 
-      <!-- Tab 4: Budget -->
+      <!-- Tab 5: Budget -->
       <section class="swipe-panel" data-view="budget">
         <div id="budgetContainer-m"></div>
       </section>
@@ -393,68 +416,92 @@
 </footer>
 
 <!-- ════════ SETTINGS MODAL ════════ -->
+<!-- Master–detail: #settingsNav lists the sections (rendered by renderSettingsNav),
+     #settingsPane shows one .settings-section at a time. Desktop shows both side
+     by side; on mobile data-stage flips between the list and the open section. -->
 <div class="modal-overlay" id="settingsModal">
-  <div class="modal-box settings-box">
+  <div class="modal-box settings-box" id="settingsBox" data-stage="list">
     <button class="modal-x" data-close="settingsModal" title="Close">×</button>
-    <div class="modal-title">Settings</div>
 
-    <div class="settings-section-label">Sections</div>
-    <div class="modal-sub">Choose which sections appear. Home is always on.</div>
-    <div class="settings-view-list" id="settingsViewList"></div>
+    <nav class="settings-nav" aria-label="Settings sections">
+      <div class="modal-title">Settings</div>
+      <div class="settings-nav-list" id="settingsNav"></div>
+    </nav>
 
-    <div class="settings-section-label">Appearance</div>
-    <div class="modal-sub">Pick a preset, or open the editor for colors, fonts and a background image.</div>
-    <div class="settings-theme-row">
-      <div class="theme-presets" id="themePresets-s"></div>
-      <button class="modal-file-btn" id="themeOpenBtn">Customize theme</button>
-    </div>
-
-    <div class="settings-section-label">Google Calendar</div>
-    <div class="modal-sub" id="gcalStatusLine">Not connected.</div>
-    <button class="gcal-connect-btn" id="gcalConnectBtn">Connect Google Calendar</button>
-
-    <div class="settings-section-label">Cloud sync</div>
-    <div class="modal-sub" id="syncStatusLine">Not configured.</div>
-    <button class="gcal-connect-btn" id="syncConnectBtn" style="display:none">Sign in with Google</button>
-
-    <div class="settings-section-label">Email Digest</div>
-    <div id="digestSettings">
-      <div class="settings-view-row">
-        <span class="settings-view-name">Show digest on Home</span>
-        <label class="gcal-toggle">
-          <input type="checkbox" id="digestEnabledToggle">
-          <span class="gcal-toggle-track"></span>
-        </label>
+    <div class="settings-pane" id="settingsPane">
+      <div class="settings-pane-head">
+        <button class="settings-back" id="settingsBackBtn" aria-label="Back to all settings">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Settings
+        </button>
+        <div class="modal-title" id="settingsPaneTitle">Sections</div>
       </div>
-      <div class="dg-fields" id="digestFields">
-        <div class="modal-sub" id="digestStatusLine">No digest delivered yet.</div>
-        <div class="modal-sub">Built every morning around 6:30 by GitHub Actions in your <code>worky</code> repo, on a model you host, and delivered here through sync. Nothing runs on this device.</div>
 
-        <div class="dg-field-label">Run it from this device</div>
-        <div class="theme-inline">
-          <input class="theme-text" id="digestGithubToken" type="password" placeholder="GitHub token (Actions: read &amp; write)" autocomplete="off" spellcheck="false" aria-label="GitHub token">
-          <button class="modal-primary" id="digestGithubSaveBtn">Save</button>
-        </div>
-        <div class="theme-bg-status" id="digestGithubStatus"></div>
-        <div class="modal-sub">Create one at GitHub → Settings → Developer settings → Fine-grained tokens, limited to <code>homiejhan/worky</code> with <b>Actions: Read and write</b>. It stays on this device.</div>
+      <section class="settings-section" data-settings-section="views">
+        <div class="modal-sub">Choose which sections appear. Home is always on.</div>
+        <div class="settings-view-list" id="settingsViewList"></div>
+      </section>
 
-        <div class="theme-bg-actions">
-          <button class="modal-file-btn" id="digestRunSettingsBtn">Run digest now</button>
-          <button class="modal-file-btn" id="digestOpenRunBtn" style="display:none">Open latest run</button>
-          <button class="modal-file-btn" id="digestSampleBtn">Load sample</button>
-          <button class="modal-file-btn" id="digestClearBtn" style="display:none">Clear digest</button>
+      <section class="settings-section" data-settings-section="appearance">
+        <div class="modal-sub">Pick a preset, or open the editor for colors, fonts and a background image.</div>
+        <div class="settings-theme-row">
+          <div class="theme-presets" id="themePresets-s"></div>
+          <button class="modal-file-btn" id="themeOpenBtn">Customize theme</button>
         </div>
-      </div>
+      </section>
+
+      <section class="settings-section" data-settings-section="gcal">
+        <div class="modal-sub" id="gcalStatusLine">Not connected.</div>
+        <button class="gcal-connect-btn" id="gcalConnectBtn">Connect Google Calendar</button>
+      </section>
+
+      <section class="settings-section" data-settings-section="sync">
+        <div class="modal-sub" id="syncStatusLine">Not configured.</div>
+        <button class="gcal-connect-btn" id="syncConnectBtn" style="display:none">Sign in with Google</button>
+      </section>
+
+      <section class="settings-section" data-settings-section="digest">
+        <div id="digestSettings">
+          <div class="settings-view-row">
+            <span class="settings-view-name">Show digest on Home</span>
+            <label class="gcal-toggle">
+              <input type="checkbox" id="digestEnabledToggle">
+              <span class="gcal-toggle-track"></span>
+            </label>
+          </div>
+          <div class="dg-fields" id="digestFields">
+            <div class="modal-sub" id="digestStatusLine">No digest delivered yet.</div>
+            <div class="modal-sub">Built every morning around 6:30 by GitHub Actions in your <code>worky</code> repo, on a model you host, and delivered here through sync. Nothing runs on this device.</div>
+
+            <div class="dg-field-label">Run it from this device</div>
+            <div class="theme-inline">
+              <input class="theme-text" id="digestGithubToken" type="password" placeholder="GitHub token (Actions: read &amp; write)" autocomplete="off" spellcheck="false" aria-label="GitHub token">
+              <button class="modal-primary" id="digestGithubSaveBtn">Save</button>
+            </div>
+            <div class="theme-bg-status" id="digestGithubStatus"></div>
+            <div class="modal-sub">Create one at GitHub → Settings → Developer settings → Fine-grained tokens, limited to <code>homiejhan/worky</code> with <b>Actions: Read and write</b>. It stays on this device.</div>
+
+            <div class="theme-bg-actions">
+              <button class="modal-file-btn" id="digestRunSettingsBtn">Run digest now</button>
+              <button class="modal-file-btn" id="digestOpenRunBtn" style="display:none">Open latest run</button>
+              <button class="modal-file-btn" id="digestSampleBtn">Load sample</button>
+              <button class="modal-file-btn" id="digestClearBtn" style="display:none">Clear digest</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="settings-section" data-settings-section="help">
+        <div class="modal-sub">Walk through every section again, one step at a time.</div>
+        <button class="modal-file-btn" id="tourReplayBtn">Take the tour</button>
+        <div class="modal-sub">What Focus stores, what the email digest reads, and how to delete your data. <a href="privacy.html" target="_blank" rel="noopener">Privacy policy</a></div>
+      </section>
+
+      <section class="settings-section" data-settings-section="data">
+        <div class="modal-sub">Wipes all saved data on this device and starts fresh.</div>
+        <button class="modal-file-btn settings-danger-btn" id="clearStorageBtn">Clear storage</button>
+      </section>
     </div>
-
-    <div class="settings-section-label">Help</div>
-    <div class="modal-sub">Walk through every section again, one step at a time.</div>
-    <button class="modal-file-btn" id="tourReplayBtn">Take the tour</button>
-    <div class="modal-sub">What Focus stores, what the email digest reads, and how to delete your data. <a href="privacy.html" target="_blank" rel="noopener">Privacy policy</a></div>
-
-    <div class="settings-section-label">Data</div>
-    <div class="modal-sub">Wipes all saved data on this device and starts fresh.</div>
-    <button class="modal-file-btn settings-danger-btn" id="clearStorageBtn">Clear storage</button>
   </div>
 </div>
 

@@ -83,7 +83,7 @@ console.log('\n── 2. Settings toggle shows the card; empty state explains Gi
   ok(d.querySelector('#homeContainer-d .dg-section'), 'card renders on desktop Home');
   ok(d.querySelector('#homeContainer-m .dg-section'), 'card renders on mobile Home');
   ok(d.querySelector('.dg-empty-text').textContent.includes('GitHub'), 'empty copy explains GitHub builds it');
-  ok(d.querySelector('.dg-empty button[onclick="openSettings()"]'), 'Open Settings button present (no token yet)');
+  ok(d.querySelector('.dg-empty button[onclick^="openSettings("]'), 'Open Settings button present (no token yet)');
   ok(d.querySelector('.dg-btn[onclick="digestRunNow()"]'), 'Run now button offered');
   ok(d.querySelector('.dg-empty button[onclick="digestLoadSample()"]'), 'sample button present');
   eq(savedDigest(w).enabled, true, 'enabled persisted');
