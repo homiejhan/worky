@@ -489,18 +489,37 @@
               <button class="modal-file-btn" id="digestClearBtn" style="display:none">Clear digest</button>
             </div>
 
-            <div class="dg-field-label">Prompts</div>
-            <div class="modal-sub">The instructions the model follows on each run. Edits are saved to your account and used from the next run on.</div>
+            <div class="dg-field-label">Prompts and sections</div>
+            <div class="modal-sub">What the model is told on each run, and which emails go into which section. Edits are saved to your account and used from the next run on.</div>
             <button class="modal-file-btn" id="digestPromptToggleBtn" aria-expanded="false" aria-controls="digestPromptEditor">Edit prompts</button>
             <div class="dg-prompt-editor" id="digestPromptEditor" hidden>
-              <select class="theme-select" id="digestPromptSelect" aria-label="Prompt to edit"></select>
+              <select class="theme-select" id="digestPromptSelect" aria-label="Prompt or section to edit"></select>
               <div class="modal-sub" id="digestPromptHint"></div>
-              <textarea class="modal-textarea dg-prompt-text" id="digestPromptText" maxlength="8000" spellcheck="false" aria-label="Prompt text"></textarea>
+              <div class="dg-prompt-section" id="digestPromptSectionFields" hidden>
+                <input class="theme-text" id="digestPromptTitle" type="text" maxlength="80" placeholder="Section title (the heading in the digest)" aria-label="Section title" autocomplete="off">
+                <textarea class="modal-textarea dg-prompt-keywords" id="digestPromptKeywords" placeholder="Keywords, separated by commas" aria-label="Keywords" autocapitalize="off" spellcheck="false"></textarea>
+                <div class="modal-sub">Whole words in the sender or subject, any case. Use * for the rest of a word (digest* matches digests). Leave empty to collect everything the sections above did not match.</div>
+                <label class="dg-prompt-check"><input type="checkbox" id="digestPromptBody"><span>Also search the first lines of the email body</span></label>
+                <label class="dg-prompt-check"><input type="checkbox" id="digestPromptLists"><span>Also take mailing-list mail that no keywords caught</span></label>
+                <div class="theme-bg-actions">
+                  <button class="modal-file-btn" id="digestPromptUpBtn">Move up</button>
+                  <button class="modal-file-btn" id="digestPromptDownBtn">Move down</button>
+                  <button class="modal-file-btn" id="digestPromptDeleteBtn">Delete section</button>
+                </div>
+              </div>
+              <textarea class="modal-textarea dg-prompt-text" id="digestPromptText" maxlength="8000" spellcheck="false" aria-label="Prompt text" placeholder="Prompt"></textarea>
               <div class="theme-bg-status" id="digestPromptStatus"></div>
               <div class="theme-bg-actions">
-                <button class="modal-primary" id="digestPromptSaveBtn">Save prompt</button>
+                <button class="modal-primary" id="digestPromptSaveBtn">Save</button>
                 <button class="modal-file-btn" id="digestPromptResetBtn">Reset to original</button>
               </div>
+              <div class="theme-bg-actions">
+                <button class="modal-file-btn" id="digestPromptNewBtn">New section</button>
+                <button class="modal-file-btn" id="digestPromptImportBtn">Import .md</button>
+                <button class="modal-file-btn" id="digestPromptExportBtn">Export .md</button>
+              </div>
+              <input type="file" id="digestPromptFile" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden>
+              <div class="modal-sub">Import replaces every prompt and section with the file; Export writes them all out in the same format. <button class="dg-prompt-link" id="digestPromptRestoreAllBtn">Restore all originals</button></div>
             </div>
           </div>
         </div>

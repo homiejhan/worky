@@ -13,9 +13,11 @@ Does exactly what the in-browser digest in app.js does, but unattended:
 
 It never touches users/<uid>/state — that blob belongs to the app's own sync.
 
-Prompts: the originals live in backend/prompts.json. Edits made in the app
-(Settings → Email Digest → Prompts) are saved to users/<uid>/digestPrompts and
-read at the start of every run; any prompt without an edit uses the original.
+Prompts and sections: the originals live in backend/prompts.json. Edits made in
+the app (Settings → Email Digest → Prompts) are saved to users/<uid>/digestPrompts
+and read at the start of every run; anything without an edit uses the original.
+The section list itself (titles, routing keywords, order, prompts) is part of
+that, so sections can be added, renamed, reordered and removed from the app.
 
 Environment (GitHub Secrets in Actions, or a .env locally):
   GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN   from backend/gmail_auth.py
@@ -48,35 +50,35 @@ import requests
 
 # ── constants ──
 
-SECTIONS = [
-    {"key": "tldr",       "title": "📰 Tech News (TLDR)",        "budget": 14000},
-    {"key": "bytebytego", "title": "🏗️ ByteByteGo",              "budget": 12000},
-    {"key": "newsletter", "title": "📮 Other Newsletters",       "budget": 8000},
-    {"key": "jobs",       "title": "💼 Job Application Updates", "budget": 5000},
-    {"key": "misc",       "title": "📬 Miscellaneous",           "budget": 4000},
-]
 CHUNK_CHARS    = 16000   # email text fed to one model call
 OVERVIEW_CHARS = 18000   # assembled digest fed to the overview call
 FETCH_PARALLEL = 6
 WINDOW_QUERY   = "newer_than:1d -in:spam -in:trash"
 MAX_EMAILS     = 400
 
-JOB_RX = re.compile(r"\b(application|applied|applying|interview|assessment|hackerrank|codesignal|codility|online assessment|OA|recruit|recruiter|recruiting|talent|candidate|candidacy|offer letter|next steps|position|hiring|greenhouse|lever\.co|ashbyhq|ashby|workday|myworkday|icims|smartrecruiters|jobvite|taleo|we regret|unfortunately|move forward|not moving forward)\b", re.I)
-NEWSLETTER_RX = re.compile(r"(newsletter|substack|medium\.com|digest|weekly|roundup|beehiiv|mailchimp|convertkit|buttondown|ghost\.io)", re.I)
 PROMO_RX = re.compile(r"(\d+% off|sale ends|flash sale|limited time|coupon|promo code|last chance|deal of the day|free shipping)", re.I)
 
-# ── prompts ──
-# The original prompts live in backend/prompts.json — the one copy both this
-# script and the app's Settings editor read. Saved edits come from Firebase
-# (users/<uid>/digestPrompts = {"prompts": {key: text}, "updatedAt": ms}) and
-# replace the original for that key only.
-#   rules                         prepended to every section call
-#   tldr / bytebytego / newsletter / jobs / misc   one per section (keys match SECTIONS)
-#   overview                      "Top of the inbox" + "Action items"
-#   tasks                         suggested-task extraction (shape enforced by TASKS_SCHEMA)
+# ── prompts & sections ──
+# The originals live in backend/prompts.json — the one copy both this script and
+# the app's Settings editor read. Saved edits come from Firebase
+# (users/<uid>/digestPrompts = {rules?, overview?, tasks?, sections?, updatedAt})
+# and replace the original for that key only.
+#   rules      prepended to every section call
+#   overview   "Top of the inbox" + "Action items"
+#   tasks      suggested-task extraction (shape enforced by TASKS_SCHEMA);
+#              the text "{sections}" inside it becomes the list of section ids
+#   sections   ordered list of {id, title, keywords, body, lists, budget, prompt}:
+#              an email goes to the first section whose keywords match its
+#              sender + subject (or the first lines of the body when `body`),
+#              else it is skipped if promotional, else to the first section with
+#              `lists` when it came through a mailing list, else to the first
+#              section with no keywords (the catch-all), else skipped.
 PROMPTS_FILE = Path(__file__).with_name("prompts.json")
-PROMPT_KEYS = ["rules"] + [s["key"] for s in SECTIONS] + ["overview", "tasks"]
-PROMPT_MAX_CHARS = 8000   # same cap as the Settings editor
+PROMPT_KEYS = ["rules", "overview", "tasks"]
+PROMPT_MAX_CHARS = 8000        # same caps as the Settings editor
+SECTION_MAX = 12
+KEYWORDS_MAX = 60
+BUDGET_DEFAULT, BUDGET_MIN, BUDGET_MAX = 8000, 2000, 30000
 
 
 def load_default_prompts():
@@ -88,24 +90,76 @@ def load_default_prompts():
     missing = [k for k in PROMPT_KEYS if not isinstance(data.get(k), str) or not data[k].strip()]
     if missing:
         raise DigestError(f"{PROMPTS_FILE.name} is missing prompts: {', '.join(missing)}")
-    return {k: data[k].strip() for k in PROMPT_KEYS}
+    out = {k: data[k].strip() for k in PROMPT_KEYS}
+    out["sections"] = normalize_sections(data.get("sections"))
+    if not out["sections"]:
+        raise DigestError(f"{PROMPTS_FILE.name} has no usable sections")
+    return out
+
+
+def normalize_sections(raw):
+    """Accept only well-formed sections; ids are slugs and unique, in file order."""
+    out, seen = [], set()
+    if not isinstance(raw, list):
+        return out
+    for x in raw:
+        if not isinstance(x, dict):
+            continue
+        sid = re.sub(r"[^a-z0-9-]+", "-", str(x.get("id") or "").lower()).strip("-")[:40]
+        title = re.sub(r"\s+", " ", str(x.get("title") or "")).strip()[:80]
+        prompt = str(x.get("prompt") or "").strip()[:PROMPT_MAX_CHARS]
+        if not sid or sid in seen or not title or not prompt:
+            continue
+        kws = x.get("keywords")
+        if isinstance(kws, str):
+            kws = re.split(r"[,\n]", kws)
+        kws = [re.sub(r"\s+", " ", str(k)).strip()[:60] for k in (kws or []) if str(k).strip()][:KEYWORDS_MAX] \
+            if isinstance(kws, list) else []
+        try:
+            budget = int(x.get("budget") or BUDGET_DEFAULT)
+        except (TypeError, ValueError):
+            budget = BUDGET_DEFAULT
+        seen.add(sid)
+        out.append({"id": sid, "title": title, "prompt": prompt, "keywords": kws,
+                    "body": bool(x.get("body")), "lists": bool(x.get("lists")),
+                    "budget": max(BUDGET_MIN, min(BUDGET_MAX, budget)),
+                    "rx": keywords_regex(kws)})
+        if len(out) >= SECTION_MAX:
+            break
+    return out
+
+
+def keywords_regex(kws):
+    """Whole-word, case-insensitive match of any keyword; `*` stands for the rest
+    of a word (digest* → digests). None when there are no keywords."""
+    parts = []
+    for k in kws:
+        esc = re.escape(k).replace(r"\*", r"[\w.-]*")
+        parts.append(rf"(?<![A-Za-z0-9]){esc}(?![A-Za-z0-9])")
+    return re.compile("|".join(parts), re.I) if parts else None
 
 
 def merge_prompts(defaults, saved):
-    """Saved edits win key by key; anything unknown, empty or not a string is ignored."""
+    """Saved edits win key by key; anything unknown, empty or malformed is ignored."""
     out, edited = dict(defaults), []
-    node = saved.get("prompts") if isinstance(saved, dict) else None
-    if isinstance(node, dict):
-        for k in PROMPT_KEYS:
-            v = node.get(k)
-            if isinstance(v, str) and v.strip() and v.strip() != defaults[k]:
-                out[k] = v.strip()[:PROMPT_MAX_CHARS]
-                edited.append(k)
+    if not isinstance(saved, dict):
+        return out, edited
+    for k in PROMPT_KEYS:
+        v = saved.get(k)
+        if isinstance(v, str) and v.strip() and v.strip() != defaults[k]:
+            out[k] = v.strip()[:PROMPT_MAX_CHARS]
+            edited.append(k)
+    if "sections" in saved:
+        secs = normalize_sections(saved.get("sections"))
+        if secs:
+            out["sections"] = secs
+            edited.append("sections")
     return out, edited
 
 
 # The shape the tasks prompt asks for, as a JSON schema. llama-server turns this into a
 # grammar so the model physically cannot emit anything that doesn't fit it.
+# tasks_schema() fills the section enum from the live section list.
 TASKS_SCHEMA = {
     "type": "object",
     "properties": {
@@ -119,7 +173,7 @@ TASKS_SCHEMA = {
                     "title":   {"type": "string"},
                     "why":     {"type": "string"},
                     "due":     {"type": "string"},
-                    "section": {"type": "string", "enum": ["jobs", "newsletter", "misc"]},
+                    "section": {"type": "string", "enum": []},   # filled by tasks_schema()
                 },
                 "required": ["title", "why", "due", "section"],
             },
@@ -127,6 +181,20 @@ TASKS_SCHEMA = {
     },
     "required": ["reasoning", "tasks"],
 }
+
+
+def tasks_schema(sections):
+    sc = json.loads(json.dumps(TASKS_SCHEMA))
+    sc["properties"]["tasks"]["items"]["properties"]["section"]["enum"] = [s["id"] for s in sections]
+    return sc
+
+
+def fallback_section(sections):
+    """Where a task with no recognisable section lands: the catch-all, else the last section."""
+    for s in sections:
+        if not s["keywords"]:
+            return s["id"]
+    return sections[-1]["id"]
 
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1"
 
@@ -295,25 +363,26 @@ def parse_message(msg):
         "date": int(msg.get("internalDate") or 0) or int(time.time() * 1000),
         "text": body_text(msg.get("payload")) or msg.get("snippet", ""),
     }
-    e["section"] = classify(e)
     return e
 
 
-def classify(e):
-    """Cheap sender/subject routing; the model only summarizes within a section."""
-    frm, subj = (e["from"] or "").lower(), e["subject"] or ""
-    meta = f"{frm} {subj}"
-    if "tldrnewsletter" in frm or re.match(r"^\s*tldr\b", subj, re.I):
-        return "tldr"
-    if "bytebytego" in frm or re.search(r"bytebytego", subj, re.I):
-        return "bytebytego"
-    if JOB_RX.search(meta) or JOB_RX.search((e["text"] or "")[:600]):
-        return "jobs"
-    if PROMO_RX.search(subj):
+def classify(e, sections):
+    """Cheap routing, see the section notes above; the model only summarizes within a section."""
+    meta = f"{(e['from'] or '').lower()} {e['subject'] or ''}"
+    body = (e["text"] or "")[:600]
+    for s in sections:
+        if s["rx"] and (s["rx"].search(meta) or (s["body"] and s["rx"].search(body))):
+            return s["id"]
+    if PROMO_RX.search(e["subject"] or ""):
         return "skip"
-    if NEWSLETTER_RX.search(meta) or e["listId"]:
-        return "newsletter"
-    return "misc"
+    if e["listId"]:
+        for s in sections:
+            if s["lists"]:
+                return s["id"]
+    for s in sections:
+        if not s["keywords"]:
+            return s["id"]
+    return "skip"
 
 
 # ── model ────────────────────────────────────────────────────────────────────
@@ -386,10 +455,11 @@ def split_overview(md):
 
 
 def strip_emoji(title):
-    return re.sub(r"^\S+\s", "", title)
+    return re.sub(r"^[^\w\s]+\s+", "", title)
 
 
-def normalize_tasks(items):
+def normalize_tasks(items, sections):
+    ids, other = {s["id"] for s in sections}, fallback_section(sections)
     out, seen = [], set()
     for t in items or []:
         if not isinstance(t, dict):
@@ -404,12 +474,12 @@ def normalize_tasks(items):
             "title": title,
             "why": re.sub(r"\s+", " ", str(t.get("why") or "")).strip()[:200],
             "due": due if re.match(r"^\d{4}-\d{2}-\d{2}$", due) else "",
-            "section": t.get("section") if t.get("section") in ("jobs", "newsletter", "misc") else "misc",
+            "section": t.get("section") if t.get("section") in ids else other,
         })
     return out[:8]
 
 
-def tasks_from_actions(md):
+def tasks_from_actions(md, sections):
     items = []
     for line in (md or "").split("\n"):
         m = re.match(r"^\s*[-*]\s*\[[ xX]?\]\s*(.+)$", line)
@@ -417,11 +487,11 @@ def tasks_from_actions(md):
             continue
         title = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", m.group(1).replace("**", "")).strip()
         if title:
-            items.append({"title": title, "why": "", "due": "", "section": "misc"})
-    return normalize_tasks(items)
+            items.append({"title": title, "why": "", "due": "", "section": ""})
+    return normalize_tasks(items, sections)
 
 
-def parse_tasks(raw):
+def parse_tasks(raw, sections):
     txt = re.sub(r"```(?:json)?", "", raw or "").strip()
     a, b = txt.find("{"), txt.rfind("}")
     if a < 0 or b <= a:
@@ -430,16 +500,17 @@ def parse_tasks(raw):
         obj = json.loads(txt[a:b + 1])
     except Exception:
         return None
-    return normalize_tasks(obj.get("tasks")) if isinstance(obj, dict) and isinstance(obj.get("tasks"), list) else None
+    return normalize_tasks(obj.get("tasks"), sections) if isinstance(obj, dict) and isinstance(obj.get("tasks"), list) else None
 
 
 def build(llm, emails, prompts):
+    secs = prompts["sections"]
     kept = [e for e in emails if e["section"] != "skip"]
-    by = {s["key"]: [e for e in kept if e["section"] == s["key"]] for s in SECTIONS}
-    total_calls = sum(len(chunk(by[s["key"]], s["budget"])) for s in SECTIONS) + 2
+    by = {s["id"]: [e for e in kept if e["section"] == s["id"]] for s in secs}
+    total_calls = sum(len(chunk(by[s["id"]], s["budget"])) for s in secs) + 2
     done, sections = 0, []
-    for s in SECTIONS:
-        lst = by[s["key"]]
+    for s in secs:
+        lst = by[s["id"]]
         if not lst:
             body = "_Nothing today_"
         else:
@@ -449,7 +520,7 @@ def build(llm, emails, prompts):
                 log(f"summarizing {strip_emoji(s['title'])} ({done}/{total_calls}, {len(ch)} emails)")
                 user = "\n\n---\n\n".join(email_block(e, i) for i, e in enumerate(ch))
                 t0 = time.time()
-                out = llm.chat(f"{prompts['rules']}\n\nSection: {s['title']}\n{prompts[s['key']]}", user, max_tokens=1400)
+                out = llm.chat(f"{prompts['rules']}\n\nSection: {s['title']}\n{s['prompt']}", user, max_tokens=1400)
                 log(f"  done in {time.time() - t0:.0f}s")
                 parts.append(out or "_The model returned nothing for these emails._")
             body = "\n\n".join(parts)
@@ -472,13 +543,14 @@ def build(llm, emails, prompts):
     date_line = f"Today is {today.isoformat()} ({today.strftime('%A')})."
     tasks = None
     try:
-        raw = llm.chat(prompts["tasks"], f"{date_line}\n\n{assembled[:OVERVIEW_CHARS]}\n\n{actions}",
-                       max_tokens=900, schema=TASKS_SCHEMA, temperature=0.1)
-        tasks = parse_tasks(raw)
+        raw = llm.chat(prompts["tasks"].replace("{sections}", "|".join(s["id"] for s in secs)),
+                       f"{date_line}\n\n{assembled[:OVERVIEW_CHARS]}\n\n{actions}",
+                       max_tokens=900, schema=tasks_schema(secs), temperature=0.1)
+        tasks = parse_tasks(raw, secs)
     except DigestError:
         tasks = None
     if tasks is None:
-        tasks = tasks_from_actions(actions)
+        tasks = tasks_from_actions(actions, secs)
 
     return "\n\n".join(x for x in (head, assembled) if x), tasks
 
@@ -546,6 +618,7 @@ def load_prompts(token=None, project=None):
         log(f"prompts: could not read saved edits ({e}); using the originals")
         return defaults
     log(f"prompts: saved edits for {', '.join(edited)}" if edited else "prompts: originals")
+    log("sections: " + ", ".join(f"{strip_emoji(s['title'])} ({s['id']})" for s in prompts["sections"]))
     return prompts
 
 
@@ -599,6 +672,7 @@ def main():
         raise DigestError("No emails in the last 24 hours.")
     counts = {}
     for e in emails:
+        e["section"] = classify(e, prompts["sections"])
         counts[e["section"]] = counts.get(e["section"], 0) + 1
     log(f"{len(emails)} emails → {counts}")
 
