@@ -170,7 +170,7 @@ console.log('\n── 7. Delivered digest (users/<uid>/digestInbox) merges like 
   eq(dg.suggestions.length, 2, 'both tasks entered the pool');
   eq(dg.suggestions[0].due, '2026-09-22', 'valid due kept');
   eq(dg.suggestions[1].due, '', 'invalid due dropped');
-  eq(dg.suggestions[1].section, 'misc', 'unknown section → misc');
+  eq(dg.suggestions[1].section, 'nope', 'section ids are kept as delivered (the backend validates them against its section list)');
   ok(d.querySelector('#homeContainer-d .dg-todo-add'), 'home card shows Add buttons');
   ok(d.querySelector('#homeContainer-d .dg-meta').textContent.includes('GitHub'), 'meta line says GitHub');
   w.digestInboxSeen(inbox(1000, 1));
@@ -367,18 +367,19 @@ console.log('\n── 8e. Redundancy: tagging an added task into a list keeps it
 async function promptTests() {
   console.log('\n── 10. Prompt editor: originals from backend/prompts.json, edits to users/<uid>/digestPrompts ──');
   const defaults = JSON.parse(fs.readFileSync(path.join(DIR, 'backend', 'prompts.json'), 'utf8'));
-  let fetches = [], failDefaults = false;
+  let fetches = [];
   const fakeFetch = async url => {
     fetches.push(String(url));
-    if (/backend\/prompts\.json$/.test(url) && !failDefaults) return jsonRes(defaults);
+    if (/backend\/prompts\.json$/.test(url)) return jsonRes(defaults);
     return jsonRes({}, 404);
   };
   const { w, d } = boot({ fetchImpl: fakeFetch });
   const $ = id => d.getElementById(id);
-  const keys = w.eval('DIGEST_PROMPT_KEYS');
-  eq(JSON.stringify(Object.keys(defaults)), JSON.stringify(Array.from(keys)), 'prompts.json has exactly the keys the editor knows, in order');
+  eq(JSON.stringify(Object.keys(defaults)), '["rules","overview","tasks","sections"]', 'prompts.json has the three prompts and the section list');
+  eq(defaults.sections.map(s => s.id).join(','), 'tldr,bytebytego,newsletter,jobs,misc', 'five original sections in digest order');
   const py = fs.readFileSync(path.join(DIR, 'backend', 'digest.py'), 'utf8');
-  ok(/PROMPT_KEYS = \["rules"\] \+ \[s\["key"\] for s in SECTIONS\] \+ \["overview", "tasks"\]/.test(py), 'digest.py builds the same key list');
+  ok(/PROMPT_KEYS = \["rules", "overview", "tasks"\]/.test(py), 'digest.py knows the same three prompt keys');
+  ok(/def classify\(e, sections\)/.test(py), 'digest.py routes with the section list');
 
   eq(fetches.length, 0, 'nothing fetched at boot');
   w.openSettings('digest');
@@ -386,14 +387,16 @@ async function promptTests() {
   eq(fetches.length, 0, 'opening Settings alone fetches nothing');
   $('digestPromptToggleBtn').click();
   ok(!$('digestPromptEditor').hidden, 'Edit prompts expands it');
-  eq($('digestPromptToggleBtn').textContent, 'Hide prompts', 'button flips to Hide prompts');
   ok(fetches.some(u => /backend\/prompts\.json$/.test(u)), 'originals fetched on first expand');
   await sleep(10);
-  eq($('digestPromptSelect').options.length, 8, 'eight prompts to pick from');
+  const optionText = () => Array.from($('digestPromptSelect').options).map(o => o.textContent);
+  eq($('digestPromptSelect').options.length, 8, 'rules + five sections + overview + tasks');
+  eq(optionText()[1], '📰 Tech News (TLDR)', 'sections listed by title, after the shared rules');
   eq($('digestPromptText').value, defaults.rules, 'shows the original shared rules');
-  ok($('digestPromptText').readOnly, 'read-only while signed out');
-  ok($('digestPromptSaveBtn').disabled, 'Save disabled while signed out');
+  ok($('digestPromptSectionFields').hidden, 'no section fields for a plain prompt');
+  ok($('digestPromptText').readOnly && $('digestPromptSaveBtn').disabled, 'read-only while signed out');
   ok($('digestPromptStatus').textContent.startsWith('Sign in to cloud sync'), 'says why');
+  ok(!$('digestPromptExportBtn').disabled, 'Export works signed out (it only reads)');
 
   /* sign in with a fake ref */
   const writes = []; let reject = null;
@@ -404,84 +407,145 @@ async function promptTests() {
   w.eval(`syncUser = { uid: 'u1', email: 'me@example.com' }; syncRef = window.__fakeRef;`);
   w.digestRenderSettings();
   ok($('digestPromptStatus').textContent.startsWith('Loading your saved prompts'), 'waits for the listener before allowing saves');
-  ok($('digestPromptSaveBtn').disabled, 'still no Save until then');
   w.digestPromptsSeen(null);
   eq($('digestPromptStatus').textContent, 'Original prompt.', 'no edits → Original prompt');
   ok(!$('digestPromptText').readOnly, 'editable once signed in');
   ok($('digestPromptSaveBtn').disabled && $('digestPromptResetBtn').disabled, 'Save and Reset idle until something changes');
 
   const pick = key => { const sel = $('digestPromptSelect'); sel.value = key; sel.dispatchEvent(new w.Event('change')); };
-  const type = text => { const ta = $('digestPromptText'); ta.value = text; ta.dispatchEvent(new w.Event('input')); };
-  pick('jobs');
-  eq($('digestPromptText').value, defaults.jobs, 'switching shows that prompt');
-  type('Only a table. Company | Role | Status.');
+  const type = (id, text) => { const el = $(id); el.value = text; el.dispatchEvent(new w.Event('input')); };
+  const tick = (id, on) => { const el = $(id); el.checked = on; el.dispatchEvent(new w.Event('change')); };
+  const last = () => writes[writes.length - 1][1];
+
+  /* a plain prompt */
+  pick('tasks');
+  eq($('digestPromptText').value, defaults.tasks, 'switching shows that prompt');
+  ok(defaults.tasks.includes('{sections}'), 'tasks prompt carries the {sections} placeholder');
+  type('digestPromptText', 'Only urgent replies.');
   eq($('digestPromptStatus').textContent, 'Unsaved changes.', 'typing marks it unsaved');
-  ok(!$('digestPromptSaveBtn').disabled, 'Save enabled');
-
   w.confirm = () => false;
-  pick('misc');
-  eq($('digestPromptSelect').value, 'jobs', 'declining the discard keeps you on the edited prompt');
-  eq($('digestPromptText').value, 'Only a table. Company | Role | Status.', 'and keeps the text');
+  pick('rules');
+  eq($('digestPromptSelect').value, 'tasks', 'declining the discard keeps you on the edited prompt');
   w.confirm = () => true;
-
-  $('digestPromptSaveBtn').click();
-  await sleep(5);
+  $('digestPromptSaveBtn').click(); await sleep(5);
   eq(writes.length, 1, 'one write');
   eq(writes[0][0], 'digestPrompts', 'to users/<uid>/digestPrompts');
-  eq(JSON.stringify(writes[0][1].prompts), JSON.stringify({ jobs: 'Only a table. Company | Role | Status.' }), 'only the edited key is stored');
-  ok(typeof writes[0][1].updatedAt === 'number', 'with updatedAt');
-  ok($('digestPromptSelect').selectedOptions[0].textContent.endsWith('(edited)'), 'picker marks it edited');
+  eq(JSON.stringify(Object.keys(last())), '["tasks","updatedAt"]', 'only the edited prompt is stored, flat, with updatedAt');
+  eq(last().tasks, 'Only urgent replies.', 'with the text');
   ok($('digestPromptStatus').textContent.startsWith('Edited, saved'), 'status says edited');
   eq($('toast').textContent, 'Prompt saved. The next digest run uses it.', 'toast confirms');
 
-  /* the listener echoing the same write, or another device's edit, lands without clobbering */
-  w.digestPromptsSeen(writes[0][1]);
-  eq($('digestPromptText').value, 'Only a table. Company | Role | Status.', 'echo leaves the text alone');
-  type('Draft in progress');
-  w.digestPromptsSeen({ prompts: { jobs: 'Only a table. Company | Role | Status.', tasks: 'Tasks from phone', bogus: 'x', misc: 7 }, updatedAt: 9 });
-  eq($('digestPromptText').value, 'Draft in progress', 'a remote update never overwrites unsaved typing');
-  eq(JSON.stringify(Object.keys(w.eval('digestPromptsSaved').prompts)), '["jobs","tasks"]', 'unknown keys and non-strings ignored');
+  /* a section: rename, keywords, flags */
+  pick('section:jobs');
+  ok(!$('digestPromptSectionFields').hidden, 'section fields appear');
+  eq($('digestPromptTitle').value, '💼 Job Application Updates', 'title filled');
+  ok($('digestPromptKeywords').value.startsWith('application, applied'), 'keywords filled');
+  ok($('digestPromptBody').checked && !$('digestPromptLists').checked, 'flags filled');
+  ok($('digestPromptHint').textContent.startsWith('Section 4 of 5'), 'position shown');
+  eq($('digestPromptSaveBtn').textContent, 'Save section', 'button names the thing');
+  type('digestPromptTitle', '💼 Recruiting');
+  type('digestPromptKeywords', 'recruiter, interview, offer*');
+  tick('digestPromptBody', false);
+  eq($('digestPromptStatus').textContent, 'Unsaved changes.', 'field edits count as changes');
+  $('digestPromptSaveBtn').click(); await sleep(5);
+  const node = last();
+  eq(node.sections.length, 5, 'the whole section list is stored once a section changes');
+  eq(node.sections[3].title, '💼 Recruiting', 'renamed');
+  eq(JSON.stringify(node.sections[3].keywords), '["recruiter","interview","offer*"]', 'keywords split and trimmed');
+  eq(node.sections[3].body, false, 'flag saved');
+  eq(node.sections[3].id, 'jobs', 'id stays put on rename');
+  eq(node.sections[3].budget, 5000, 'budget carried over');
+  eq(node.sections[0].title, '📰 Tech News (TLDR)', 'untouched sections stored as the originals');
+  eq(node.tasks, 'Only urgent replies.', 'the earlier prompt edit is kept alongside');
+  eq(optionText()[4], '💼 Recruiting (edited)', 'picker shows the new title, marked edited');
+  eq($('toast').textContent, 'Section saved. The next digest run uses it.', 'toast confirms');
+
+  /* reorder, add, delete */
+  $('digestPromptUpBtn').click(); await sleep(5);
+  eq(last().sections.map(s => s.id).join(','), 'tldr,bytebytego,jobs,newsletter,misc', 'Move up swaps with the one above');
+  eq($('digestPromptSelect').value, 'section:jobs', 'selection follows the section');
+  ok($('digestPromptHint').textContent.startsWith('Section 3 of 5'), 'position updates');
+  $('digestPromptNewBtn').click(); await sleep(5);
+  eq(last().sections.length, 6, 'New section appends one');
+  eq(last().sections[5].id, 'section-1', 'with a fresh id');
+  eq($('digestPromptSelect').value, 'section:section-1', 'and selects it');
+  eq($('digestPromptTitle').value, 'New section', 'placeholder title');
+  eq(optionText()[6], 'New section (new)', 'marked new in the picker');
+  eq($('digestPromptResetBtn').textContent, 'Discard changes', 'no original to reset a new section to');
+  type('digestPromptTitle', '🏃 Fitness'); type('digestPromptKeywords', 'strava, garmin'); type('digestPromptText', 'Summarize training mail.');
+  $('digestPromptSaveBtn').click(); await sleep(5);
+  eq(last().sections[5].title, '🏃 Fitness', 'new section saved');
+  ok($('digestPromptStatus').textContent.startsWith('Your section, saved'), 'status for an added section');
+  $('digestPromptDownBtn').disabled || $('digestPromptDownBtn').click();
+  ok($('digestPromptDownBtn').disabled, 'cannot move the last section down');
+  $('digestPromptUpBtn').click(); await sleep(5);
+  eq(last().sections.map(s => s.id).join(','), 'tldr,bytebytego,jobs,newsletter,section-1,misc', 'moved above the catch-all');
+  pick('section:bytebytego');
+  $('digestPromptDeleteBtn').click(); await sleep(5);
+  eq(last().sections.map(s => s.id).join(','), 'tldr,jobs,newsletter,section-1,misc', 'Delete removes it');
+  eq($('digestPromptSelect').value, 'section:jobs', 'selection moves to the next section');
+
+  /* reset one section, then the empty and back-to-original cases */
+  pick('section:jobs');
+  $('digestPromptResetBtn').click(); await sleep(5);
+  eq(last().sections[1].title, '💼 Job Application Updates', 'Reset restores the original section in place');
+  eq(last().sections[1].body, true, 'including its flags');
+  eq($('digestPromptKeywords').value.split(', ').length, defaults.sections[3].keywords.length, 'keywords back');
+  type('digestPromptText', '   ');
+  $('digestPromptSaveBtn').click();
+  ok($('toast').textContent.includes('needs a prompt'), 'an empty section prompt is refused');
+  type('digestPromptText', defaults.sections[3].prompt);
   pick('tasks');
-  eq($('digestPromptText').value, 'Tasks from phone', 'another device\'s edit shows up');
+  type('digestPromptText', defaults.tasks + '\n');
+  $('digestPromptSaveBtn').click(); await sleep(5);
+  eq(last().tasks, undefined, 'saving the original text drops that edit instead of storing a copy');
+  ok(Array.isArray(last().sections), 'while the section list stays');
 
-  /* empty and back-to-original */
-  type('   ');
-  $('digestPromptSaveBtn').click();
-  eq(writes.length, 1, 'an empty prompt is not saved');
-  ok($('toast').textContent.includes('cannot be empty'), 'and says so');
-  type(defaults.tasks + '\n');
-  $('digestPromptSaveBtn').click();
-  await sleep(5);
-  eq(JSON.stringify(writes[1][1].prompts), JSON.stringify({ jobs: 'Only a table. Company | Role | Status.' }), 'saving the original text drops the edit instead of storing a copy');
+  /* export → import round trip */
+  const md = w.digestPromptsExportText();
+  ok(md.startsWith('# Worky digest prompts'), 'export has a title');
+  eq((md.match(/^## Section: /gm) || []).length, 5, 'one block per section');
+  ok(md.includes('## Section: 🏃 Fitness\nid: section-1\nkeywords: strava, garmin\nsearch body: no\nmailing lists: no\nbudget: 8000\n\n```text\nSummarize training mail.\n```'), 'section block carries id, keywords, flags, budget and prompt');
+  ok(md.includes('## Suggested tasks\nkey: tasks\n\n```text\n' + defaults.tasks + '\n```'), 'prompt blocks carry their key');
+  const parsed = w.digestPromptsParseMd(md);
+  ok(!parsed.error, 'export parses back');
+  eq(JSON.stringify(parsed.flat.sections), JSON.stringify(w.digestPromptSections()), 'sections survive the round trip exactly');
+  eq(parsed.flat.rules, defaults.rules, 'and the prompts');
+  eq(w.digestPromptsParseMd('# nothing here').error, 'No "## Section:" blocks found. Export a copy first to see the format.', 'a file with no sections is refused');
+  ok(/has no prompt/.test(w.digestPromptsParseMd('## Section: Empty\nid: e\n\n```text\n\n```').error), 'a section without a prompt is refused');
+  const custom = '## Shared rules\nkey: rules\n\n```text\nBe brief.\n```\n\n## Section: Everything\n\n```text\nOne line per email.\n```\n\n## Section: Work\nkeywords: jira, github\nsearch body: yes\n\n```text\nWork mail.\n```\n';
+  await w.digestPromptImportText(custom, 'mine.md');
+  eq(last().rules, 'Be brief.', 'import stores the prompt from the file');
+  eq(last().tasks, undefined, 'a prompt the file leaves out goes back to the original');
+  eq(last().sections.map(s => s.id).join(','), 'everything,work', 'sections from the file, ids slugged from titles when missing');
+  eq(last().sections[1].body, true, 'yes/no flags read');
+  eq($('toast').textContent, 'Imported mine.md. The next digest run uses it.', 'toast confirms');
+  eq($('digestPromptSelect').options.length, 5, 'picker now lists the two imported sections');
 
-  /* reset */
-  pick('jobs');
-  $('digestPromptResetBtn').click();
-  await sleep(5);
-  eq(writes[2][1], null, 'resetting the last edit removes the node');
-  eq($('digestPromptText').value, defaults.jobs, 'text back to the original');
-  eq($('toast').textContent, 'Reset to the original prompt.', 'toast confirms');
-  ok($('digestPromptResetBtn').disabled, 'nothing left to reset');
-
-  /* write failure rolls back */
-  reject = { code: 'PERMISSION_DENIED', message: 'permission_denied' };
-  type('Will fail');
-  $('digestPromptSaveBtn').click();
-  await sleep(5);
-  ok(!(w.eval('digestPromptsSaved').prompts.jobs), 'failed write rolled back');
-  ok($('toast').textContent.includes('database rules'), 'permission error explained');
-  eq($('digestPromptText').value, 'Will fail', 'the typed text is kept after a failed save');
-  eq($('digestPromptStatus').textContent, 'Unsaved changes.', 'and still marked unsaved');
-  w.confirm = () => true; type(defaults.jobs);
-  reject = null;
-
-  /* the real listener path delivers digestPrompts too */
+  /* a remote update, the real listener path, and rollback */
+  pick('section:work');
+  type('digestPromptText', 'Draft in progress');
+  w.digestPromptsSeen({ sections: [{ id: 'work', title: 'Work', prompt: 'Work mail.' }, { id: 'rest', title: 'Rest', prompt: 'r', keywords: [] }], updatedAt: 9 });
+  eq($('digestPromptText').value, 'Draft in progress', 'a remote update never overwrites unsaved typing');
+  w.digestPromptsSeen({ sections: [{ id: 'rest', title: 'Rest', prompt: 'r' }], bogus: 'x', updatedAt: 10 });
+  eq($('digestPromptSelect').value, 'rules', 'when the shown section is deleted elsewhere the editor falls back to the rules');
   w.eval('syncReconciled = true');
-  w.syncOnRemoteValue({ val: () => ({ digestPrompts: { prompts: { misc: 'Misc via listener' }, updatedAt: 3 } }) });
-  pick('misc');
-  eq($('digestPromptText').value, 'Misc via listener', 'syncOnRemoteValue feeds the editor');
+  w.syncOnRemoteValue({ val: () => ({ digestPrompts: { overview: 'Overview via listener', updatedAt: 3 } }) });
+  pick('overview');
+  eq($('digestPromptText').value, 'Overview via listener', 'syncOnRemoteValue feeds the editor');
+  eq($('digestPromptSelect').options.length, 8, 'no stored sections → the originals are back');
+  reject = { code: 'PERMISSION_DENIED', message: 'permission_denied' };
+  type('digestPromptText', 'Will fail');
+  $('digestPromptSaveBtn').click(); await sleep(5);
+  eq(w.digestPromptText('overview'), 'Overview via listener', 'failed write rolled back');
+  eq($('digestPromptText').value, 'Will fail', 'the typed text is kept after a failed save');
+  ok($('toast').textContent.includes('database rules'), 'permission error explained');
+  reject = null;
+  type('digestPromptText', 'Overview via listener');
 
-  /* signing out */
+  /* restore all, then sign out */
+  $('digestPromptRestoreAllBtn').click(); await sleep(5);
+  eq(last(), null, 'Restore all removes the node');
   w.syncStop();
   w.eval('syncUser = null');
   w.digestRenderSettings();
@@ -495,6 +559,9 @@ async function promptTests() {
   await sleep(10);
   ok(b2.d.getElementById('digestPromptStatus').textContent.startsWith('Could not load the original prompts'), 'offline → clear error');
   ok(b2.d.getElementById('digestPromptSaveBtn').disabled, 'and nothing can be saved over a missing original');
+
+  /* tasks keep whatever section id the backend used */
+  eq(w.digestNormalizeTasks([{ title: 'A', section: 'fitness' }, { title: 'B', section: 'Nope!' }], false).map(t => t.section).join(','), 'fitness,misc', 'custom section ids on tasks are kept, junk falls back to misc');
 }
 
 console.log('\n── 9. Run now: token gate, dispatch, watch the run, delivery ends it ──');
