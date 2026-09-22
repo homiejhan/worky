@@ -13,16 +13,22 @@ Does exactly what the in-browser digest in app.js does, but unattended:
 
 It never touches users/<uid>/state — that blob belongs to the app's own sync.
 
+Prompts: the originals live in backend/prompts.json. Edits made in the app
+(Settings → Email Digest → Prompts) are saved to users/<uid>/digestPrompts and
+read at the start of every run; any prompt without an edit uses the original.
+
 Environment (GitHub Secrets in Actions, or a .env locally):
   GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN   from backend/gmail_auth.py
   FIREBASE_SERVICE_ACCOUNT   the service-account JSON, as one string
   WORKY_UID                  the Firebase Auth uid of the account to deliver to
   LLM_URL                    OpenAI-compatible base URL   (default http://127.0.0.1:8080)
   LLM_MODEL                  label stored with the digest (default: whatever /v1/models says)
+  FIREBASE_DB_URL            only if the database isn't https://<project>-default-rtdb.firebaseio.com
 
 Usage:
   python backend/digest.py             # full run → Firebase
   python backend/digest.py --dry-run   # everything except the Firebase write; saves digest.md
+                                       # (still reads your saved prompts when the Firebase secrets are set)
 """
 
 import argparse
@@ -36,10 +42,11 @@ import re
 import sys
 import time
 from html.parser import HTMLParser
+from pathlib import Path
 
 import requests
 
-# ── constants: kept byte-for-byte in step with app.js so both paths agree ──
+# ── constants ──
 
 SECTIONS = [
     {"key": "tldr",       "title": "📰 Tech News (TLDR)",        "budget": 14000},
@@ -58,50 +65,46 @@ JOB_RX = re.compile(r"\b(application|applied|applying|interview|assessment|hacke
 NEWSLETTER_RX = re.compile(r"(newsletter|substack|medium\.com|digest|weekly|roundup|beehiiv|mailchimp|convertkit|buttondown|ghost\.io)", re.I)
 PROMO_RX = re.compile(r"(\d+% off|sale ends|flash sale|limited time|coupon|promo code|last chance|deal of the day|free shipping)", re.I)
 
-RULES = """You write one section of a daily email digest for a busy engineer reading on a phone.
-Formatting rules:
-- Bullets and short tables over paragraphs. No paragraph longer than 2 sentences.
-- Bold key terms, companies, and deadlines.
-- Keep every link the email provides, as markdown links.
-- Concise, scannable, zero fluff. Never invent facts that are not in the emails.
-- Output plain markdown for this section only. No section heading, no preamble, no closing remarks."""
+# ── prompts ──
+# The original prompts live in backend/prompts.json — the one copy both this
+# script and the app's Settings editor read. Saved edits come from Firebase
+# (users/<uid>/digestPrompts = {"prompts": {key: text}, "updatedAt": ms}) and
+# replace the original for that key only.
+#   rules                         prepended to every section call
+#   tldr / bytebytego / newsletter / jobs / misc   one per section (keys match SECTIONS)
+#   overview                      "Top of the inbox" + "Action items"
+#   tasks                         suggested-task extraction (shape enforced by TASKS_SCHEMA)
+PROMPTS_FILE = Path(__file__).with_name("prompts.json")
+PROMPT_KEYS = ["rules"] + [s["key"] for s in SECTIONS] + ["overview", "tasks"]
+PROMPT_MAX_CHARS = 8000   # same cap as the Settings editor
 
-SECTION_PROMPTS = {
-    "tldr": """These are TLDR newsletter emails. Break each edition into its major stories.
-One bullet per story: **bolded headline** + 1–2 sentence summary, with the article link when available.
-If more than one edition arrived (TLDR, TLDR AI, ...), group by edition using a bold sub-header line.""",
-    "bytebytego": """These are ByteByteGo newsletter emails. Give a high-level summary of the main topic.
-Structure as three bold sub-headers: **Major concepts**, **How it works** (step-by-step, or an ASCII diagram inside a code block), **Why it matters**.
-Short bullets under each, not paragraphs. Include links when available.""",
-    "newsletter": """These are newsletters other than TLDR and ByteByteGo (Substack, Medium digests, company or industry roundups).
-For each newsletter: **newsletter name** as a bold sub-header, then 1–3 bullets covering its key points, with article links when available.
-Skip anything purely promotional with no real content.""",
-    "jobs": """These emails relate to job applications: rejections, assessment invites, interview scheduling, recruiter outreach, offer updates.
-Put anything time-sensitive (assessments with deadlines, interview confirmations) at the top, each line starting with ⚠️.
-Then a markdown table with columns: Company | Role | Status | Action needed | Deadline. Use — when a cell is unknown.""",
-    "misc": """These are emails that are not newsletters or job updates: personal mail, bills and receipts, account notices, calendar mail.
-One line each: **sender** — what it is — whether action is needed. Skip routine promotional noise entirely.""",
-}
 
-OVERVIEW_PROMPT = """Below is today's assembled email digest. Write two short markdown blocks and nothing else.
-First block, headed exactly "## 🔝 Top of the inbox": 2–3 lines covering how many emails were processed, anything urgent, and the single most important item.
-Second block, headed exactly "## ✅ Action items": a checklist (lines starting with "- [ ] ") of every email that needs a reply or a task from me, each with the deadline if there is one. If there are none, write a single line "Nothing needs a reply today."
-Use only facts from the digest. No preamble, no closing remarks."""
+def load_default_prompts():
+    try:
+        with open(PROMPTS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        raise DigestError(f"Could not read {PROMPTS_FILE.name}: {e}")
+    missing = [k for k in PROMPT_KEYS if not isinstance(data.get(k), str) or not data[k].strip()]
+    if missing:
+        raise DigestError(f"{PROMPTS_FILE.name} is missing prompts: {', '.join(missing)}")
+    return {k: data[k].strip() for k in PROMPT_KEYS}
 
-TASKS_PROMPT = """You turn a daily email digest into a short list of to-do tasks for the reader.
-Respond with ONLY a JSON object of this exact shape, no markdown, no commentary:
-{"reasoning": "<2-3 sentences: which emails need a reply, a decision, or an action from the reader>",
- "tasks": [{"title": "<imperative, under 12 words, names the company/person>",
-            "why": "<one short sentence from the email>",
-            "due": "<YYYY-MM-DD or empty string>",
-            "section": "<jobs|newsletter|misc>"}]}
-Rules:
-- Only tasks the reader must personally do: replies, decisions, assessments, forms, confirmations, deadlines. Never "read the newsletter".
-- 0 to 8 tasks, most urgent first. If nothing needs doing, "tasks" is an empty array.
-- "due" is a calendar date only when the email states or clearly implies one. Resolve words like tomorrow or Friday against today's date given below. Otherwise use "".
-- Use only facts present in the digest."""
 
-# The same shape as TASKS_PROMPT, as a JSON schema. llama-server turns this into a
+def merge_prompts(defaults, saved):
+    """Saved edits win key by key; anything unknown, empty or not a string is ignored."""
+    out, edited = dict(defaults), []
+    node = saved.get("prompts") if isinstance(saved, dict) else None
+    if isinstance(node, dict):
+        for k in PROMPT_KEYS:
+            v = node.get(k)
+            if isinstance(v, str) and v.strip() and v.strip() != defaults[k]:
+                out[k] = v.strip()[:PROMPT_MAX_CHARS]
+                edited.append(k)
+    return out, edited
+
+
+# The shape the tasks prompt asks for, as a JSON schema. llama-server turns this into a
 # grammar so the model physically cannot emit anything that doesn't fit it.
 TASKS_SCHEMA = {
     "type": "object",
@@ -430,7 +433,7 @@ def parse_tasks(raw):
     return normalize_tasks(obj.get("tasks")) if isinstance(obj, dict) and isinstance(obj.get("tasks"), list) else None
 
 
-def build(llm, emails):
+def build(llm, emails, prompts):
     kept = [e for e in emails if e["section"] != "skip"]
     by = {s["key"]: [e for e in kept if e["section"] == s["key"]] for s in SECTIONS}
     total_calls = sum(len(chunk(by[s["key"]], s["budget"])) for s in SECTIONS) + 2
@@ -446,7 +449,7 @@ def build(llm, emails):
                 log(f"summarizing {strip_emoji(s['title'])} ({done}/{total_calls}, {len(ch)} emails)")
                 user = "\n\n---\n\n".join(email_block(e, i) for i, e in enumerate(ch))
                 t0 = time.time()
-                out = llm.chat(f"{RULES}\n\nSection: {s['title']}\n{SECTION_PROMPTS[s['key']]}", user, max_tokens=1400)
+                out = llm.chat(f"{prompts['rules']}\n\nSection: {s['title']}\n{prompts[s['key']]}", user, max_tokens=1400)
                 log(f"  done in {time.time() - t0:.0f}s")
                 parts.append(out or "_The model returned nothing for these emails._")
             body = "\n\n".join(parts)
@@ -458,7 +461,7 @@ def build(llm, emails):
 
     log(f"overview ({done + 1}/{total_calls})")
     try:
-        overview = llm.chat(OVERVIEW_PROMPT, f"{stats}\n\n{assembled[:OVERVIEW_CHARS]}", max_tokens=700)
+        overview = llm.chat(prompts["overview"], f"{stats}\n\n{assembled[:OVERVIEW_CHARS]}", max_tokens=700)
     except DigestError:
         overview = ""
     top, actions = split_overview(overview)
@@ -469,7 +472,7 @@ def build(llm, emails):
     date_line = f"Today is {today.isoformat()} ({today.strftime('%A')})."
     tasks = None
     try:
-        raw = llm.chat(TASKS_PROMPT, f"{date_line}\n\n{assembled[:OVERVIEW_CHARS]}\n\n{actions}",
+        raw = llm.chat(prompts["tasks"], f"{date_line}\n\n{assembled[:OVERVIEW_CHARS]}\n\n{actions}",
                        max_tokens=900, schema=TASKS_SCHEMA, temperature=0.1)
         tasks = parse_tasks(raw)
     except DigestError:
@@ -516,15 +519,44 @@ def firebase_token():
     return creds.token, info["project_id"]
 
 
-def firebase_deliver(payload, token=None, project=None):
+def firebase_db(project):
+    return os.environ.get("FIREBASE_DB_URL") or f"https://{project}-default-rtdb.firebaseio.com"
+
+
+def firebase_prompts(token, project):
+    """users/<uid>/digestPrompts, written by the app's Settings editor. Returns None if unset."""
+    uid = os.environ["WORKY_UID"]
+    r = requests.get(f"{firebase_db(project)}/users/{uid}/digestPrompts.json",
+                     params={"access_token": token}, timeout=30)
+    if not r.ok:
+        raise DigestError(f"Firebase read failed ({r.status_code}): {r.text[:200]}")
+    return r.json()
+
+
+def load_prompts(token=None, project=None):
+    """Originals from prompts.json, overlaid with the edits saved in the app.
+    A failed read never fails the run — it just falls back to the originals."""
+    defaults = load_default_prompts()
+    if not token:
+        log("prompts: originals (no Firebase access on this run)")
+        return defaults
+    try:
+        prompts, edited = merge_prompts(defaults, firebase_prompts(token, project))
+    except Exception as e:
+        log(f"prompts: could not read saved edits ({e}); using the originals")
+        return defaults
+    log(f"prompts: saved edits for {', '.join(edited)}" if edited else "prompts: originals")
+    return prompts
+
+
+def firebase_deliver(payload):
     """Write the digest. A service-account access token lives for one hour and
     the model step can take longer than that on a slow runner, so always mint a
     fresh token here instead of reusing the one from the pre-flight check — and
     if Firebase still says 401 (clock skew, revoked key), mint once more and retry."""
     token, project = firebase_token()
-    db = os.environ.get("FIREBASE_DB_URL") or f"https://{project}-default-rtdb.firebaseio.com"
     uid = os.environ["WORKY_UID"]
-    url = f"{db}/users/{uid}/digestInbox.json"
+    url = f"{firebase_db(project)}/users/{uid}/digestInbox.json"
     r = requests.put(url, params={"access_token": token}, json=payload, timeout=30)
     if r.status_code == 401:
         log("firebase: token rejected, minting a fresh one and retrying")
@@ -548,9 +580,16 @@ def main():
         missing += [k for k in ("FIREBASE_SERVICE_ACCOUNT", "WORKY_UID") if not os.environ.get(k)]
     if missing:
         raise DigestError("Missing secrets: " + ", ".join(missing) + " (Settings → Secrets and variables → Actions → Secrets tab).")
+    fb_token = fb_project = None
     if not args.dry_run:
-        _, fb_project = firebase_token()        # pre-flight only; the delivery mints its own token
+        fb_token, fb_project = firebase_token()
         log(f"firebase: service account ok (project {fb_project}, uid …{os.environ['WORKY_UID'][-4:]})")
+    elif os.environ.get("FIREBASE_SERVICE_ACCOUNT") and os.environ.get("WORKY_UID"):
+        try:   # a dry run should test the prompts you actually saved
+            fb_token, fb_project = firebase_token()
+        except Exception as e:
+            log(f"firebase: not reachable on this dry run ({e})")
+    prompts = load_prompts(fb_token, fb_project)   # read now, before the long model step
 
     llm = LLM(os.environ.get("LLM_URL", "http://127.0.0.1:8080"), os.environ.get("LLM_MODEL"))
     log(f"model: {llm.model}")
@@ -564,7 +603,7 @@ def main():
     log(f"{len(emails)} emails → {counts}")
 
     t0 = time.time()
-    markdown, tasks = build(llm, emails)
+    markdown, tasks = build(llm, emails, prompts)
     log(f"digest built in {(time.time() - t0) / 60:.1f} min, {len(markdown)} chars, {len(tasks)} task candidates")
 
     payload = {

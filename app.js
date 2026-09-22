@@ -5193,6 +5193,7 @@ function syncOnRemoteValue(snap) {
   digestInboxLatest = (v && v.digestInbox) || null;
   syncReconcileRemote(v);
   digestInboxSeen(digestInboxLatest);         // backend-delivered digest, if any
+  digestPromptsSeen(v ? v.digestPrompts : null);   // prompt edits (Settings → Email Digest)
 }
 function syncReconcileRemote(v) {
   const localFp = syncFingerprint(gatherState());
@@ -5289,6 +5290,8 @@ function syncStop() {
   syncCommitPending = 0;
   digestInboxLatest = null;
   digestInboxPending = null;
+  digestPromptsSaved = undefined;             // they belong to the account that just left
+  digestPromptDirty = false;
   $('syncChoiceModal')?.classList.remove('show');
 }
 
@@ -6893,6 +6896,7 @@ function digestRenderSettings() {
   if (open) open.style.display = (digestRun && digestRun.url) ? '' : 'none';
   const clr = $('digestClearBtn');
   if (clr) clr.style.display = d.last ? '' : 'none';
+  digestPromptRender();
 }
 function bindDigest() {
   $('digestEnabledToggle')?.addEventListener('change', e => {
@@ -6918,6 +6922,214 @@ function bindDigest() {
   $('digestOpenRunBtn')?.addEventListener('click', () => { if (digestRun && digestRun.url) window.open(digestRun.url, '_blank', 'noopener'); });
   $('digestSampleBtn')?.addEventListener('click', () => { closeModal('settingsModal'); digestLoadSample(); });
   $('digestClearBtn')?.addEventListener('click', digestClearLast);
+  bindDigestPrompts();
+}
+
+/* ── Prompts (Settings → Email Digest → Prompts) ──
+ * The originals are backend/prompts.json, the same file backend/digest.py
+ * reads, so there is only one copy of them. Edits are written to
+ * users/<uid>/digestPrompts = { prompts: { key: text }, updatedAt } — a sibling
+ * of state and digestInbox that sync pushes never touch (update(), not set())
+ * and that the backend reads at the start of every run. Only edited keys are
+ * stored; a key with no edit runs the original. */
+const DIGEST_PROMPTS_URL = 'backend/prompts.json';
+const DIGEST_PROMPT_MAX  = 8000;   // same cap as digest.py
+const DIGEST_PROMPT_DEFS = [
+  { key: 'rules',      label: 'Shared rules (every section)',
+    hint: 'Sent first on every section call, followed by that section\'s own prompt.' },
+  { key: 'tldr',       label: 'Tech News (TLDR)',
+    hint: 'Used with the shared rules for emails from TLDR.' },
+  { key: 'bytebytego', label: 'ByteByteGo',
+    hint: 'Used with the shared rules for emails from ByteByteGo.' },
+  { key: 'newsletter', label: 'Other newsletters',
+    hint: 'Used with the shared rules for Substack, Medium and other mailing lists.' },
+  { key: 'jobs',       label: 'Job application updates',
+    hint: 'Used with the shared rules for application, assessment and recruiter emails.' },
+  { key: 'misc',       label: 'Miscellaneous',
+    hint: 'Used with the shared rules for everything else that is not promotional.' },
+  { key: 'overview',   label: 'Top of the inbox and action items',
+    hint: 'Keep the "## ✅ Action items" heading. The digest splits on it, and suggested tasks fall back to that checklist.' },
+  { key: 'tasks',      label: 'Suggested tasks',
+    hint: 'The reply is forced into { reasoning, tasks: [{ title, why, due, section }] }. Change the rules, not the fields.' },
+];
+const DIGEST_PROMPT_KEYS = DIGEST_PROMPT_DEFS.map(p => p.key);
+let digestPromptDefaults = null;         // backend/prompts.json, once fetched
+let digestPromptDefaultsState = 'idle';  // idle | loading | ok | error
+let digestPromptsSaved;                  // undefined until the sync listener reports, then { prompts, updatedAt }
+let digestPromptKey = 'rules';
+let digestPromptDirty = false;
+let digestPromptOpen = false;
+
+function digestPromptsNormalize(node) {
+  const out = { prompts: {}, updatedAt: 0 };
+  if (node && typeof node === 'object') {
+    const p = node.prompts && typeof node.prompts === 'object' ? node.prompts : {};
+    DIGEST_PROMPT_KEYS.forEach(k => {
+      if (typeof p[k] === 'string' && p[k].trim()) out.prompts[k] = p[k].trim().slice(0, DIGEST_PROMPT_MAX);
+    });
+    out.updatedAt = Number(node.updatedAt) || 0;
+  }
+  return out;
+}
+/* called by the sync listener with users/<uid>/digestPrompts (or null) */
+function digestPromptsSeen(node) {
+  digestPromptsSaved = digestPromptsNormalize(node);
+  digestPromptRender();
+}
+async function digestPromptsLoadDefaults() {
+  if (digestPromptDefaultsState === 'loading' || digestPromptDefaultsState === 'ok') return;
+  digestPromptDefaultsState = 'loading';
+  digestPromptRender();
+  try {
+    const r = await fetch(DIGEST_PROMPTS_URL, { cache: 'no-cache' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    const missing = DIGEST_PROMPT_KEYS.filter(k => typeof data[k] !== 'string' || !data[k].trim());
+    if (missing.length) throw new Error('missing ' + missing.join(', '));
+    digestPromptDefaults = {};
+    DIGEST_PROMPT_KEYS.forEach(k => { digestPromptDefaults[k] = data[k].trim(); });
+    digestPromptDefaultsState = 'ok';
+  } catch (e) {
+    digestPromptDefaultsState = 'error';
+  }
+  digestPromptRender();
+}
+function digestPromptEdit(key) {
+  return (digestPromptsSaved && digestPromptsSaved.prompts[key]) || '';
+}
+function digestPromptCurrent(key) {
+  return digestPromptEdit(key) || (digestPromptDefaults && digestPromptDefaults[key]) || '';
+}
+function digestPromptSignedIn() {
+  return !!(typeof syncUser !== 'undefined' && syncUser && typeof syncRef !== 'undefined' && syncRef);
+}
+function digestPromptCanSave() {
+  return digestPromptSignedIn() && digestPromptsSaved !== undefined && digestPromptDefaultsState === 'ok';
+}
+function digestPromptLabel(key) {
+  return (DIGEST_PROMPT_DEFS.find(p => p.key === key) || DIGEST_PROMPT_DEFS[0]).label;
+}
+function digestPromptRender() {
+  const btn = $('digestPromptToggleBtn'), box = $('digestPromptEditor');
+  if (!btn || !box) return;
+  btn.textContent = digestPromptOpen ? 'Hide prompts' : 'Edit prompts';
+  btn.setAttribute('aria-expanded', String(digestPromptOpen));
+  box.hidden = !digestPromptOpen;
+  if (!digestPromptOpen) return;
+
+  const sel = $('digestPromptSelect');
+  const opts = DIGEST_PROMPT_DEFS.map(p => p.label + (digestPromptEdit(p.key) ? ' (edited)' : ''));
+  if (sel.options.length !== DIGEST_PROMPT_DEFS.length) {
+    sel.innerHTML = '';
+    DIGEST_PROMPT_DEFS.forEach(p => { const o = document.createElement('option'); o.value = p.key; sel.appendChild(o); });
+  }
+  DIGEST_PROMPT_DEFS.forEach((p, i) => { sel.options[i].textContent = opts[i]; });
+  sel.value = digestPromptKey;
+  const def = DIGEST_PROMPT_DEFS.find(p => p.key === digestPromptKey);
+  $('digestPromptHint').textContent = def ? def.hint : '';
+
+  const ta = $('digestPromptText');
+  const canSave = digestPromptCanSave();
+  if (!digestPromptDirty) ta.value = digestPromptCurrent(digestPromptKey);
+  ta.readOnly = !canSave;
+  const edited = !!digestPromptEdit(digestPromptKey);
+  $('digestPromptSaveBtn').disabled = !canSave || !digestPromptDirty;
+  $('digestPromptResetBtn').disabled = !canSave || (!edited && !digestPromptDirty);
+
+  const st = $('digestPromptStatus');
+  let msg = '', cls = '';
+  if (digestPromptDefaultsState === 'error') {
+    msg = 'Could not load the original prompts. Check your connection, then hide and reopen the editor.'; cls = 'err';
+  } else if (digestPromptDefaultsState !== 'ok') {
+    msg = 'Loading the original prompts…';
+  } else if (!digestPromptSignedIn()) {
+    msg = 'Sign in to cloud sync to edit prompts. Runs read them from your account.'; cls = 'err';
+  } else if (digestPromptsSaved === undefined) {
+    msg = 'Loading your saved prompts…';
+  } else if (digestPromptDirty) {
+    msg = 'Unsaved changes.'; cls = 'dirty';
+  } else if (edited) {
+    const when = digestPromptsSaved.updatedAt
+      ? new Date(digestPromptsSaved.updatedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+      : '';
+    msg = `Edited${when ? ', saved ' + when : ''}. The next run uses this version.`;
+  } else {
+    msg = 'Original prompt.';
+  }
+  st.textContent = msg;
+  st.className = 'theme-bg-status' + (cls ? ' ' + cls : '');
+}
+/* Write the full set of edits (only the edited keys; none → remove the node). */
+function digestPromptsWrite(next, okMsg) {
+  if (!digestPromptCanSave()) return Promise.resolve(false);
+  const prev = digestPromptsSaved;
+  const draft = $('digestPromptText') ? $('digestPromptText').value : '';
+  const node = Object.keys(next).length ? { prompts: next, updatedAt: Date.now() } : null;
+  digestPromptsSaved = digestPromptsNormalize(node);   // optimistic; the listener confirms
+  digestPromptDirty = false;
+  digestPromptRender();
+  return syncRef.child('digestPrompts').set(node)
+    .then(() => { showToast(okMsg); return true; })
+    .catch(err => {
+      digestPromptsSaved = prev;
+      digestPromptDirty = true;                         // hand the text back so nothing typed is lost
+      if ($('digestPromptText')) $('digestPromptText').value = draft;
+      digestPromptRender();
+      const perm = /permission/i.test(String((err && (err.message || err.code)) || ''));
+      showToast(perm ? 'Could not save: your database rules block users/<uid>/digestPrompts'
+                     : 'Could not save the prompt. Try again when you are online.');
+      return false;
+    });
+}
+function digestPromptSave() {
+  if (!digestPromptCanSave()) return;
+  const text = ($('digestPromptText').value || '').trim();
+  if (!text) { showToast('A prompt cannot be empty. Use Reset to restore the original.'); return; }
+  const next = { ...digestPromptsSaved.prompts };
+  if (text === digestPromptDefaults[digestPromptKey]) delete next[digestPromptKey];
+  else next[digestPromptKey] = text.slice(0, DIGEST_PROMPT_MAX);
+  return digestPromptsWrite(next, 'Prompt saved. The next digest run uses it.');
+}
+function digestPromptReset() {
+  if (!digestPromptCanSave()) return;
+  if (!digestPromptEdit(digestPromptKey)) {          // only unsaved typing to throw away
+    digestPromptDirty = false;
+    digestPromptRender();
+    return;
+  }
+  if (!window.confirm(`Reset "${digestPromptLabel(digestPromptKey)}" to the original prompt?`)) return;
+  const next = { ...digestPromptsSaved.prompts };
+  delete next[digestPromptKey];
+  return digestPromptsWrite(next, 'Reset to the original prompt.');
+}
+function bindDigestPrompts() {
+  $('digestPromptToggleBtn')?.addEventListener('click', () => {
+    if (digestPromptOpen && digestPromptDirty &&
+        !window.confirm(`Discard unsaved changes to "${digestPromptLabel(digestPromptKey)}"?`)) return;
+    if (digestPromptOpen) digestPromptDirty = false;
+    digestPromptOpen = !digestPromptOpen;
+    if (digestPromptOpen && digestPromptDefaultsState !== 'ok') {
+      digestPromptDefaultsState = 'idle';
+      digestPromptsLoadDefaults();
+    }
+    digestPromptRender();
+  });
+  $('digestPromptSelect')?.addEventListener('change', e => {
+    const key = e.target.value;
+    if (digestPromptDirty && !window.confirm(`Discard unsaved changes to "${digestPromptLabel(digestPromptKey)}"?`)) {
+      e.target.value = digestPromptKey;
+      return;
+    }
+    digestPromptKey = DIGEST_PROMPT_KEYS.includes(key) ? key : 'rules';
+    digestPromptDirty = false;
+    digestPromptRender();
+  });
+  $('digestPromptText')?.addEventListener('input', e => {
+    const dirty = e.target.value.trim() !== digestPromptCurrent(digestPromptKey);
+    if (dirty !== digestPromptDirty) { digestPromptDirty = dirty; digestPromptRender(); }
+  });
+  $('digestPromptSaveBtn')?.addEventListener('click', digestPromptSave);
+  $('digestPromptResetBtn')?.addEventListener('click', digestPromptReset);
 }
 
 const DIGEST_SAMPLE_MD = `## 🔝 Top of the inbox

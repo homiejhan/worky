@@ -2927,6 +2927,14 @@ body.format-mode .list-sched-row { display: flex; }
 .dg-sync-hint.warn { color: var(--danger); }
 .dg-fields .theme-bg-actions { flex-wrap: wrap; }
 .dg-fields .theme-bg-actions .modal-file-btn { flex: 1 1 30%; }
+.dg-prompt-editor { display: flex; flex-direction: column; gap: 8px; }
+.dg-prompt-editor[hidden] { display: none; }
+.dg-prompt-text { height: 240px; resize: vertical; font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
+.dg-prompt-text[readonly] { color: var(--ink-3); }
+.dg-prompt-editor .theme-bg-actions .modal-primary { flex: 1 1 30%; }
+.dg-prompt-editor button:disabled { opacity: .5; cursor: default; }
+#digestPromptStatus.dirty { color: var(--accent); }
+#digestPromptStatus.err { color: var(--danger); }
 .tour-next:active { transform: translateY(1px); }
 
 

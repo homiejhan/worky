@@ -488,6 +488,20 @@
               <button class="modal-file-btn" id="digestSampleBtn">Load sample</button>
               <button class="modal-file-btn" id="digestClearBtn" style="display:none">Clear digest</button>
             </div>
+
+            <div class="dg-field-label">Prompts</div>
+            <div class="modal-sub">The instructions the model follows on each run. Edits are saved to your account and used from the next run on.</div>
+            <button class="modal-file-btn" id="digestPromptToggleBtn" aria-expanded="false" aria-controls="digestPromptEditor">Edit prompts</button>
+            <div class="dg-prompt-editor" id="digestPromptEditor" hidden>
+              <select class="theme-select" id="digestPromptSelect" aria-label="Prompt to edit"></select>
+              <div class="modal-sub" id="digestPromptHint"></div>
+              <textarea class="modal-textarea dg-prompt-text" id="digestPromptText" maxlength="8000" spellcheck="false" aria-label="Prompt text"></textarea>
+              <div class="theme-bg-status" id="digestPromptStatus"></div>
+              <div class="theme-bg-actions">
+                <button class="modal-primary" id="digestPromptSaveBtn">Save prompt</button>
+                <button class="modal-file-btn" id="digestPromptResetBtn">Reset to original</button>
+              </div>
+            </div>
           </div>
         </div>
       </section>
