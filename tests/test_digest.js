@@ -363,6 +363,140 @@ console.log('\n── 8e. Redundancy: tagging an added task into a list keeps it
   ok(d.querySelector(`#homeContainer-d .dg-todo[data-dgt="${first.id}"] .dg-todo-add`), 'deleting the moved task re-offers it, as before');
 }
 
+/* ── 10. Prompt editor (Settings → Email Digest → Prompts) ── */
+async function promptTests() {
+  console.log('\n── 10. Prompt editor: originals from backend/prompts.json, edits to users/<uid>/digestPrompts ──');
+  const defaults = JSON.parse(fs.readFileSync(path.join(DIR, 'backend', 'prompts.json'), 'utf8'));
+  let fetches = [], failDefaults = false;
+  const fakeFetch = async url => {
+    fetches.push(String(url));
+    if (/backend\/prompts\.json$/.test(url) && !failDefaults) return jsonRes(defaults);
+    return jsonRes({}, 404);
+  };
+  const { w, d } = boot({ fetchImpl: fakeFetch });
+  const $ = id => d.getElementById(id);
+  const keys = w.eval('DIGEST_PROMPT_KEYS');
+  eq(JSON.stringify(Object.keys(defaults)), JSON.stringify(Array.from(keys)), 'prompts.json has exactly the keys the editor knows, in order');
+  const py = fs.readFileSync(path.join(DIR, 'backend', 'digest.py'), 'utf8');
+  ok(/PROMPT_KEYS = \["rules"\] \+ \[s\["key"\] for s in SECTIONS\] \+ \["overview", "tasks"\]/.test(py), 'digest.py builds the same key list');
+
+  eq(fetches.length, 0, 'nothing fetched at boot');
+  w.openSettings('digest');
+  ok($('digestPromptEditor').hidden, 'editor starts collapsed');
+  eq(fetches.length, 0, 'opening Settings alone fetches nothing');
+  $('digestPromptToggleBtn').click();
+  ok(!$('digestPromptEditor').hidden, 'Edit prompts expands it');
+  eq($('digestPromptToggleBtn').textContent, 'Hide prompts', 'button flips to Hide prompts');
+  ok(fetches.some(u => /backend\/prompts\.json$/.test(u)), 'originals fetched on first expand');
+  await sleep(10);
+  eq($('digestPromptSelect').options.length, 8, 'eight prompts to pick from');
+  eq($('digestPromptText').value, defaults.rules, 'shows the original shared rules');
+  ok($('digestPromptText').readOnly, 'read-only while signed out');
+  ok($('digestPromptSaveBtn').disabled, 'Save disabled while signed out');
+  ok($('digestPromptStatus').textContent.startsWith('Sign in to cloud sync'), 'says why');
+
+  /* sign in with a fake ref */
+  const writes = []; let reject = null;
+  w.__fakeRef = {
+    child: k => ({ set: v => { writes.push([k, v === null ? null : JSON.parse(JSON.stringify(v))]); return reject ? Promise.reject(reject) : Promise.resolve(); } }),
+    update: () => Promise.resolve(), off() {},
+  };
+  w.eval(`syncUser = { uid: 'u1', email: 'me@example.com' }; syncRef = window.__fakeRef;`);
+  w.digestRenderSettings();
+  ok($('digestPromptStatus').textContent.startsWith('Loading your saved prompts'), 'waits for the listener before allowing saves');
+  ok($('digestPromptSaveBtn').disabled, 'still no Save until then');
+  w.digestPromptsSeen(null);
+  eq($('digestPromptStatus').textContent, 'Original prompt.', 'no edits → Original prompt');
+  ok(!$('digestPromptText').readOnly, 'editable once signed in');
+  ok($('digestPromptSaveBtn').disabled && $('digestPromptResetBtn').disabled, 'Save and Reset idle until something changes');
+
+  const pick = key => { const sel = $('digestPromptSelect'); sel.value = key; sel.dispatchEvent(new w.Event('change')); };
+  const type = text => { const ta = $('digestPromptText'); ta.value = text; ta.dispatchEvent(new w.Event('input')); };
+  pick('jobs');
+  eq($('digestPromptText').value, defaults.jobs, 'switching shows that prompt');
+  type('Only a table. Company | Role | Status.');
+  eq($('digestPromptStatus').textContent, 'Unsaved changes.', 'typing marks it unsaved');
+  ok(!$('digestPromptSaveBtn').disabled, 'Save enabled');
+
+  w.confirm = () => false;
+  pick('misc');
+  eq($('digestPromptSelect').value, 'jobs', 'declining the discard keeps you on the edited prompt');
+  eq($('digestPromptText').value, 'Only a table. Company | Role | Status.', 'and keeps the text');
+  w.confirm = () => true;
+
+  $('digestPromptSaveBtn').click();
+  await sleep(5);
+  eq(writes.length, 1, 'one write');
+  eq(writes[0][0], 'digestPrompts', 'to users/<uid>/digestPrompts');
+  eq(JSON.stringify(writes[0][1].prompts), JSON.stringify({ jobs: 'Only a table. Company | Role | Status.' }), 'only the edited key is stored');
+  ok(typeof writes[0][1].updatedAt === 'number', 'with updatedAt');
+  ok($('digestPromptSelect').selectedOptions[0].textContent.endsWith('(edited)'), 'picker marks it edited');
+  ok($('digestPromptStatus').textContent.startsWith('Edited, saved'), 'status says edited');
+  eq($('toast').textContent, 'Prompt saved. The next digest run uses it.', 'toast confirms');
+
+  /* the listener echoing the same write, or another device's edit, lands without clobbering */
+  w.digestPromptsSeen(writes[0][1]);
+  eq($('digestPromptText').value, 'Only a table. Company | Role | Status.', 'echo leaves the text alone');
+  type('Draft in progress');
+  w.digestPromptsSeen({ prompts: { jobs: 'Only a table. Company | Role | Status.', tasks: 'Tasks from phone', bogus: 'x', misc: 7 }, updatedAt: 9 });
+  eq($('digestPromptText').value, 'Draft in progress', 'a remote update never overwrites unsaved typing');
+  eq(JSON.stringify(Object.keys(w.eval('digestPromptsSaved').prompts)), '["jobs","tasks"]', 'unknown keys and non-strings ignored');
+  pick('tasks');
+  eq($('digestPromptText').value, 'Tasks from phone', 'another device\'s edit shows up');
+
+  /* empty and back-to-original */
+  type('   ');
+  $('digestPromptSaveBtn').click();
+  eq(writes.length, 1, 'an empty prompt is not saved');
+  ok($('toast').textContent.includes('cannot be empty'), 'and says so');
+  type(defaults.tasks + '\n');
+  $('digestPromptSaveBtn').click();
+  await sleep(5);
+  eq(JSON.stringify(writes[1][1].prompts), JSON.stringify({ jobs: 'Only a table. Company | Role | Status.' }), 'saving the original text drops the edit instead of storing a copy');
+
+  /* reset */
+  pick('jobs');
+  $('digestPromptResetBtn').click();
+  await sleep(5);
+  eq(writes[2][1], null, 'resetting the last edit removes the node');
+  eq($('digestPromptText').value, defaults.jobs, 'text back to the original');
+  eq($('toast').textContent, 'Reset to the original prompt.', 'toast confirms');
+  ok($('digestPromptResetBtn').disabled, 'nothing left to reset');
+
+  /* write failure rolls back */
+  reject = { code: 'PERMISSION_DENIED', message: 'permission_denied' };
+  type('Will fail');
+  $('digestPromptSaveBtn').click();
+  await sleep(5);
+  ok(!(w.eval('digestPromptsSaved').prompts.jobs), 'failed write rolled back');
+  ok($('toast').textContent.includes('database rules'), 'permission error explained');
+  eq($('digestPromptText').value, 'Will fail', 'the typed text is kept after a failed save');
+  eq($('digestPromptStatus').textContent, 'Unsaved changes.', 'and still marked unsaved');
+  w.confirm = () => true; type(defaults.jobs);
+  reject = null;
+
+  /* the real listener path delivers digestPrompts too */
+  w.eval('syncReconciled = true');
+  w.syncOnRemoteValue({ val: () => ({ digestPrompts: { prompts: { misc: 'Misc via listener' }, updatedAt: 3 } }) });
+  pick('misc');
+  eq($('digestPromptText').value, 'Misc via listener', 'syncOnRemoteValue feeds the editor');
+
+  /* signing out */
+  w.syncStop();
+  w.eval('syncUser = null');
+  w.digestRenderSettings();
+  eq(w.eval('digestPromptsSaved'), undefined, 'sign-out forgets the account\'s prompts');
+  ok($('digestPromptStatus').textContent.startsWith('Sign in to cloud sync'), 'and asks to sign in again');
+
+  /* originals unavailable */
+  const b2 = boot({ fetchImpl: async () => { throw new Error('offline'); } });
+  b2.w.openSettings('digest');
+  b2.d.getElementById('digestPromptToggleBtn').click();
+  await sleep(10);
+  ok(b2.d.getElementById('digestPromptStatus').textContent.startsWith('Could not load the original prompts'), 'offline → clear error');
+  ok(b2.d.getElementById('digestPromptSaveBtn').disabled, 'and nothing can be saved over a missing original');
+}
+
 console.log('\n── 9. Run now: token gate, dispatch, watch the run, delivery ends it ──');
 {
   const calls = [];
@@ -429,6 +563,8 @@ console.log('\n── 9. Run now: token gate, dispatch, watch the run, delivery 
     d.getElementById('settingsBtn').click();
     d.getElementById('digestGithubSaveBtn').click();
     eq(w.localStorage.getItem('focus-digest-github'), null, 'Remove clears the token');
+
+    await promptTests();
 
     console.log(`\n${pass} passed, ${fail} failed`);
     process.exit(fail ? 1 : 0);
