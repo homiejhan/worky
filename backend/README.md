@@ -30,6 +30,16 @@ like a local run, saves, and the next sync push — which rewrites the user node
 clears the inbox. If two digests land before a device syncs, only the newest is
 kept; that's a deliberate simplification.
 
+## Prompts and sections
+
+The originals are in `backend/prompts.json`: three fixed prompts (`rules`, sent before every section call; `overview`, the top-of-inbox block; `tasks`, the suggested-task extraction) and an ordered `sections` list. Each section has an `id`, a `title` (the heading in the digest), the `keywords` that route emails into it, two flags (`body`: also search the first lines of the email; `lists`: also take mailing-list mail that no keywords caught), a `budget` (characters of email text per section per model call) and its own `prompt`.
+
+Routing is `classify()`: an email goes to the first section, top to bottom, whose keywords match its sender + subject (whole words, case-insensitive, `*` for the rest of a word); else it is skipped if the subject looks promotional; else to the first section with `lists` when it came through a mailing list; else to the first section with no keywords (the catch-all); else skipped.
+
+Edit all of this from the app under **Settings → Email Digest → Prompts**: rename, reorder, add and delete sections, change keywords and prompts. Edits are saved to `users/<uid>/digestPrompts` (`{rules?, overview?, tasks?, sections?, updatedAt}`) and read at the start of every run, so the next run picks them up with no commit. A prompt is stored only when it differs from the original; the section list is stored whole once anything about it changes. **Reset to original** restores one prompt or section, **Restore all originals** clears the node, and **Export .md** / **Import .md** move the whole set through a Markdown file (one `## Section:` block per section). Changing `prompts.json` itself changes the originals for both the script and the editor.
+
+If the saved edits can't be read, the run logs it and falls back to the originals rather than failing. A `--dry-run` still reads your saved edits when the Firebase secrets are set, so it's the way to try a new prompt without replacing the digest on your Home card.
+
 ## One-time setup (about 15 minutes)
 
 **1. Gmail refresh token.** In Google Cloud Console, in the same project as the
