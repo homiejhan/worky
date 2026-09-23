@@ -12,6 +12,7 @@ import {
   calColorHidden, calDisplayDays, calEnsureDay, calEvents, calPlaceEventEl, calRefresh, calSave,
   nextCalEventId,
 } from './calendar.js';
+import { normalizeWage } from './shifts.js';
 
 /* gcal state */
 let gcalToken     = null;
@@ -19,6 +20,33 @@ export let gcalCalendars = [];
 export let gcalEvents    = {};
 let gcalSyncing   = false;
 
+/* Shift settings per Google calendar, synced with the rest of the state:
+ * { calId: { shift?: true | false, wage?: dollars an hour } }. A calendar with
+ * no entry is judged by its name (see shifts.js). */
+export let shiftCals = {};
+export function setShiftCals(v) { shiftCals = v; }
+export function normalizeShiftCals(v) {
+  const out = {};
+  if (!v || typeof v !== 'object') return out;
+  Object.entries(v).forEach(([id, c]) => {
+    if (!id || !c || typeof c !== 'object') return;
+    const e = {};
+    if (typeof c.shift === 'boolean') e.shift = c.shift;
+    const w = normalizeWage(c.wage);
+    if (w !== null) e.wage = w;
+    if (Object.keys(e).length) out[id] = e;
+  });
+  return out;
+}
+/* Google calendars the way shifts.js reads them: { calId: { name, shift?, wage? } }.
+ * A setting outlives a hidden or disconnected calendar, so a Focus copy of one
+ * of its events still finds its wage. */
+export function gcalShiftCalendars() {
+  const out = {};
+  Object.entries(shiftCals).forEach(([id, c]) => { out[id] = { ...c }; });
+  gcalCalendars.forEach(c => { out[c.id] = { ...(out[c.id] || {}), name: c.summary }; });
+  return out;
+}
 /* ───────────────────────── GOOGLE CALENDAR ───────────────────────── */
 function gcalSaveToken(t) {
   gcalToken = t;
