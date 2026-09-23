@@ -768,12 +768,15 @@
 
 <div class="toast" id="toast"></div>
 <!-- ── Firebase (Cloud Sync) — compat builds, no bundler needed.
-     Loaded before app.js; if these fail (offline first-run), the app
-     detects the missing global and simply disables sync. ── -->
+     Classic scripts run before the app's modules; if these fail (offline
+     first-run), the app detects the missing global and simply disables sync. ── -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
-<script src="app.js"></script>
+<!-- The app: ES modules in js/, one per feature; js/main.js is the entry point.
+     Modules need http(s) — serve the folder (e.g. npx serve) rather than opening
+     index.html as a file. -->
+<script type="module" src="js/main.js"></script>
 <script>
   /* ── Offline support: register the service worker ──
      Network-first strategy: online loads always get fresh code

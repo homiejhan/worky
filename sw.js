@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════════════════════
    Focus — Service Worker (offline support)
    Strategy:
-   • App shell (index.html, app.js, style.css): NETWORK-FIRST.
+   • App shell (index.html, js/*.js modules, style.css): NETWORK-FIRST.
      Online loads always fetch fresh code from GitHub Pages, then
      update the cache. Offline loads fall back to the cached copy.
      → Deploys are never stuck behind the SW cache.
@@ -12,16 +12,41 @@
      passed straight through to the network — never cached.
    ════════════════════════════════════════════════════════════ */
 
-const CACHE_VERSION = 'worky-v9';
+const CACHE_VERSION = 'worky-v10';
 const SHELL_CACHE   = `${CACHE_VERSION}-shell`;
 const FONT_CACHE    = `${CACHE_VERSION}-fonts`;
 
 /* Files that make up the app shell. './' covers the GitHub Pages
-   directory URL (https://homiejhan.github.io/worky/). */
+   directory URL (https://homiejhan.github.io/worky/). Every module in js/
+   is listed so a first visit caches the whole app for offline use
+   (tests/test_smoke.js checks this list against the folder). */
 const SHELL_FILES = [
   './',
   './index.html',
-  './app.js',
+  './js/main.js',
+  './js/bindings.js',
+  './js/budget.js',
+  './js/calendar.js',
+  './js/config.js',
+  './js/dbd.js',
+  './js/digest-prompts.js',
+  './js/digest.js',
+  './js/drag.js',
+  './js/formats.js',
+  './js/gcal.js',
+  './js/home.js',
+  './js/io.js',
+  './js/lists.js',
+  './js/onboarding.js',
+  './js/persistence.js',
+  './js/settings.js',
+  './js/sync.js',
+  './js/tasklinks.js',
+  './js/templates.js',
+  './js/theme.js',
+  './js/timers.js',
+  './js/util.js',
+  './js/views.js',
   './style.css',
   './manifest.json',
   './icon-180.png',
