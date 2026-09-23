@@ -1283,6 +1283,45 @@ body.format-mode .list-sched-row { display: flex; }
 .home-sec-timers { --sc: var(--hue-timers); }
 .home-sec-cal    { --sc: var(--hue-calendar); }
 .home-sec-lists  { --sc: var(--star); }
+.home-sec-insights { --sc: var(--danger); grid-column: 1 / -1; }
+
+/* insight cards: one line of what the rule saw, one button to go and fix it */
+.home-insights { display: flex; flex-direction: column; gap: 10px; }
+.home-insight {
+  --hi: var(--accent);
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 14px 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--hi);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+.home-insight.hi-clash { --hi: var(--hue-calendar); }
+.home-insight.hi-cash  { --hi: var(--danger); }
+.home-insight.hi-timer { --hi: var(--hue-timers); }
+.hi-mark {
+  flex-shrink: 0;
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--hi) 18%, transparent);
+  color: var(--hi);
+}
+.hi-main { flex: 1; min-width: 0; }
+.hi-title { font-size: 13.5px; font-weight: 650; color: var(--ink); }
+.hi-text { margin-top: 2px; font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
+.hi-go {
+  flex-shrink: 0; align-self: center;
+  padding: 6px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-mid);
+  border-radius: 999px;
+  font-size: 12px; font-weight: 600;
+  color: var(--ink-2);
+  transition: color 0.15s, border-color 0.15s;
+}
+.hi-go:hover { color: var(--hi); border-color: var(--hi); }
 .home-section-title {
   display: flex; align-items: center; gap: 8px;
   font-size: 13.5px; font-weight: 600;

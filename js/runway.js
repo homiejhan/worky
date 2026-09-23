@@ -82,7 +82,8 @@ export function billsDueBetween(bills, fromKey, toKey) {
  *   paycheck          projected pay landing on payday (shifts from today until then)
  *   unpricedShifts    shifts before payday with no wage (not in paycheck)
  *   billsBeforePayday bills due after today and before payday
- *   short, shortBy    the money runs out before payday, and by how many days */
+ *   short, shortBy    the money runs out before payday, and by how many days
+ *   shortfall         when short: the dollars that would carry you to payday */
 export function cashRunway({ today, payday = null, balance = 0, todaySpend = 0, dailySpend = 0,
   shifts = [], bills = [], horizon = 60 }) {
   const daysToPayday = payday ? Math.max(0, daysBetween(today, payday)) : null;
@@ -102,9 +103,12 @@ export function cashRunway({ today, payday = null, balance = 0, todaySpend = 0, 
     if (cash < -0.005) { daysOfCash = d; runsOutOn = date; runsOutWith = dueToday.map(b => b.name); break; }
   }
   const short = daysOfCash !== null && daysToPayday !== null && daysOfCash < daysToPayday;
+  // Before payday money only goes out, so the gap is the balance on payday eve.
+  const eve = balance - Math.max(0, todaySpend) - Math.max(0, dailySpend) * Math.max(0, (daysToPayday ?? 0) - 1) - billsBeforePayday;
   return {
     daysToPayday, daysOfCash, runsOutOn, runsOutWith, paycheck, unpricedShifts,
     billsBeforePayday: Math.round(billsBeforePayday * 100) / 100,
     short, shortBy: short ? daysToPayday - daysOfCash : 0,
+    shortfall: short ? Math.round(Math.max(0, -eve) * 100) / 100 : 0,
   };
 }
