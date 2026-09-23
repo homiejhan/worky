@@ -1,29 +1,12 @@
-const { JSDOM } = require('jsdom');
-const fs = require('fs');
-const path = require('path');
-
-const DIR = path.join(__dirname, '..');   // repo root (tests live in tests/)
-const html = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8')
-  // strip external scripts/links; we inject app.js ourselves
-  .replace(/<script src="[^"]*"><\/script>/g, '')
-  .replace(/<link[^>]*fonts\.googleapis[^>]*>/g, '');
-const appJs = fs.readFileSync(path.join(DIR, 'app.js'), 'utf8');
+/* Themes: presets, custom colors, fonts, background image.
+ * Run: npm test (or node --experimental-vm-modules tests/test_theme.js) */
+const { loadApp } = require('./load-app');
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; console.log('  ✓', msg); } else { fail++; console.log('  ✗', msg); } }
 function eq(a, b, msg) { ok(a === b, `${msg} (got ${JSON.stringify(a)})`); }
 
-function boot(storageSeed) {
-  const dom = new JSDOM(html, { url: 'https://localhost/worky/', runScripts: 'dangerously', pretendToBeVisual: true });
-  const w = dom.window;
-  if (storageSeed) Object.entries(storageSeed).forEach(([k, v]) => w.localStorage.setItem(k, v));
-  Object.defineProperty(w, 'confirm', { value: () => true, writable: true, configurable: true });
-  w.matchMedia = w.matchMedia || (() => ({ matches: false, addListener() {}, removeListener() {} }));
-  const s = w.document.createElement('script');
-  s.textContent = appJs;
-  w.document.body.appendChild(s);
-  return { dom, w, d: w.document };
-}
+function boot(storageSeed) { return loadApp({ storage: storageSeed }); }
 
 const rootVar = (w, name) => w.document.documentElement.style.getPropertyValue(name).trim();
 const savedTheme = (w) => JSON.parse(w.localStorage.getItem('focus-app-state')).theme;
@@ -32,9 +15,10 @@ const savedTheme = (w) => JSON.parse(w.localStorage.getItem('focus-app-state')).
 const preset = (w, id) => w.eval(`themePreset(${JSON.stringify(id)})`);
 const rgb = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)).join(',');
 
+(async () => {   // the app boots asynchronously now (ES modules), so the checks run in here
 console.log('\n── 1. Default boot applies Midnight ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   const mid = preset(w, 'midnight');
   eq(rootVar(w, '--bg-solid'), mid.bg, 'bg-solid is midnight bg');
   eq(rootVar(w, '--scheme'), 'dark', 'scheme dark');
@@ -50,7 +34,7 @@ console.log('\n── 1. Default boot applies Midnight ──');
 
 console.log('\n── 2. Settings → preset chip switches theme ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   d.getElementById('settingsBtn').click();
   ok(d.getElementById('settingsModal').classList.contains('show'), 'settings opens');
   const chips = d.querySelectorAll('#themePresets-s .theme-chip');
@@ -73,7 +57,7 @@ console.log('\n── 2. Settings → preset chip switches theme ──');
 
 console.log('\n── 3. Editor: live color edit detaches preset; hex + swatch stay in sync ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   d.getElementById('settingsBtn').click();
   d.getElementById('themeOpenBtn').click();
   ok(d.getElementById('themeModal').classList.contains('show'), 'theme editor opens');
@@ -116,7 +100,7 @@ console.log('\n── 3. Editor: live color edit detaches preset; hex + swatch s
 
 console.log('\n── 4. Fonts: custom Google Font name ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   d.getElementById('settingsBtn').click();
   d.getElementById('themeOpenBtn').click();
   const sel = d.getElementById('thFontSelect');
@@ -140,7 +124,7 @@ console.log('\n── 4. Fonts: custom Google Font name ──');
 
 console.log('\n── 5. Background image via URL + glass/dim/blur ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   d.getElementById('settingsBtn').click();
   d.getElementById('themeOpenBtn').click();
   eq(d.getElementById('thBgControls').style.display, 'none', 'image sliders hidden without image');
@@ -173,7 +157,7 @@ console.log('\n── 5. Background image via URL + glass/dim/blur ──');
 
 console.log('\n── 6. Preset switch keeps the background image ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   w.themeSetBgUrl('https://example.com/a.png');
   w.themeApplyPreset('ocean');
   eq(savedTheme(w).bgMode, 'url', 'image survives preset switch');
@@ -182,12 +166,12 @@ console.log('\n── 6. Preset switch keeps the background image ──');
 
 console.log('\n── 7. Persistence round-trip (reload) ──');
 {
-  const first = boot();
+  const first = await boot();
   first.w.themeApplyPreset('ember');
   first.w.themeSet('accent', '#123456');
   first.w.saveToLocal();
   const seed = { 'focus-app-state': first.w.localStorage.getItem('focus-app-state') };
-  const { w } = boot(seed);
+  const { w } = await boot(seed);
   eq(rootVar(w, '--bg-solid'), preset(w, 'ember').bg, 'ember bg restored after reload');
   eq(rootVar(w, '--accent'), '#123456', 'custom accent restored');
   eq(savedTheme(w).preset, 'custom', 'custom preset restored');
@@ -195,7 +179,7 @@ console.log('\n── 7. Persistence round-trip (reload) ──');
 
 console.log('\n── 8. Local uploaded image is device-only; other device degrades gracefully ──');
 {
-  const { w } = boot();
+  const { w } = await boot();
   w.localStorage.setItem('focus-theme-bg', 'data:image/jpeg;base64,AAAA');
   w.themeGet().bgMode = 'local';
   w.themeCommit();
@@ -204,7 +188,7 @@ console.log('\n── 8. Local uploaded image is device-only; other device degra
   ok(!JSON.stringify(state).includes('base64,AAAA'), 'data url NOT in synced state');
   eq(state.theme.bgMode, 'local', 'bgMode local in state');
   // "other device": same state, no local image
-  const other = boot({ 'focus-app-state': JSON.stringify(state) });
+  const other = await boot({ 'focus-app-state': JSON.stringify(state) });
   ok(!other.d.getElementById('themeBg').classList.contains('on'), 'no image layer without local file');
   eq(rootVar(other.w, '--bg-surface'), preset(other.w, 'midnight').surface, 'panels stay opaque when image missing');
   eq(rootVar(other.w, '--bg-base'), 'transparent', 'canvas shows the ambient wash, as with no image at all');
@@ -212,7 +196,7 @@ console.log('\n── 8. Local uploaded image is device-only; other device degra
 
 console.log('\n── 9. Compress / decompress (export + cloud format) ──');
 {
-  const { w } = boot();
+  const { w } = await boot();
   w.themeApplyPreset('lavender');
   w.themeSetBgUrl('https://example.com/x.jpg');
   const st = w.gatherState();
@@ -230,7 +214,7 @@ console.log('\n── 9. Compress / decompress (export + cloud format) ──');
 
 console.log('\n── 10. normalizeTheme hardening ──');
 {
-  const { w } = boot();
+  const { w } = await boot();
   const mid = preset(w, 'midnight');
   const n = w.normalizeTheme({ preset: 'nope', bg: 'red', fontSize: 99, radius: -4, bgMode: 'url', bgUrl: '', bgDim: 'x', font: '   ' });
   eq(n.preset, 'midnight', 'unknown preset → midnight');
@@ -250,3 +234,4 @@ console.log('\n── 10. normalizeTheme hardening ──');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
+})().catch(e => { console.error(e); process.exit(1); });

@@ -1,16 +1,12 @@
-/* Email digest — headless tests (node test_digest.js; needs `npm i jsdom`).
+/* Email digest — headless tests. Run: npm test (or node --experimental-vm-modules tests/test_digest.js).
  * The digest is built on GitHub and delivered through Firebase; these tests
  * cover the app side: state, the suggestion pool, rendering, delivery merge,
  * and the GitHub "Run now" trigger against a fake GitHub API. */
-const { JSDOM } = require('jsdom');
+const { loadApp } = require('./load-app');
 const fs = require('fs');
 const path = require('path');
 
 const DIR = path.join(__dirname, '..');   // repo root (tests live in tests/)
-const html = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8')
-  .replace(/<script src="[^"]*"><\/script>/g, '')
-  .replace(/<link[^>]*fonts\.googleapis[^>]*>/g, '');
-const appJs = fs.readFileSync(path.join(DIR, 'app.js'), 'utf8');
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; console.log('  ✓', msg); } else { fail++; console.log('  ✗', msg); } }
@@ -18,18 +14,11 @@ function eq(a, b, msg) { ok(a === b, `${msg} (got ${JSON.stringify(a)})`); }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function boot({ storage, url, fetchImpl } = {}) {
-  const dom = new JSDOM(html, { url: url || 'https://localhost/worky/', runScripts: 'dangerously', pretendToBeVisual: true });
-  const w = dom.window;
-  if (storage) Object.entries(storage).forEach(([k, v]) => w.localStorage.setItem(k, v));
-  Object.defineProperty(w, 'confirm', { value: () => true, writable: true, configurable: true });
-  w.matchMedia = w.matchMedia || (() => ({ matches: false, addListener() {}, removeListener() {} }));
-  if (!w.TextDecoder) w.TextDecoder = TextDecoder;
-  if (fetchImpl) w.fetch = fetchImpl;
-  w.innerWidth = 1280;
-  const s = w.document.createElement('script');
-  s.textContent = appJs;
-  w.document.body.appendChild(s);
-  return { dom, w, d: w.document };
+  return loadApp({ storage, url, before: w => {
+    if (!w.TextDecoder) w.TextDecoder = TextDecoder;
+    if (fetchImpl) w.fetch = fetchImpl;
+    w.innerWidth = 1280;
+  } });
 }
 const b64url = s => Buffer.from(s, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const jsonRes = (obj, status = 200) => ({ ok: status < 300, status, json: async () => obj });
@@ -37,9 +26,10 @@ const dbd = w => w.eval('dbdTasks');
 const savedDigest = w => JSON.parse(w.localStorage.getItem('focus-app-state')).digest;
 
 
+(async () => {   // the app boots asynchronously now (ES modules), so the checks run in here
 console.log('\n── 0. Sample digest carries suggested tasks ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   w.digestLoadSample();
   const sug = w.digestGet().suggestions;
   eq(sug.length, 4, 'sample adds 4 suggestions to the pool');
@@ -62,7 +52,7 @@ console.log('\n── 0. Sample digest carries suggested tasks ──');
 
 console.log('\n── 1. Default boot: digest off, nothing on Home, state carries the record ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   eq(d.querySelector('.dg-section'), null, 'no digest card when disabled');
   w.saveToLocal();
   eq(savedDigest(w).enabled, false, 'saved state has digest.enabled=false');
@@ -73,7 +63,7 @@ console.log('\n── 1. Default boot: digest off, nothing on Home, state carrie
 
 console.log('\n── 2. Settings toggle shows the card; empty state explains GitHub + offers sample ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   d.getElementById('settingsBtn').click();
   const tog = d.getElementById('digestEnabledToggle');
   eq(tog.checked, false, 'toggle starts off');
@@ -91,7 +81,7 @@ console.log('\n── 2. Settings toggle shows the card; empty state explains Gi
 
 console.log('\n── 3. Sample digest renders every section, tables, code, task list ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   w.digestLoadSample();
   const md = d.querySelector('#homeContainer-d .dg-md');
   ok(md, 'markdown body rendered');
@@ -112,7 +102,7 @@ console.log('\n── 3. Sample digest renders every section, tables, code, task
 
 console.log('\n── 4. Renderer is safe: raw HTML and javascript: links are neutralised ──');
 {
-  const { w } = boot();
+  const { w } = await boot();
   const out = w.digestRenderMd('# Hi <script>alert(1)</script>\n\n- [click](javascript:alert(1))\n- <img src=x onerror=alert(1)> **bold**\n\n| a | b |\n|---|---|\n| <b>x</b> | y |');
   ok(!out.includes('<script'), 'script tag escaped');
   ok(!out.includes('<img'), 'img tag escaped');
@@ -124,7 +114,7 @@ console.log('\n── 4. Renderer is safe: raw HTML and javascript: links are ne
 
 console.log('\n── 5. Compress/decompress round trip keeps the digest ──');
 {
-  const { w } = boot();
+  const { w } = await boot();
   w.digestLoadSample();
   const st = w.gatherState();
   const back = w.decompressState(w.compressState(st));
@@ -144,10 +134,10 @@ console.log('\n── 5. Compress/decompress round trip keeps the digest ──'
 
 console.log('\n── 6. Reload persistence + a synced copy shows up on another device ──');
 {
-  const a = boot();
+  const a = await boot();
   a.w.digestLoadSample();
   const raw = a.w.localStorage.getItem('focus-app-state');
-  const b = boot({ storage: { 'focus-app-state': raw } });
+  const b = await boot({ storage: { 'focus-app-state': raw } });
   ok(b.d.querySelector('#homeContainer-d .dg-md'), 'second device renders the digest from state alone');
   eq(b.w.digestGithubGet().token, '', 'GitHub token is device-local (not carried by state)');
   ok(b.d.querySelector('.dg-btn[onclick="digestRunNow()"]'), 'Run now still offered');
@@ -155,7 +145,7 @@ console.log('\n── 6. Reload persistence + a synced copy shows up on another 
 
 console.log('\n── 7. Delivered digest (users/<uid>/digestInbox) merges like a run ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   const inbox = (at, n) => ({ at, markdown: `## 🔝 Top of the inbox\nrun ${n}\n\n## 📰 Tech News (TLDR)\n- a story`, count: 12, model: 'qwen3.5-4b', source: 'github',
     tasks: [{ title: `Reply to Acme recruiter ${n}`, why: 'asked for times', due: '2026-09-22', section: 'jobs' }, { title: 'Pay the water bill', why: '', due: 'garbage', section: 'nope' }] });
   w.eval('syncReconciled = false');
@@ -210,7 +200,7 @@ console.log('\n── 7. Delivered digest (users/<uid>/digestInbox) merges like 
 
 console.log('\n── 8. Add / Dismiss / Add all against the pool ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   w.digestLoadSample();
   const first = w.digestGet().suggestions[0];
   const before = w.eval('dbdTasks.length');
@@ -229,7 +219,7 @@ console.log('\n── 8. Add / Dismiss / Add all against the pool ──');
 
 console.log('\n── 8a. Redundancy: how two titles are scored ──');
 {
-  const { w } = boot();
+  const { w } = await boot();
   const sc = (a, b) => w.digestDupScore(a, b);
   const FLAG = w.eval('DIGEST_DUP_FLAG');
   [ ['Finish the Northwind Labs online assessment', 'Northwind OA'],
@@ -258,7 +248,7 @@ console.log('\n── 8a. Redundancy: how two titles are scored ──');
 
 console.log('\n── 8b. Redundancy: a suggestion that repeats an existing task is flagged, not added ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   const day = n => { const x = new Date(); x.setDate(x.getDate() + n); return w.calDateKey(x); };
   w.eval(`dbdTasks.push({ id: dbdIdCounter++, text: 'Northwind OA', due: '${day(1)}', done: false })`);
   w.eval(`todoLists.push({ id: todoIdCounter++, title: 'Bills', color: '#378ADD', isDefault: false, tasks: [{ id: taskIdCounter++, text: 'water bill', done: false }] })`);
@@ -307,7 +297,7 @@ console.log('\n── 8b. Redundancy: a suggestion that repeats an existing task
 
 console.log('\n── 8c. Redundancy: finished tasks only count while they are recent ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   const day = n => { const x = new Date(); x.setDate(x.getDate() + n); return w.calDateKey(x); };
   w.eval(`dbdTasks.push({ id: dbdIdCounter++, text: 'Pay the water bill', due: '${day(-31)}', done: true, doneOn: '${day(-30)}' })`);
   w.eval(`dbdTasks.push({ id: dbdIdCounter++, text: 'Fabrikam phone screen', due: '${day(-1)}', done: true, doneOn: '${day(-1)}' })`);
@@ -327,7 +317,7 @@ console.log('\n── 8c. Redundancy: finished tasks only count while they are r
 
 console.log('\n── 8d. Redundancy: the same suggestion in other words does not enter the pool twice ──');
 {
-  const { w } = boot();
+  const { w } = await boot();
   w.eval('syncReconciled = true');
   const send = (at, tasks) => w.digestInboxSeen({ at, markdown: '## 🔝 Top of the inbox\nrun ' + at, count: 5, model: 'm', source: 'github', tasks });
   send(1000, [{ title: 'Finish the Northwind Labs online assessment', why: '', due: '', section: 'jobs' }]);
@@ -349,7 +339,7 @@ console.log('\n── 8d. Redundancy: the same suggestion in other words does no
 
 console.log('\n── 8e. Redundancy: tagging an added task into a list keeps it Added ✓ ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   w.digestLoadSample();
   const first = w.digestGet().suggestions[0];
   w.digestAddTask(first.id);
@@ -373,7 +363,7 @@ async function promptTests() {
     if (/backend\/prompts\.json$/.test(url)) return jsonRes(defaults);
     return jsonRes({}, 404);
   };
-  const { w, d } = boot({ fetchImpl: fakeFetch });
+  const { w, d } = await boot({ fetchImpl: fakeFetch });
   const $ = id => d.getElementById(id);
   eq(JSON.stringify(Object.keys(defaults)), '["rules","overview","tasks","sections"]', 'prompts.json has the three prompts and the section list');
   eq(defaults.sections.map(s => s.id).join(','), 'tldr,bytebytego,newsletter,jobs,misc', 'five original sections in digest order');
@@ -553,7 +543,7 @@ async function promptTests() {
   ok($('digestPromptStatus').textContent.startsWith('Sign in to cloud sync'), 'and asks to sign in again');
 
   /* originals unavailable */
-  const b2 = boot({ fetchImpl: async () => { throw new Error('offline'); } });
+  const b2 = await boot({ fetchImpl: async () => { throw new Error('offline'); } });
   b2.w.openSettings('digest');
   b2.d.getElementById('digestPromptToggleBtn').click();
   await sleep(10);
@@ -574,7 +564,7 @@ console.log('\n── 9. Run now: token gate, dispatch, watch the run, delivery 
     if (/\/runs\?/.test(url)) return { status: 200, ok: true, json: async () => runsResponse };
     return { status: 404, ok: false, json: async () => ({}) };
   };
-  const { w, d } = boot({ fetchImpl: fakeFetch });
+  const { w, d } = await boot({ fetchImpl: fakeFetch });
   w.eval('DIGEST_RUN_POLL_MS = 5');
   w.digestGet().enabled = true; w.renderHome();
   w.digestRunNow();
@@ -637,3 +627,4 @@ console.log('\n── 9. Run now: token gate, dispatch, watch the run, delivery 
     process.exit(fail ? 1 : 0);
   }).catch(e => { console.error(e); process.exit(1); });
 }
+})().catch(e => { console.error(e); process.exit(1); });
