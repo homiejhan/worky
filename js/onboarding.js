@@ -173,7 +173,7 @@ const TOUR_STEPS = [
     body: 'A daily envelope. Set a daily amount and a starting balance, log purchases as you go, and whatever is left rolls over at midnight. Home shows today\'s balance at a glance.',
     target: { d: '#budgetContainer-d .budget-wrap', m: '#budgetContainer-m .budget-wrap' } },
   { key: 'formats', title: 'Formats',
-    body: 'Formats is where you edit your defaults: which timers exist and how long they run, which Daily lists there are, and the weekly calendar templates. Not sure where to start? Templates gives you eight ready-made setups to build on. Press Done to save. Reset returns the day to whatever you set here.',
+    body: 'Formats is where you edit your defaults: which timers exist and how long they run, which Daily lists there are, and the weekly calendar templates. Not sure where to start? Templates has ready-made setups to build on. Press Done to save. Reset returns the day to whatever you set here.',
     target: { d: '#fmtBtn', m: '#fmtBtn' } },
   { key: 'settings', title: 'Settings',
     body: 'Hide sections you don\'t use, pick a theme or build your own, connect Google Calendar, and sign in to sync across your devices. You can replay this tour from here too.',

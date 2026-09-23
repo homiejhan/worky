@@ -3,6 +3,8 @@ import { $, closeModal, escAttr, showToast } from './util.js';
 import { saveToLocal } from './persistence.js';
 import { renderTimers, setTimerDefaults, setTimers } from './timers.js';
 import { makeTasks, nextTodoId, renderTodos, setTodoLists, todoLists } from './lists.js';
+import { viewEnabled } from './views.js';
+import { setViewEnabled } from './settings.js';
 import { formatMode, nextFormatTimerId, setPreFormatTimerState } from './formats.js';
 import { taskLinkRefOfEvent } from './tasklinks.js';
 import {
@@ -16,9 +18,36 @@ import { themeApplyPreset, themeFontStack, themePreset } from './theme.js';
  * three things Formats owns — timers, Daily lists, weekly calendar
  * templates — and (optionally) switches to a matching theme preset.
  * Custom lists, Day-by-Day tasks, budget, and calendar events you added
- * by hand are never touched. Nothing reaches the cloud until Done, so a
- * template can be tried and tweaked freely. */
-const FORMAT_TEMPLATES = [
+ * by hand are never touched; a template's `lists` are only added when no
+ * list of that name exists, and its `views` are only switched on. Nothing
+ * reaches the cloud until Done, so a template can be tried and tweaked
+ * freely. Working student is the default: a fresh device starts from it
+ * (see applyStarterProfile). */
+export const DEFAULT_TEMPLATE = 'working';
+export const FORMAT_TEMPLATES = [
+  { id: 'working', name: 'Working student', tagline: 'Classes, shifts and cash on one page. The default setup.', theme: 'midnight',
+    timers: [
+      { label: 'Study', seconds: 3*3600, color: '#8B5CF6' },
+      { label: 'Work',  seconds: 4*3600, color: '#22C55E' },
+      { label: 'Sleep', seconds: 8*3600, color: '#378ADD' },
+    ],
+    daily: [
+      { title: 'Before class or shift', color: '#2F6FE0', starred: true,
+        tasks: ['Check today\'s classes and shift', 'Pack bag, charger and work clothes', 'Eat something real', 'Pick the one assignment that matters most'] },
+      { title: 'Wind down', color: '#8B5CF6', starred: true,
+        tasks: ['Set out tomorrow\'s clothes', 'Screens off 30 minutes before bed', 'Phone on silent', 'Lights out on time'] },
+      { title: 'Sunday planning', color: '#F97316', activeDays: [0],
+        tasks: ['Map this week\'s deadlines', 'Check next week\'s shifts', 'Block study time around shifts', 'Check cash until payday', 'Laundry'] },
+    ],
+    lists: [{ title: 'Deadlines', color: '#EC3636', starred: true }],   // where due dates live
+    views: ['budget'],                                                  // the envelope stays on
+    cal: [
+      { title: 'Study block',   start: '14:00', end: '16:00', color: '#8B5CF6', repeatDays: [1,3,5] },
+      { title: 'Lunch',         start: '12:15', end: '12:15', color: '#505050', repeatDays: [1,2,3,4,5], type: 'divider' },
+      { title: 'Plan the week', start: '19:00', end: '19:30', color: '#F97316', repeatDays: [0] },
+      { title: 'Lights out',    start: '23:30', end: '23:30', color: '#378ADD', repeatDays: [0,1,2,3,4,5,6], type: 'divider' },
+    ] },
+
   { id: 'classic', name: 'Classic', tagline: 'The original Focus setup — work, growth, faith, skills.', theme: 'midnight',
     timers: [
       { label: 'Productivity Timer',   seconds: 5*3600, color: '#378ADD' },
@@ -39,32 +68,6 @@ const FORMAT_TEMPLATES = [
       { title: 'Lunch',         start: '12:30', end: '12:30', color: '#505050', repeatDays: [1,2,3,4,5], type: 'divider' },
       { title: 'Workout',       start: '17:30', end: '18:30', color: '#22C55E', repeatDays: [1,3,5] },
       { title: 'Weekly review', start: '18:00', end: '18:45', color: '#8B5CF6', repeatDays: [0] },
-    ] },
-
-  { id: 'student', name: 'Student', tagline: 'Classes, study blocks, and a Sunday plan.', theme: 'daylight',
-    timers: [
-      { label: 'Classes & Lectures', seconds: 4*3600,      color: '#2F6FE0' },
-      { label: 'Study Block',        seconds: 3*3600,      color: '#8B5CF6' },
-      { label: 'Homework',           seconds: 2*3600,      color: '#F97316' },
-      { label: 'Reading',            seconds: 1*3600,      color: '#22C55E' },
-    ],
-    daily: [
-      { title: 'Morning kickoff', color: '#2F6FE0', starred: true,
-        tasks: ['Check today\'s schedule', 'Pack bag & charger', 'Eat breakfast', 'Pick the one assignment that matters most'] },
-      { title: 'Study habits', color: '#8B5CF6', starred: true,
-        tasks: ['Review yesterday\'s notes', '3 × 25-minute focus sprints', 'Flashcards for 15 minutes', 'Write tomorrow\'s to-do'] },
-      { title: 'Campus admin', color: '#EAB308', activeDays: [1,2,3,4,5],
-        tasks: ['Clear school email', 'Check assignment portal', 'Log office hours or questions'] },
-      { title: 'Sunday planning', color: '#F97316', activeDays: [0],
-        tasks: ['Map out the week\'s deadlines', 'Block study time on the calendar', 'Prep meals or snacks', 'Laundry'] },
-    ],
-    cal: [
-      { title: 'Classes',          start: '09:00', end: '12:00', color: '#2F6FE0', repeatDays: [1,2,3,4,5] },
-      { title: 'Lunch',            start: '12:15', end: '12:15', color: '#505050', repeatDays: [1,2,3,4,5], type: 'divider' },
-      { title: 'Study block',      start: '14:00', end: '16:00', color: '#8B5CF6', repeatDays: [1,2,3,4,5] },
-      { title: 'Gym',              start: '17:00', end: '18:00', color: '#22C55E', repeatDays: [2,4] },
-      { title: 'Weekend study',    start: '10:00', end: '12:00', color: '#8B5CF6', repeatDays: [6] },
-      { title: 'Plan the week',    start: '19:00', end: '19:45', color: '#F97316', repeatDays: [0] },
     ] },
 
   { id: 'deepwork', name: 'Deep Work', tagline: 'Long focus blocks with a startup and shutdown ritual.', theme: 'ocean',
@@ -175,32 +178,15 @@ const FORMAT_TEMPLATES = [
       { title: 'Walk',  start: '17:00', end: '17:30', color: '#22C55E', repeatDays: [0,1,2,3,4,5,6] },
     ] },
 
-  { id: 'nightowl', name: 'Night Owl', tagline: 'For late shifts and people who do their best work after dark.', theme: 'sunset',
-    timers: [
-      { label: 'Work',      seconds: 6*3600, color: '#FF7A8A' },
-      { label: 'Creative',  seconds: 2*3600, color: '#8B5CF6' },
-      { label: 'Errands',   seconds: 1*3600, color: '#EAB308' },
-      { label: 'Wind-down', seconds: 1*3600, color: '#378ADD' },
-    ],
-    daily: [
-      { title: 'Evening start', color: '#FF7A8A', starred: true,
-        tasks: ['Coffee or tea', 'Plan the night\'s 3 priorities', 'Check messages once', 'Water bottle filled'] },
-      { title: 'Before sleep', color: '#378ADD', starred: true,
-        tasks: ['Blackout curtains down', 'No screens for 30 minutes', 'Set out tomorrow\'s clothes', 'Phone on silent'] },
-      { title: 'Daylight errands', color: '#EAB308', activeDays: [1,2,3,4,5],
-        tasks: ['Anything that needs business hours', 'Get some sunlight', 'Groceries or post'] },
-      { title: 'Midweek reset', color: '#8B5CF6', activeDays: [3],
-        tasks: ['Change the sheets', 'Tidy the desk', 'Check the week\'s progress'] },
-    ],
-    cal: [
-      { title: 'Wake',           start: '11:00', end: '11:00', color: '#505050', repeatDays: [0,1,2,3,4,5,6], type: 'divider' },
-      { title: 'Creative block', start: '12:00', end: '14:00', color: '#8B5CF6', repeatDays: [2,4,6] },
-      { title: 'Work shift',     start: '16:00', end: '23:30', color: '#FF7A8A', repeatDays: [1,2,3,4,5] },
-      { title: 'Wind-down',      start: '23:30', end: '23:30', color: '#378ADD', repeatDays: [0,1,2,3,4,5,6], type: 'divider' },
-    ] },
 ];
 
-function formatTemplateById(id) { return FORMAT_TEMPLATES.find(t => t.id === id) || null; }
+/* A custom list that already plays the part of a template's list (same name). */
+function templateListFor(l) {
+  const name = l.title.trim().toLowerCase();
+  return todoLists.find(x => !x.isDefault && (x.title || '').trim().toLowerCase() === name) || null;
+}
+
+export function formatTemplateById(id) { return FORMAT_TEMPLATES.find(t => t.id === id) || null; }
 
 export function openFormatTemplates() {
   if (!formatMode) { showToast('Open Formats first, then pick a template.'); return; }
@@ -214,8 +200,10 @@ function renderFormatTemplates() {
   el.innerHTML = FORMAT_TEMPLATES.map(tp => {
     const th = themePreset(tp.theme);
     const swatches = tp.timers.map(t => `<span class="fmt-tpl-sw" style="background:${t.color}"></span>`).join('');
-    const lists = tp.daily.map(d => `<span class="fmt-tpl-chip" style="--chip:${d.color}">${escAttr(d.title)}</span>`).join('');
-    const counts = `${tp.timers.length} timer${tp.timers.length === 1 ? '' : 's'} · ${tp.daily.length} daily list${tp.daily.length === 1 ? '' : 's'} · ${tp.cal.length} calendar block${tp.cal.length === 1 ? '' : 's'}`;
+    const lists = [...tp.daily, ...(tp.lists || [])].map(d => `<span class="fmt-tpl-chip" style="--chip:${d.color}">${escAttr(d.title)}</span>`).join('');
+    const counts = `${tp.timers.length} timer${tp.timers.length === 1 ? '' : 's'} · ${tp.daily.length} daily list${tp.daily.length === 1 ? '' : 's'}` +
+      (tp.lists ? ` + ${tp.lists.map(l => escAttr(l.title)).join(', ')}` : '') +
+      ` · ${tp.cal.length} calendar block${tp.cal.length === 1 ? '' : 's'}`;
     return `
       <button class="fmt-tpl-card" data-tpl="${tp.id}"
         style="--t-bg:${th.bg};--t-sf:${th.surface};--t-ink:${th.ink};--t-ink2:${th.ink2};--t-ac:${th.accent};--t-font:${escAttr(themeFontStack(th.font))};--t-r:${th.radius}px">
@@ -226,7 +214,7 @@ function renderFormatTemplates() {
           <span class="fmt-tpl-preview-line" style="width:45%"></span>
         </span>
         <span class="fmt-tpl-body">
-          <span class="fmt-tpl-name">${escAttr(tp.name)}</span>
+          <span class="fmt-tpl-name">${escAttr(tp.name)}${tp.id === DEFAULT_TEMPLATE ? '<span class="fmt-tpl-default">Default</span>' : ''}</span>
           <span class="fmt-tpl-tag">${escAttr(tp.tagline)}</span>
           <span class="fmt-tpl-chips">${lists}</span>
           <span class="fmt-tpl-counts">${counts}</span>
@@ -248,9 +236,11 @@ function applyFormatTemplate(id, withTheme) {
   if (!formatMode) return;
   const tp = formatTemplateById(id);
   if (!tp) return;
+  const addLists = (tp.lists || []).filter(l => !templateListFor(l));
   const msg = `Load the "${tp.name}" template?\n\nThis replaces your timers, Daily lists, and weekly calendar templates` +
               (withTheme ? ', and switches the theme' : '') +
-              `. Today's timer progress resets.\n\nCustom lists, Day by Day tasks, budget, and hand-added calendar events are kept.`;
+              `. Today's timer progress resets.\n\nCustom lists, Day by Day tasks, budget, and hand-added calendar events are kept` +
+              (addLists.length ? `, and it adds ${addLists.map(l => `a ${l.title} list`).join(' and ')}.` : '.');
   if (!confirm(msg)) return;
 
   /* timers — a fresh set; live progress of the replaced timers is dropped */
@@ -261,7 +251,8 @@ function applyFormatTemplate(id, withTheme) {
   setTimerDefaults(tp.timers.map(t => ({ label: t.label, seconds: t.seconds, color: t.color })));
   setPreFormatTimerState([]);
 
-  /* Daily lists — replaced; custom lists ride along untouched */
+  /* Daily lists — replaced; custom lists ride along untouched, plus any
+   * list the template brings that doesn't exist yet (added at the end) */
   const customLists = todoLists.filter(l => !l.isDefault);
   const dailyLists = tp.daily.map(d => ({
     id: nextTodoId(), title: d.title, color: d.color,
@@ -269,7 +260,11 @@ function applyFormatTemplate(id, withTheme) {
     activeDays: Array.isArray(d.activeDays) ? d.activeDays.slice() : null,
     tasks: makeTasks(d.tasks),
   }));
-  setTodoLists([...dailyLists, ...customLists]);
+  const newLists = addLists.map(l => ({
+    id: nextTodoId(), title: l.title, color: l.color,
+    isDefault: false, starred: !!l.starred, activeDays: null, tasks: [],
+  }));
+  setTodoLists([...dailyLists, ...customLists, ...newLists]);
 
   /* calendar templates — drop instances of the old ones (a linked instance
    * survives as a plain event, like reseedTemplate does), then seed new */
@@ -288,6 +283,7 @@ function applyFormatTemplate(id, withTheme) {
   calTemplates.forEach(reseedTemplate);
 
   if (withTheme) themeApplyPreset(tp.theme);
+  (tp.views || []).forEach(v => { if (!viewEnabled(v)) setViewEnabled(v, true); });
 
   renderTimers();
   renderTodos();
