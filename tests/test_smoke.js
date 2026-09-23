@@ -101,6 +101,15 @@ const fakeFetch = async url => {
   missing.forEach(([n, where]) => console.log('     missing:', n, 'in', where));
   eq(missing.length, 0, `all ${seen.size} functions named by inline handlers exist on window`);
   ok(seen.size >= 30, `the walk reached most handlers (${seen.size})`);
+  // handlers in HTML the walk can't reach (e.g. insight cards only show when a rule fires):
+  // every name a module writes straight after on…=" must be on window too
+  const written = new Set();
+  fs.readdirSync(path.join(ROOT, 'js')).filter(f => f.endsWith('.js')).forEach(f => {
+    const src = fs.readFileSync(path.join(ROOT, 'js', f), 'utf8');
+    for (const m of src.matchAll(/\bon[a-z]+="([A-Za-z_$][\w$]*)\(/g)) if (!['if', 'for', 'while', 'switch'].includes(m[1])) written.add(m[1]);
+  });
+  const unexposed = [...written].filter(n => typeof w[n] !== 'function');
+  eq(unexposed.join(), '', `every handler named in module HTML (${written.size}) is on window`);
 
   console.log('\n── 6. Inline handlers run ──');
   const before = errors.length;
