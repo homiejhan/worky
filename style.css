@@ -151,8 +151,6 @@ input, textarea, select { font-family: var(--font-sans); color: var(--ink); }
 .section-label-timers   { --sc: var(--hue-timers); }
 .section-label-daily    { --sc: var(--hue-daily); }
 .section-label-lists    { --sc: var(--hue-lists); }
-.section-label-calendar { --sc: var(--hue-calendar); }
-.section-label-budget   { --sc: var(--hue-budget); }
 
 .panel-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -2795,25 +2793,6 @@ body.format-mode .list-sched-row { display: flex; }
 .dg-run-x { margin-left: auto; background: none; border: none; color: inherit; font-size: 15px; line-height: 1; cursor: pointer; opacity: .7; }
 .dg-run-x:hover { opacity: 1; }
 
-.dg-status { padding: 0 14px 12px; }
-.dg-status.error { padding-top: 2px; }
-.dg-status-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.dg-status-text { font-size: 12.5px; color: var(--ink); flex: 1; min-width: 0; line-height: 1.4; }
-.dg-status.error .dg-status-text { color: var(--danger); margin-bottom: 8px; }
-.dg-status-sub { display: block; font-size: 11px; color: var(--ink-3); margin-top: 1px; }
-.dg-track { height: 3px; background: var(--bg-hover); border-radius: 2px; overflow: hidden; }
-.dg-fill { height: 100%; background: var(--accent); transition: width 0.3s var(--ease); }
-.dg-spinner {
-  width: 14px; height: 14px; flex-shrink: 0;
-  border: 2px solid rgba(var(--accent-rgb),0.25);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: dg-spin 0.9s linear infinite;
-}
-@keyframes dg-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .dg-spinner { animation: none; } .dg-fill { transition: none; } }
-
-/* rendered markdown */
 /* Suggested tasks block */
 .dg-todos { padding: 4px 14px 6px; border-bottom: 1px solid var(--border); }
 .dg-todos-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 10px 0 6px; }
@@ -2860,25 +2839,9 @@ body.format-mode .list-sched-row { display: flex; }
   transition: all 0.15s var(--ease); touch-action: manipulation;
 }
 .dg-todo-dismiss:hover { color: var(--ink); background: var(--bg-hover); border-color: var(--border-mid); }
-
-/* Schedule chips in Settings */
-.dg-sched-times { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; min-height: 22px; }
-.dg-sched-chip {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 3px 4px 3px 9px; border-radius: 999px;
-  font-size: 12px; font-weight: 600; color: var(--accent);
-  background: var(--accent-dim); border: 1px solid rgba(var(--accent-rgb),0.35);
-}
-.dg-sched-chip button {
-  width: 18px; height: 18px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  color: var(--accent); font-size: 14px; line-height: 1;
-  background: transparent; border: 0; opacity: 0.75;
-}
-.dg-sched-chip button:hover { opacity: 1; background: rgba(var(--accent-rgb),0.22); }
-.dg-sched-none { font-size: 12px; color: var(--ink-3); }
 @media (max-width: 640px) { .dg-todos { padding: 4px 12px 6px; } }
 
+/* rendered markdown */
 .dg-md {
   padding: 2px 14px 14px;
   font-size: 13px; line-height: 1.55;
@@ -2990,7 +2953,7 @@ body.format-mode .list-sched-row { display: flex; }
 }
 
 /* Type: nothing below 11.5px. The 10.5px labels read as machine text. */
-.budget-field-hint, .dg-todo-counts, .fmt-tpl-counts, .fmt-tpl-chip, .dg-todo-due, .dg-todos-count, .home-dbd-cal { font-size: 11.5px; }
+.budget-field-hint, .fmt-tpl-counts, .fmt-tpl-chip, .dg-todo-due, .dg-todos-count, .home-dbd-cal { font-size: 11.5px; }
 .timer-sub { font-size: 11.5px; }
 .dg-todo-sub, .dg-todo-dup { font-size: 12px; }
 .dg-todo-title { font-size: 13.5px; }

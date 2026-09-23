@@ -674,7 +674,7 @@ function startEditTimer(id, pfx) {
   const edit = document.querySelector(`.tedit-${id}-${pfx}`);
   if (edit) {
     edit.style.display = 'block';
-    edit.value = fmt(formatMode ? t.seconds : t.seconds);
+    edit.value = fmt(t.seconds);
     edit.focus(); edit.select();
   }
 }
@@ -2131,11 +2131,10 @@ function dbdRowHtml(entry, overdue, showDate) {
 function renderDbd() {
   const todayKey = dbdTodayKey();
   const all = dbdAllEntries();
-  const byDue = dbdCompare;
 
-  const overdue   = all.filter(e => !e.task.done && e.task.due < todayKey).sort(byDue);
-  const upcoming  = all.filter(e => e.task.due >= todayKey).sort(byDue);
-  const donePast  = all.filter(e => e.task.done && e.task.due < todayKey).sort(byDue);
+  const overdue   = all.filter(e => !e.task.done && e.task.due < todayKey).sort(dbdCompare);
+  const upcoming  = all.filter(e => e.task.due >= todayKey).sort(dbdCompare);
+  const donePast  = all.filter(e => e.task.done && e.task.due < todayKey).sort(dbdCompare);
 
   // Group upcoming by due-date key, preserving ascending order.
   const groups = [];
@@ -2981,10 +2980,9 @@ function homeDbdRow(entry, tone) {
 function homeDbdHtml() {
   const todayKey = dbdTodayKey();
   const all = dbdAllEntries();
-  const byDue = dbdCompare;
-  const overdue  = all.filter(e => !e.task.done && e.task.due <  todayKey).sort(byDue);
-  const today    = all.filter(e =>                 e.task.due === todayKey).sort(byDue);
-  const upcoming = all.filter(e => !e.task.done && e.task.due >  todayKey).sort(byDue).slice(0, 3);
+  const overdue  = all.filter(e => !e.task.done && e.task.due <  todayKey).sort(dbdCompare);
+  const today    = all.filter(e =>                 e.task.due === todayKey).sort(dbdCompare);
+  const upcoming = all.filter(e => !e.task.done && e.task.due >  todayKey).sort(dbdCompare).slice(0, 3);
   if (!overdue.length && !today.length && !upcoming.length) return '';
   const emptyToday = (!overdue.length && !today.length)
     ? '<div class="home-muted-note">Nothing due today.</div>' : '';
@@ -3568,11 +3566,8 @@ function bindCalEventDrag(el, ev, dateKeyOrDow, isFmtMode) {
 
       // grab offset within the event so the drop lands where it visually sits
       const ghostTop = ghost ? parseFloat(ghost.style.top) : y;
-      const colRect  = col.getBoundingClientRect();
-      const localY   = ghostTop - colRect.top;
-      const sc = col.closest('.cal-scroll-area, .cal-grid-wrap');
-      const scrollAdj = 0; // colRect already reflects scroll position
-      const mins = calPxToMins(localY + scrollAdj);
+      const colRect  = col.getBoundingClientRect();   // already reflects the scroll position
+      const mins = calPxToMins(ghostTop - colRect.top);
 
       if (isFmtMode || formatMode) {
         const toDow = parseInt(col.dataset.dow);
@@ -4310,7 +4305,6 @@ async function gcalSyncAll() {
           gcalId:   ev.id,
           calId:    cal.id,
           calName:  cal.summary,
-          calColor: cal.color,
           title:    ev.summary || '(no title)',
           start:    startLocal,
           end:      endLocal,
@@ -4822,41 +4816,10 @@ function renderBudget() {
   });
 }
 
-/* Re-render everything except the container holding focus, so committing one
- * field never yanks the cursor out of another. */
-function budgetChanged(skipRoot) {
+function budgetChanged() {
   saveToLocal();
-  [$('budgetContainer-d'), $('budgetContainer-m')].forEach(el => {
-    if (!el) return;
-    if (el === skipRoot) return;
-    el.innerHTML = budgetHtml();
-    bindBudgetContainer(el);
-  });
-  if (skipRoot) budgetPatchFigures(skipRoot);
+  renderBudget();
   renderHome();
-}
-
-/* Update the derived read-outs in place for the container being edited. */
-function budgetPatchFigures(root) {
-  const tb = todayBalance();
-  const total = totalBalance();
-  const spent = purchasesTotal();
-  const fig = root.querySelector('.budget-figure');
-  if (fig) {
-    fig.classList.toggle('over', total < 0);
-    const v = fig.querySelector('.budget-figure-value');
-    const s = fig.querySelector('.budget-figure-sub');
-    if (v) v.textContent = money(total);
-    if (s) s.textContent = `${money(round2(budget.initial))} initial − ${money(spent)} spent today`;
-  }
-  const sp = root.querySelector('.budget-spent');
-  if (sp) sp.textContent = money(spent);
-  root.querySelectorAll('[data-bfield]').forEach(inp => {
-    if (inp === document.activeElement) return;
-    const k = inp.dataset.bfield;
-    const val = k === 'today' ? tb : k === 'daily' ? round2(budget.daily) : round2(budget.initial);
-    inp.value = val.toFixed(2);
-  });
 }
 
 function setBudgetField(key, raw) {
@@ -6875,7 +6838,7 @@ function digestRenderSettings() {
    * digest shows on one device and not another is that this differs */
   const via = $('digestSyncHint');
   if (via) {
-    const signedIn = !!(typeof syncUser !== 'undefined' && syncUser);
+    const signedIn = !!syncUser;
     via.classList.toggle('warn', !signedIn);
     via.textContent = signedIn
       ? `This device receives digests through cloud sync as ${syncUser.email || 'your Google account'}. Every device signed in to that same account shows the same digest.`
@@ -7055,9 +7018,7 @@ function digestPromptFlat() {               // the stored node, minus updatedAt,
 }
 
 /* ── editor state ── */
-function digestPromptSignedIn() {
-  return !!(typeof syncUser !== 'undefined' && syncUser && typeof syncRef !== 'undefined' && syncRef);
-}
+function digestPromptSignedIn() { return !!(syncUser && syncRef); }
 function digestPromptCanSave() {
   return digestPromptSignedIn() && digestPromptsSaved !== undefined && digestPromptDefaultsState === 'ok';
 }
