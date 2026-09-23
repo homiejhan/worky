@@ -1956,6 +1956,26 @@ body.format-mode .list-sched-row { display: flex; }
 .cal-event.cal-linked-done .cal-event-title { text-decoration: line-through; }
 .cal-event.cal-linked-done .cal-event-title::before { content: '✓ '; }
 
+/* ── paid shifts: pay tag on the grid and the editor's Work row ── */
+.cal-event.cal-shift { padding-bottom: 16px; }
+.cal-shift-badge {
+  position: absolute; right: 4px; bottom: 3px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 16%, transparent);
+  font-size: 9.5px; font-weight: 700;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+  pointer-events: none;
+}
+.cal-shift-row .cal-shift-btn { flex: 0 0 auto; padding: 8px 14px; }
+.cal-wage { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.cal-wage-cur, .cal-wage-unit { font-size: 12.5px; color: var(--ink-3); }
+.cal-wage-input { width: 96px; flex: 0 1 auto; padding: 9px 11px; font-variant-numeric: tabular-nums; }
+.cal-shift-hint { margin-top: -4px; }
+.cal-shift-hint:empty { display: none; }
+
 /* event editor: task picker + locked title */
 .cal-link-row { display: none; }
 .cal-link-row.shown { display: flex; }

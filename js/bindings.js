@@ -15,8 +15,8 @@ import { homeToggleDesktop } from './home.js';
 import { goTab, setSwipePanelWidths, showDesktopDaily, showDesktopLists } from './views.js';
 import { openSettings, settingsBack, settingsShow, setViewEnabled } from './settings.js';
 import {
-  calNavDay, calSendToGcal, calToggleDesktop, calToggleWeekMode, closeCalModal, deleteCalEvent,
-  saveCalEvent, setCalEventType,
+  calNavDay, calRenderShiftUI, calSendToGcal, calToggleDesktop, calToggleShift,
+  calToggleWeekMode, closeCalModal, deleteCalEvent, saveCalEvent, setCalEventType,
 } from './calendar.js';
 import { gcalDeleteFromDetail, gcalDisconnect, gcalSyncAll, gcalSyncToApp } from './gcal.js';
 import { budgetToggleDesktop } from './budget.js';
@@ -114,6 +114,8 @@ export function bindStatic() {
   $('calSendToGcalBtn')?.addEventListener('click', calSendToGcal);
   $('calTypeEvent')?.addEventListener('click', () => setCalEventType('event'));
   $('calTypeDivider')?.addEventListener('click', () => setCalEventType('divider'));
+  $('calShiftBtn')?.addEventListener('click', calToggleShift);
+  ['calEventTitle', 'calEventStart', 'calEventEnd', 'calEventWage'].forEach(id => $(id)?.addEventListener('input', calRenderShiftUI));
   $('calLinkSelect')?.addEventListener('change', taskLinkApplySelectToTitle);
 
   /* task ↔ calendar link modal */

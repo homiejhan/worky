@@ -19,9 +19,12 @@ import { homeDesktopOpen, homeToggleDesktop } from './home.js';
 import { desktopNavSync } from './views.js';
 import {
   gcalCalendars, gcalDeleteEvent, gcalEvents, gcalInjectEvents, gcalIsConnected, gcalPushEvent,
-  gcalReconcileDay, gcalSyncAll, gcalUpdateEvent,
+  gcalReconcileDay, gcalShiftCalendars, gcalSyncAll, gcalUpdateEvent,
 } from './gcal.js';
-import { budgetDesktopOpen, budgetToggleDesktop } from './budget.js';
+import { budgetDesktopOpen, budgetToggleDesktop, money } from './budget.js';
+import {
+  isShift, normalizeWage, shiftAppIn, shiftMinutes, shiftPay, shiftReason,
+} from './shifts.js';
 
 /* calendar state */
 export let calEvents       = {};   // { 'YYYY-MM-DD': [ev,...] }
@@ -41,6 +44,8 @@ let calEditDate = null;
 let calEditDow  = null;
 let calEditType = 'event';
 let calSelectedColor = CAL_COLORS[0];
+let calEditShift = null;   // the editor's Paid shift choice: true / false, or null = not chosen (detect)
+let calEditCal   = {};     // the Google calendar the edited event came from, if any
 
 /* calendar color-group visibility (events only — never dividers) */
 const CAL_HIDDEN_LS_KEY = 'focus-cal-hidden-colors';
@@ -182,6 +187,8 @@ function calMakeEventEl(ev, dateKeyOrDow, isFmtMode) {
     time.textContent = `${calFmtTime(ev.start)}–${calFmtTime(ev.end)}`;
     el.appendChild(t);
     el.appendChild(time);
+    const cal = calCalOf(ev);
+    if (isShift(ev, cal)) { el.classList.add('cal-shift'); el.appendChild(shiftBadgeEl(shiftPay(ev, cal))); }
     if (linked) {
       el.classList.add('cal-linked');
       if (taskLinkEventDone(ev)) el.classList.add('cal-linked-done');
@@ -531,6 +538,23 @@ export function calTickNow() {
   setTimeout(calTickNow, 60000);
 }
 
+/* ── shifts: which events are paid work (rules in shifts.js) ── */
+/* The Google calendar a Focus event was copied from, as shifts.js reads it. */
+function calCalOf(ev) {
+  return (ev && ev.gcalCalId && gcalShiftCalendars()[ev.gcalCalId]) || {};
+}
+/* The corner tag on a shift: what it pays, or just "shift" while it has no wage. */
+export function shiftBadgeEl(pay) {
+  const b = document.createElement('span');
+  b.className = 'cal-shift-badge';
+  b.textContent = pay === null ? 'shift' : '$' + Math.round(pay);
+  b.title = pay === null ? 'Paid shift (no wage set)' : `Paid shift: ${money(pay)}`;
+  return b;
+}
+function calFmtHours(mins) {
+  const h = Math.round(mins / 6) / 10;
+  return `${h} h`;
+}
 /* ── EVENT MODAL — state fully re-initialized on every open ── */
 function renderColorSwatches() {
   const swatchEl = $('calColorSwatches');
@@ -553,6 +577,68 @@ export function setCalEventType(type) {
   $('calTypeEvent').classList.toggle('active', type === 'event');
   $('calTypeDivider').classList.toggle('active', type === 'divider');
   $('calEventEndField').style.visibility = type === 'divider' ? 'hidden' : 'visible';
+  calRenderShiftUI();
+}
+
+/* The editor's Work row. The event it describes right now, as shifts.js reads it. */
+function calEditorEvent() {
+  return {
+    title: $('calEventTitle').value, start: $('calEventStart').value, end: $('calEventEnd').value,
+    type: calEditType, wage: normalizeWage($('calEventWage').value),
+    ...(calEditShift !== null ? { shift: calEditShift } : {}),
+  };
+}
+/* The newest wage on any Focus shift, to prefill the next one. */
+function calLastWage() {
+  let best = null;
+  [...calTemplates, ...Object.values(calEvents).flat()].forEach(e => {
+    const w = normalizeWage(e && e.wage);
+    if (w !== null && (!best || e.id > best.id)) best = { id: e.id, w };
+  });
+  return best ? best.w : null;
+}
+export function calRenderShiftUI() {
+  const row = $('calShiftRow'), hint = $('calShiftHint');
+  if (!row || !hint) return;
+  const divider = calEditType === 'divider';
+  row.style.display = divider ? 'none' : '';
+  if (divider) { hint.textContent = ''; return; }
+  const ev = calEditorEvent();
+  const on = isShift(ev, calEditCal);
+  const btn = $('calShiftBtn');
+  btn.classList.toggle('active', on);
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  $('calWageWrap').style.display = on ? '' : 'none';
+  const calWage = normalizeWage(calEditCal.wage);
+  $('calEventWage').placeholder = calWage === null ? '0.00' : calWage.toFixed(2);
+  if (!on) { hint.textContent = ''; return; }
+  const lines = [];
+  const why = shiftReason(ev, calEditCal);
+  if (why === 'title') lines.push(`Detected: the title names ${shiftAppIn(ev.title)}.`);
+  if (why === 'calendar-name') lines.push(`Detected: it comes from “${calEditCal.name}”.`);
+  const mins = shiftMinutes(ev), pay = shiftPay(ev, calEditCal);
+  if (!mins) lines.push('Give it an end time to count its hours.');
+  else if (pay === null) lines.push('Add your hourly wage to count what it pays.');
+  else lines.push(`${calFmtHours(mins)} × ${money(ev.wage ?? calWage)} = ${money(pay)}, counted in the week's pay.`);
+  hint.textContent = lines.join(' ');
+}
+export function calToggleShift() {
+  calEditShift = !isShift(calEditorEvent(), calEditCal);
+  const inp = $('calEventWage');
+  if (calEditShift && !inp.value && normalizeWage(calEditCal.wage) === null) {
+    const last = calLastWage();
+    if (last !== null) inp.value = last.toFixed(2);
+  }
+  calRenderShiftUI();
+}
+/* What the editor saves about work: `shift` only once the user chose, `wage` only on a shift. */
+function calShiftFields() {
+  if (calEditType === 'divider') return {};
+  const ev = calEditorEvent();
+  const out = {};
+  if (calEditShift !== null) out.shift = calEditShift;
+  if (ev.wage !== null && isShift(ev, calEditCal)) out.wage = ev.wage;
+  return out;
 }
 
 function _initCalModal({ isFmt, existingEv, defaultStart }) {
@@ -573,6 +659,13 @@ function _initCalModal({ isFmt, existingEv, defaultStart }) {
       : '10:00';
     calSelectedColor = CAL_COLORS[0];
   }
+
+  // 2b. work: an explicit Paid shift choice and the event's own wage
+  calEditCal   = existingEv ? calCalOf(existingEv) : {};
+  calEditShift = existingEv && typeof existingEv.shift === 'boolean' ? existingEv.shift : null;
+  const ownWage = normalizeWage(existingEv && existingEv.wage);
+  $('calEventWage').value = ownWage === null ? '' : ownWage.toFixed(2);
+  calRenderShiftUI();
 
   // 3. swatches — rebuilt with current selection
   renderColorSwatches();
@@ -648,6 +741,8 @@ export function closeCalModal() {
   calEditId = null;
   calEditDate = null;
   calEditDow = null;
+  calEditShift = null;
+  calEditCal = {};
 }
 
 /* ── save / delete (GCal hooks integrated) ── */
@@ -658,6 +753,7 @@ export async function saveCalEvent() {
 
   const wasNew  = (calEditId === null || calEditId === undefined);
   const dateKey = calEditDate;
+  const work    = calShiftFields();
   const oldEvId = calEditId;
   const isFmt   = (calEditDow !== null) || (formatMode && calEditDate === null);
 
@@ -669,7 +765,7 @@ export async function saveCalEvent() {
     const tmpl = {
       id: tmplId, title, start, end,
       color: calSelectedColor, type: calEditType,
-      isTemplate: true, repeatDays,
+      isTemplate: true, repeatDays, ...work,
     };
     const tIdx = calTemplates.findIndex(t => t.id === tmplId);
     if (tIdx >= 0) calTemplates[tIdx] = tmpl;
@@ -692,12 +788,13 @@ export async function saveCalEvent() {
           gcalCalId:    old.gcalCalId ?? null,
           ...(old.linkTaskId != null ? { linkTaskId: old.linkTaskId } : {}),
           ...(old.linkDbdId  != null ? { linkDbdId:  old.linkDbdId  } : {}),
+          ...work,
         };
       }
     } else {
       calEvents[key].push({
         id: calEventIdCtr++, title, start, end,
-        color: calSelectedColor, type: calEditType,
+        color: calSelectedColor, type: calEditType, ...work,
       });
     }
     // Task link chosen in the picker (dividers can't be linked).

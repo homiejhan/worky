@@ -335,6 +335,16 @@
         <button class="cal-type-btn" id="calTypeDivider">Divider</button>
       </div>
     </div>
+    <div class="cal-event-row cal-shift-row" id="calShiftRow">
+      <span class="cal-event-label">Work</span>
+      <button class="cal-type-btn cal-shift-btn" id="calShiftBtn" type="button" aria-pressed="false">Paid shift</button>
+      <div class="cal-wage" id="calWageWrap">
+        <span class="cal-wage-cur">$</span>
+        <input class="cal-event-input cal-wage-input" id="calEventWage" type="text" inputmode="decimal" placeholder="0.00" aria-label="Hourly wage" autocomplete="off">
+        <span class="cal-wage-unit">/hr</span>
+      </div>
+    </div>
+    <div class="modal-sub cal-shift-hint" id="calShiftHint"></div>
     <div class="cal-dow-row" id="calDowRow"></div>
     <div class="modal-actions">
       <button class="modal-cancel" id="calModalCancel">Cancel</button>

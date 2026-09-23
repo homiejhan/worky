@@ -117,6 +117,75 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     eq(Object.keys(again.w.eval('normalizeShiftCals({ a: { shift: "yes", wage: -1 }, b: { wage: "13" }, c: {} })')).join(), 'b', 'empty or junk entries are dropped');
   }
 
+  console.log('\n── 6. The event editor: Paid shift and wage ──');
+  {
+    const { w, d } = await loadApp({ storage: { 'focus-tour-done': '1' } });
+    const today = w.eval('calDateKey(calToday())');
+    w.openCalModal(today, null, '17:00');
+    ok(d.getElementById('calShiftRow').style.display !== 'none', 'an event shows the Work row');
+    ok(!d.getElementById('calShiftBtn').classList.contains('active'), 'not a shift until asked');
+    eq(d.getElementById('calWageWrap').style.display, 'none', 'wage hidden while not a shift');
+    d.getElementById('calEventTitle').value = 'Campus cafe';
+    d.getElementById('calEventEnd').value = '21:00';
+    d.getElementById('calShiftBtn').click();
+    ok(d.getElementById('calShiftBtn').classList.contains('active'), 'Paid shift turns on');
+    const wage = d.getElementById('calEventWage');
+    wage.value = '15'; wage.dispatchEvent(new w.Event('input', { bubbles: true }));
+    eq(d.getElementById('calShiftHint').textContent, '4 h × $15.00 = $60.00, counted in the week\'s pay.', 'hint shows the pay');
+    await w.saveCalEvent();
+    const ev = w.eval(`calEvents['${today}'].find(e => e.title === 'Campus cafe')`);
+    ok(ev && ev.shift === true && ev.wage === 15, 'saved with shift: true, wage: 15');
+    ok(d.querySelector('#calMobileGrid .cal-event.cal-shift .cal-shift-badge')?.textContent === '$60', 'the event carries a $60 tag');
+
+    // title detection, no toggle needed; the next shift's wage is prefilled
+    w.openCalModal(today, null, '07:00');
+    d.getElementById('calEventTitle').value = '7shifts: Barista';
+    d.getElementById('calEventEnd').value = '10:00';
+    d.getElementById('calEventTitle').dispatchEvent(new w.Event('input', { bubbles: true }));
+    ok(d.getElementById('calShiftBtn').classList.contains('active'), 'a title naming 7shifts turns it on by itself');
+    ok(d.getElementById('calShiftHint').textContent.startsWith('Detected: the title names 7shifts.'), 'and says why');
+    await w.saveCalEvent();
+    const auto = w.eval(`calEvents['${today}'].find(e => e.title === '7shifts: Barista')`);
+    ok(auto && !('shift' in auto) && !('wage' in auto), 'detected shifts store no flag (detection keeps working if renamed)');
+
+    // switching a detected shift off sticks
+    w.openCalModal(today, auto.id);
+    d.getElementById('calShiftBtn').click();
+    ok(!d.getElementById('calShiftBtn').classList.contains('active'), 'Paid shift turns off');
+    await w.saveCalEvent();
+    eq(w.eval(`calEvents['${today}'].find(e => e.title === '7shifts: Barista').shift`), false, 'saved as shift: false');
+
+    // turning a new one on prefills the last wage
+    w.openCalModal(today, null, '12:00');
+    d.getElementById('calShiftBtn').click();
+    eq(d.getElementById('calEventWage').value, '15.00', 'last wage prefilled');
+    w.closeCalModal();
+
+    // dividers never carry work fields
+    w.openCalModal(today, null, '13:00');
+    w.setCalEventType('divider');
+    eq(d.getElementById('calShiftRow').style.display, 'none', 'dividers hide the Work row');
+    d.getElementById('calEventTitle').value = 'When I Work';
+    await w.saveCalEvent();
+    const div = w.eval(`calEvents['${today}'].find(e => e.type === 'divider' && e.title === 'When I Work')`);
+    ok(div && !('shift' in div) && !('wage' in div), 'a divider saves no shift or wage');
+
+    // a weekly template shift counts on the days it repeats
+    w.openCalModal(today, w.eval(`calEvents['${today}'].find(e => e.title === 'Campus cafe').id`));
+    await w.deleteCalEvent();
+    d.getElementById('fmtBtn').click();
+    w.eval('openCalModalFmt(1, null, "18:00")');
+    d.getElementById('calEventTitle').value = 'Library desk';
+    d.getElementById('calEventEnd').value = '22:00';
+    d.getElementById('calShiftBtn').click();
+    d.getElementById('calEventWage').value = '12.5';
+    d.querySelectorAll('#calDowRow .cal-dow-btn').forEach(b => b.classList.toggle('active', b.dataset.dow === '1' || b.dataset.dow === '3'));
+    await w.saveCalEvent();
+    const tmpl = w.eval('calTemplates.find(t => t.title === "Library desk")');
+    ok(tmpl && tmpl.shift === true && tmpl.wage === 12.5, 'template saved as a $12.50 shift');
+    d.getElementById('fmtBtn').click();   // Done
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
