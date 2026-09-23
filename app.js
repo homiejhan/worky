@@ -61,6 +61,7 @@ let TIMER_DEFAULTS = [
 
 let formatMode = false;
 let formatTimerIdCounter = 900;
+let preFormatTimerState = [];   // live timer progress, parked while Formats shows the defaults
 let wokenUp = false;
 let theme = null;          // normalized theme record (see THEME section)
 
@@ -136,8 +137,9 @@ let budget = {
 };
 let purchaseIdCounter = 1;
 
-/* view visibility — which sections appear in the UI.
- * 'home' is always on and is not stored. */
+/* view visibility — which sections appear in the UI, in tab-bar order.
+ * 'home' is always on and is not stored. On mobile every view is one swipe
+ * panel, and currentView holds the key of the one showing. */
 const VIEW_DEFS = [
   { key: 'home',     label: 'Home' },
   { key: 'timers',   label: 'Timers' },
@@ -147,18 +149,6 @@ const VIEW_DEFS = [
   { key: 'budget',   label: 'Budget' },
 ];
 let views = { timers: true, daily: true, lists: true, calendar: true, budget: true };
-
-/* Mobile swipe panels, in tab-bar order. Every view has its own panel
- * (Daily used to share the Lists panel). A panel is visible when any of
- * the views it hosts is on. currentView holds a panel key. */
-const MOBILE_PANELS = [
-  { key: 'home',     views: ['home'] },
-  { key: 'timers',   views: ['timers'] },
-  { key: 'lists',    views: ['lists'] },
-  { key: 'daily',    views: ['daily'] },
-  { key: 'calendar', views: ['calendar'] },
-  { key: 'budget',   views: ['budget'] },
-];
 let currentView = 'home';
 
 /* Desktop: Lists and Daily are separate pages that share the right panel.
@@ -166,12 +156,13 @@ let currentView = 'home';
  * Budget) is covering it. */
 let desktopPage = 'lists';
 
-/* misc */
-let currentTab = 0;   // index within the currently visible tabs
-let preFormatTimerState = [];
-
 /* ───────────────────────── UTIL ───────────────────────── */
 function $(id) { return document.getElementById(id); }
+/* Which layout the CSS is showing (the breakpoint lives in style.css). */
+function isMobileLayout() {
+  const m = $('mobileApp');
+  return !!m && getComputedStyle(m).display !== 'none';
+}
 
 function fmt(s) {
   s = Math.max(0, Math.round(s));
@@ -3119,17 +3110,9 @@ function viewEnabled(key) {
   return views[key] !== false;
 }
 function visibleViews() { return VIEW_DEFS.filter(v => viewEnabled(v.key)); }
-
-/* Mobile panel helpers — see MOBILE_PANELS. */
-function panelForView(key) {
-  const p = MOBILE_PANELS.find(p => p.views.includes(key));
-  return p ? p.key : key;
-}
-function panelEnabled(key) {
-  const p = MOBILE_PANELS.find(p => p.key === key);
-  return !!p && p.views.some(viewEnabled);
-}
-function visiblePanels() { return MOBILE_PANELS.filter(p => panelEnabled(p.key)); }
+/* Mobile: is there a swipe panel showing for this key? Unlike viewEnabled,
+ * a key that isn't a view at all counts as off. */
+function panelEnabled(key) { return VIEW_DEFS.some(v => v.key === key) && viewEnabled(key); }
 
 /* Show/hide every element tagged with data-view, close any desktop overlay
  * whose view was just disabled, and rebuild the mobile tab strip. */
@@ -3171,26 +3154,20 @@ function setSwipePanelWidths() {
     b.style.display = on ? '' : 'none';
     b.classList.toggle('active', b.dataset.view === currentView);
   });
-  const vis = visiblePanels();
+  const vis = visibleViews();
   const idx = Math.max(0, vis.findIndex(v => v.key === currentView));
   if (track) {
     track.style.width = (w * vis.length) + 'px';
     track.style.transition = 'none';
     track.style.transform = `translateX(${-idx * w}px)`;
   }
-  currentTab = idx;
 }
 
-/* Accepts a view key ('budget', 'daily') or a legacy numeric index.
- * View keys are mapped to the mobile panel that hosts them. */
-function goTab(target, animate) {
-  let key = (typeof target === 'number') ? (VIEW_DEFS[target] || {}).key : target;
-  key = panelForView(key);
-  if (!key || !panelEnabled(key)) key = 'home';
+/* Mobile: slide to a view's panel (Home when that view is off). */
+function goTab(key, animate) {
+  if (!panelEnabled(key)) key = 'home';
   currentView = key;
-  const vis = visiblePanels();
-  const idx = Math.max(0, vis.findIndex(v => v.key === key));
-  currentTab = idx;
+  const idx = Math.max(0, visibleViews().findIndex(v => v.key === key));
   const w = swipeFrameWidth();
   const track = $('swipeTrack');
   if (track) {
@@ -3208,8 +3185,7 @@ function goTab(target, animate) {
 /* Total-balance chip on Home opens Budget on whichever layout is active. */
 function openBudgetTab() {
   if (!viewEnabled('budget')) return;
-  const mobile = $('mobileApp') && getComputedStyle($('mobileApp')).display !== 'none';
-  if (mobile) goTab('budget', true);
+  if (isMobileLayout()) goTab('budget', true);
   else budgetToggleDesktop(true);
 }
 
@@ -3353,7 +3329,7 @@ function initSwipe() {
     const dx = e.changedTouches[0].clientX - sx;
     const dy = e.changedTouches[0].clientY - sy;
     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
-      const vis = visiblePanels();
+      const vis = visibleViews();
       const at = Math.max(0, vis.findIndex(v => v.key === currentView));
       const next = dx < 0 ? Math.min(at + 1, vis.length - 1) : Math.max(at - 1, 0);
       goTab(vis[next].key, true);
@@ -3888,9 +3864,7 @@ function calToggleWeekMode() {
 function calRefresh() {
   if (taskLinkSyncTitles()) calSave();
   if (calDesktopOpen) calRenderDesktop();
-  if (document.querySelector('.mobile-app') && getComputedStyle($('mobileApp')).display !== 'none') {
-    calRenderMobile();
-  }
+  if (isMobileLayout()) calRenderMobile();
 }
 
 function calTickNow() {
@@ -6638,7 +6612,7 @@ function digestRenderMd(md) {
 }
 
 function digestShowHome() {
-  if (window.innerWidth <= 768) goTab('home', true); else homeToggleDesktop(true);
+  if (isMobileLayout()) goTab('home', true); else homeToggleDesktop(true);
 }
 
 /* ── Home card ── */
@@ -7709,10 +7683,6 @@ let tourReoffer  = false;   // welcome was hidden by the cloud-sync choice modal
 let _tourRaf     = 0;
 let _tourTimer   = null;
 
-function tourIsMobile() {
-  const m = $('mobileApp');
-  return !!m && getComputedStyle(m).display !== 'none';
-}
 function tourSeen() {
   try { return localStorage.getItem(TOUR_LS_KEY) === '1'; } catch (e) { return false; }
 }
@@ -7783,7 +7753,7 @@ function tourKeydown(e) {
  * views are overlays over the right panel, so opening one closes the rest. */
 function tourGoView(view) {
   if (!view) return;
-  if (tourIsMobile()) { goTab(view, false); return; }
+  if (isMobileLayout()) { goTab(view, false); return; }
   switch (view) {
     case 'home':
     case 'timers':
@@ -7799,7 +7769,7 @@ function tourGoView(view) {
 
 function tourTargets(step) {
   if (!step.target) return [];
-  const sel = step.target[tourIsMobile() ? 'm' : 'd'];
+  const sel = step.target[isMobileLayout() ? 'm' : 'd'];
   const list = Array.isArray(sel) ? sel : [sel];
   return list.map(s => document.querySelector(s)).filter(el => el && el.getClientRects().length > 0);
 }
@@ -7877,8 +7847,8 @@ function tourLayout() {
 
   /* card placement: mobile pins it above the data bar; desktop tries beside,
    * below, above the spotlight, and finally the screen centre */
-  card.classList.toggle('bottom', tourIsMobile());
-  if (tourIsMobile()) { card.style.left = card.style.top = ''; return; }
+  card.classList.toggle('bottom', isMobileLayout());
+  if (isMobileLayout()) { card.style.left = card.style.top = ''; return; }
 
   const cw = card.offsetWidth, ch = card.offsetHeight, gap = 14;
   let left, top;
