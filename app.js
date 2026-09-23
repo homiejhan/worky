@@ -34,11 +34,9 @@ const FIREBASE_CONFIG = {
   projectId: "worky-b3e3a",
   appId: "1:996860584518:web:61b0638c1f8512c6786047",
 };
-/* Sign-in reuses the same Google OAuth client + redirect that the
- * Google Calendar connection already uses (proven to work in the
- * iOS PWA). The `state` tag tells the two redirect handlers apart. */
-const SYNC_CLIENT_ID   = GCAL_CLIENT_ID;
-const SYNC_REDIRECT    = GCAL_REDIRECT;
+/* Sign-in reuses the Google OAuth client + redirect of the Google Calendar
+ * connection (GCAL_CLIENT_ID / GCAL_REDIRECT, proven to work in the iOS PWA).
+ * The `state` tag tells the two redirect handlers apart. */
 const SYNC_STATE_TAG   = 'worky-sync';
 const SYNC_META_LS_KEY = 'focus-sync-meta';
 
@@ -189,6 +187,7 @@ const DOTS_SVG = '<svg width="4" height="14" viewBox="0 0 4 14" fill="none"><cir
 const SYNC_SVG  = '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M5.8 8.2a2.4 2.4 0 0 1 0-3.4l1.5-1.5a2.4 2.4 0 0 1 3.4 3.4l-.8.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M8.2 5.8a2.4 2.4 0 0 1 0 3.4l-1.5 1.5a2.4 2.4 0 0 1-3.4-3.4l.8-.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
 // Badge shown on a task that has a linked child list, and on the child list header.
 const CHILD_SVG = '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><rect x="1" y="1.5" width="12" height="3.5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="9" width="12" height="3.5" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M7 5v4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+const CHECK_SVG = '<svg width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const STAR_SVG  = '<svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 1.3l1.75 3.55 3.92.57-2.84 2.77.67 3.9L7 10.25l-3.5 1.84.67-3.9L1.33 5.42l3.92-.57L7 1.3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none" class="star-path"/></svg>';
 
 /* Plain-object task copy that keeps the optional due/doneOn fields
@@ -217,6 +216,10 @@ function showToast(msg) {
 function calToday() { const d = new Date(); d.setHours(0,0,0,0); return d; }
 function calDateKey(d) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function calKeyToDate(key) {   // 'YYYY-MM-DD' → local midnight
+  const [y, m, d] = String(key).split('-').map(Number);
+  return new Date(y, m - 1, d);
 }
 function calRollingDays() {
   const t = calToday();
@@ -534,11 +537,12 @@ function calLoad() {
 
 /* ───────────────────────── TIMERS ───────────────────────── */
 function timerById(id) { return timers.find(x => x.id === id); }
+/* A timer's default (template) record: TIMER_DEFAULTS runs parallel to timers. */
+function timerDefault(id) { return TIMER_DEFAULTS[timers.findIndex(x => x.id === id)]; }
 
 /* Fraction of the timer's default budget still remaining (0–1). */
 function timerPct(t) {
-  const idx = timers.findIndex(x => x.id === t.id);
-  const def = TIMER_DEFAULTS[idx];
+  const def = timerDefault(t.id);
   const total = def && def.seconds > 0 ? def.seconds : (t.secondsAtStart || t.seconds || 0);
   if (!total) return 0;
   return Math.max(0, Math.min(1, getRemaining(t) / total));
@@ -598,10 +602,8 @@ function setTimerLabel(id, value) {
   const t = timerById(id);
   if (!t) return;
   t.label = value;
-  if (formatMode) {
-    const idx = timers.findIndex(x => x.id === id);
-    if (TIMER_DEFAULTS[idx]) TIMER_DEFAULTS[idx].label = value;
-  }
+  const def = timerDefault(id);
+  if (formatMode && def) def.label = value;
   saveToLocal();
 }
 
@@ -610,10 +612,8 @@ function changeTimerColor(id, color) {
   const t = timerById(id);
   if (!t) return;
   t.color = color;
-  if (formatMode) {
-    const idx = timers.findIndex(x => x.id === id);
-    if (TIMER_DEFAULTS[idx]) TIMER_DEFAULTS[idx].color = color;
-  }
+  const def = timerDefault(id);
+  if (formatMode && def) def.color = color;
   document.querySelectorAll(`.tbar-${id}`).forEach(el => el.style.background = color);
   saveToLocal();
 }
@@ -667,10 +667,8 @@ function commitEditTimer(id, pfx) {
     if (!isNaN(parsed) && parsed >= 0) {
       t.seconds = parsed;
       if (t.running) { t.startedAt = Date.now(); t.secondsAtStart = parsed; }
-      if (formatMode) {
-        const idx = timers.findIndex(x => x.id === id);
-        if (TIMER_DEFAULTS[idx]) TIMER_DEFAULTS[idx].seconds = parsed;
-      }
+      const def = timerDefault(id);
+      if (formatMode && def) def.seconds = parsed;
     }
     edit.style.display = 'none';
   }
@@ -685,8 +683,7 @@ function commitEditTimer(id, pfx) {
 function resetTimer(id) {
   const t = timerById(id);
   if (!t) return;
-  const idx = timers.findIndex(x => x.id === id);
-  const def = TIMER_DEFAULTS[idx];
+  const def = timerDefault(id);
   t.running = false;
   t.seconds = def ? def.seconds : t.seconds;
   t.startedAt = null;
@@ -823,9 +820,7 @@ function buildCard(list, pfx) {
         ${rowHandle}
         <div class="task-check task-checks-${task.id} ${task.done?'done':''}" style="${checkStyle}"
           onclick="toggleTask(${list.id},${task.id})">
-          <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
-            <path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
+          ${CHECK_SVG}
         </div>
         <input class="task-text task-text-${task.id} ${task.done?'done':''}"
           value="${escAttr(task.text)}" placeholder="Task…"
@@ -875,8 +870,7 @@ const CALICON_SVG = '<svg width="11" height="11" viewBox="0 0 12 12" fill="none"
 
 function taskDateChipLabel(due) {
   const today = calToday();
-  const [y, m, d] = due.split('-').map(Number);
-  const date = new Date(y, m - 1, d);
+  const date = calKeyToDate(due);
   const diff = Math.round((date - today) / 86400000);
   if (diff === 0) return 'Today';
   if (diff === 1) return 'Tmrw';
@@ -1897,8 +1891,7 @@ function dbdTodayKey() { return calDateKey(calToday()); }
 
 function dbdLabelFor(key) {
   const today = calToday();
-  const [y, m, d] = key.split('-').map(Number);
-  const date = new Date(y, m - 1, d);
+  const date = calKeyToDate(key);
   const diff = Math.round((date - today) / 86400000);
   if (diff === 0)  return 'Today';
   if (diff === 1)  return 'Tomorrow';
@@ -2077,9 +2070,7 @@ function dbdRowHtml(entry, overdue, showDate) {
          data-list-id="${list.id}" data-task-id="${t.id}">
       <div class="task-check dbd-check task-checks-${t.id} ${t.done ? 'done' : ''}" style="${checkStyle}"
         onclick="toggleTask(${list.id},${t.id})">
-        <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
-          <path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        ${CHECK_SVG}
       </div>
       <input class="task-text task-text-${t.id} ${t.done ? 'done' : ''}" value="${escAttr(t.text)}" placeholder="Task…"
         oninput="setTaskText(${list.id},${t.id},this.value)"
@@ -2093,9 +2084,7 @@ function dbdRowHtml(entry, overdue, showDate) {
   return `
     <div class="task-row dbd-row ${overdue ? 'dbd-overdue-row' : ''}" data-dbd-id="${t.id}">
       <div class="task-check dbd-check ${t.done ? 'done' : ''}" onclick="toggleDbdTask(${t.id})">
-        <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
-          <path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        ${CHECK_SVG}
       </div>
       <input class="task-text ${t.done ? 'done' : ''}" value="${escAttr(t.text)}" placeholder="Task…"
         oninput="setDbdText(${t.id}, this.value)"
@@ -2500,14 +2489,20 @@ function taskLinkRenderEvents() {
   });
 }
 
-/* Core: attach `ref` (default: modal task) to an existing local event. */
-async function taskLinkAttach(ref, dateKey, ev, { silent } = {}) {
-  const res = taskLinkResolveTask(ref);
-  if (!res || !ev) return false;
+/* Link the task `res` (resolved from `ref`) to `ev` on `dateKey`: the event
+ * takes the task's name and the task moves to the event's day. */
+function taskLinkBind(ref, res, ev, dateKey) {
   taskLinkClearAll(ref, ev);          // a task links to one event only
   taskLinkSetOnEvent(ev, ref);
   ev.title = res.task.text;
   if (res.task.due !== dateKey) res.task.due = dateKey;   // undated list task → Day by Day
+}
+
+/* Core: attach `ref` (default: modal task) to an existing local event. */
+async function taskLinkAttach(ref, dateKey, ev, { silent } = {}) {
+  const res = taskLinkResolveTask(ref);
+  if (!res || !ev) return false;
+  taskLinkBind(ref, res, ev, dateKey);
   calSave();
   calRefresh();
   renderTodos();
@@ -2629,10 +2624,7 @@ function taskLinkApplyFromModal(ev, dateKey) {
   const ref = taskLinkParseOption(sel.value);
   const res = taskLinkResolveTask(ref);
   if (!res) { taskLinkSetOnEvent(ev, null); return; }
-  taskLinkClearAll(ref, ev);
-  taskLinkSetOnEvent(ev, ref);
-  ev.title = res.task.text;
-  if (res.task.due !== dateKey) res.task.due = dateKey;
+  taskLinkBind(ref, res, ev, dateKey);
   renderTodos();
   renderDbd();
 }
@@ -2787,9 +2779,6 @@ function confirmClearStorage() {
  * live-update hooks keep it fresh: tickAll drives .tdisp-N timer text, and
  * paintTaskState drives .task-checks-N / .task-text-N on starred lists. */
 let homeDesktopOpen = false;
-
-const HOME_CHECK_SVG = `<svg width="9" height="9" viewBox="0 0 9 9" fill="none">
-  <path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
 /* Keep the sidebar nav in step with whichever desktop panel is showing. */
 function desktopNavSync() {
@@ -2947,7 +2936,7 @@ function homeDbdRow(entry, tone) {
   return `
     <div class="task-row home-dbd-row home-tone-${tone}">
       <div class="task-check home-dbd-check ${tagged ? `task-checks-${t.id} ` : ''}${t.done ? 'done' : ''}"${checkStyle} onclick="${toggle}">
-        ${HOME_CHECK_SVG}
+        ${CHECK_SVG}
       </div>
       ${tagDot}
       <span class="home-task-text ${tagged ? `task-text-${t.id} ` : ''}${t.done ? 'done' : ''}">${escAttr(t.text)}</span>
@@ -2985,7 +2974,7 @@ function homeListCard(list) {
       <div class="task-row home-list-row">
         <div class="task-check task-checks-${task.id} ${task.done ? 'done' : ''}" style="${checkStyle}"
           onclick="toggleTask(${list.id},${task.id})">
-          ${HOME_CHECK_SVG}
+          ${CHECK_SVG}
         </div>
         <span class="home-task-text task-text-${task.id} ${task.done ? 'done' : ''}">${escAttr(task.text)}</span>
       </div>`;
@@ -3389,7 +3378,7 @@ function initViewportGuard() {
 /* ───────────────────────── CALENDAR ───────────────────────── */
 function calEnsureDay(key) {
   if (!calEvents[key]) {
-    const dow = new Date(key + 'T00:00:00').getDay();
+    const dow = calKeyToDate(key).getDay();
     calEvents[key] = calTemplates
       .filter(t => t.repeatDays && t.repeatDays.includes(dow))
       .map(t => ({ ...t, id: calEventIdCtr++, fromTemplate: true, templateId: t.id }));
@@ -4250,9 +4239,9 @@ async function gcalSyncAll() {
         if (ev.start.dateTime) {
           const sd = new Date(ev.start.dateTime);
           const ed = new Date(ev.end?.dateTime || ev.start.dateTime);
-          localDateKey = `${sd.getFullYear()}-${String(sd.getMonth()+1).padStart(2,'0')}-${String(sd.getDate()).padStart(2,'0')}`;
-          startLocal = `${String(sd.getHours()).padStart(2,'0')}:${String(sd.getMinutes()).padStart(2,'0')}`;
-          endLocal   = `${String(ed.getHours()).padStart(2,'0')}:${String(ed.getMinutes()).padStart(2,'0')}`;
+          localDateKey = calDateKey(sd);
+          startLocal = calMinsToStr(sd.getHours() * 60 + sd.getMinutes());
+          endLocal   = calMinsToStr(ed.getHours() * 60 + ed.getMinutes());
           allDay = false;
         } else {
           localDateKey = (ev.start.date || '').slice(0, 10);
@@ -4317,20 +4306,24 @@ function gcalReconcile() {
 }
 
 /* ── push / update / delete ── */
+/* Request body for creating or updating `ev` on `dateKey`, in this device's time zone. */
+function gcalEventBody(ev, dateKey) {
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return JSON.stringify({
+    summary: ev.title,
+    start: { dateTime: `${dateKey}T${ev.start}:00`, timeZone },
+    end:   { dateTime: `${dateKey}T${ev.end}:00`,   timeZone },
+  });
+}
+
 async function gcalPushEvent(ev, dateKey, calId) {
   if (!gcalIsConnected()) return null;
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const body = {
-    summary: ev.title,
-    start: { dateTime: `${dateKey}T${ev.start}:00`, timeZone: tz },
-    end:   { dateTime: `${dateKey}T${ev.end}:00`,   timeZone: tz },
-  };
   try {
     const res = await fetch(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`,
       { method: 'POST',
         headers: { Authorization: `Bearer ${gcalToken.access_token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body) }
+        body: gcalEventBody(ev, dateKey) }
     );
     const data = await res.json();
     return data.id || null;
@@ -4339,18 +4332,12 @@ async function gcalPushEvent(ev, dateKey, calId) {
 
 async function gcalUpdateEvent(gcalId, calId, ev, dateKey) {
   if (!gcalIsConnected() || !gcalId) return;
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const body = {
-    summary: ev.title,
-    start: { dateTime: `${dateKey}T${ev.start}:00`, timeZone: tz },
-    end:   { dateTime: `${dateKey}T${ev.end}:00`,   timeZone: tz },
-  };
   try {
     await fetch(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events/${gcalId}`,
       { method: 'PUT',
         headers: { Authorization: `Bearer ${gcalToken.access_token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body) }
+        body: gcalEventBody(ev, dateKey) }
     );
   } catch(e) { showToast('Could not update GCal event.'); }
 }
@@ -4611,11 +4598,7 @@ function todayBalance() { return round2(todayAllowance() - purchasesTotal()); }
 function totalBalance() { return round2(budget.initial - purchasesTotal()); }
 
 function daysBetweenKeys(fromKey, toKey) {
-  const [y1, m1, d1] = fromKey.split('-').map(Number);
-  const [y2, m2, d2] = toKey.split('-').map(Number);
-  const a = new Date(y1, m1 - 1, d1);
-  const b = new Date(y2, m2 - 1, d2);
-  const diff = Math.round((b - a) / 86400000);
+  const diff = Math.round((calKeyToDate(toKey) - calKeyToDate(fromKey)) / 86400000);
   return Math.max(1, Math.min(diff, 366));   // clamp: never negative, never absurd
 }
 
@@ -5246,8 +5229,8 @@ function syncChooseExport() {
 /* ── Sign-in flow ── */
 function syncConnect() {
   const params = new URLSearchParams({
-    client_id:     SYNC_CLIENT_ID,
-    redirect_uri:  SYNC_REDIRECT,
+    client_id:     GCAL_CLIENT_ID,
+    redirect_uri:  GCAL_REDIRECT,
     response_type: 'token',
     scope:         'openid email profile',
     prompt:        'select_account',
@@ -5791,8 +5774,17 @@ function renderThemeUI() {
   }
   const urlIn = $('thBgUrl');
   if (urlIn && document.activeElement !== urlIn) urlIn.value = t.bgMode === 'url' ? t.bgUrl : '';
-  const rst = $('thResetBtn');
-  if (rst) rst.textContent = t.preset === 'custom' ? 'Reset to Midnight' : `Reset to ${themePreset(t.preset).name}`;
+  themeRenderResetBtn();
+}
+
+/* The preset Reset returns to: the current one, or Midnight from a custom theme. */
+function themeResetTarget() {
+  const t = themeGet();
+  return themePreset(t.preset === 'custom' ? 'midnight' : t.preset);
+}
+function themeRenderResetBtn() {
+  const r = $('thResetBtn');
+  if (r) r.textContent = `Reset to ${themeResetTarget().name}`;
 }
 
 function openThemeEditor() {
@@ -5804,10 +5796,7 @@ function openThemeEditor() {
 function bindTheme() {
   $('themeOpenBtn')?.addEventListener('click', openThemeEditor);
   $('thDoneBtn')?.addEventListener('click', () => closeModal('themeModal'));
-  $('thResetBtn')?.addEventListener('click', () => {
-    const t = themeGet();
-    themeApplyPreset(t.preset === 'custom' ? 'midnight' : t.preset);
-  });
+  $('thResetBtn')?.addEventListener('click', () => themeApplyPreset(themeResetTarget().id));
   /* preset chips live in two places (settings + editor) — unique ids, one handler */
   ['themePresets-s', 'themePresets-m'].forEach(id => {
     $(id)?.addEventListener('click', e => {
@@ -5862,9 +5851,7 @@ function bindTheme() {
       saveToLocal();
       renderThemePresets('themePresets-m');
       renderThemePresets('themePresets-s');
-      const t = themeGet();
-      const r = $('thResetBtn');
-      if (r) r.textContent = t.preset === 'custom' ? 'Reset to Midnight' : `Reset to ${themePreset(t.preset).name}`;
+      themeRenderResetBtn();
     }
   });
   $('thFontCustom')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } });
@@ -6172,8 +6159,7 @@ function digestDupCandidates() {
   const today = calToday();
   const recent = key => {
     if (!key) return false;
-    const [y, m, d] = String(key).split('-').map(Number);
-    return Math.abs(Math.round((new Date(y, m - 1, d) - today) / 86400000)) <= DIGEST_DUP_DONE_DAYS;
+    return Math.abs(Math.round((calKeyToDate(key) - today) / 86400000)) <= DIGEST_DUP_DONE_DAYS;
   };
   const stale = t => t.done && t.due && !(recent(t.doneOn) || recent(t.due));
   const out = [];
@@ -6305,13 +6291,12 @@ function digestNormalizeTasks(arr, resolve) {
   });
   return out.slice(0, 10);
 }
-function digestDateKey(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 /* Accepts ISO dates plus a few relative words; anything in the past becomes
  * today, anything more than ~3 months out (or unparseable) becomes "". */
 function digestNormalizeDue(v) {
   const s = String(v || '').trim().toLowerCase();
   if (!s || s === 'none' || s === 'null') return '';
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const today = calToday();
   let d = null;
   const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (iso) d = new Date(+iso[1], +iso[2] - 1, +iso[3]);
@@ -6324,9 +6309,9 @@ function digestNormalizeDue(v) {
   }
   if (!d || isNaN(d)) return '';
   const diff = (d - today) / 86400000;
-  if (diff < 0) return digestDateKey(today);
+  if (diff < 0) return calDateKey(today);
   if (diff > 100) return '';
-  return digestDateKey(d);
+  return calDateKey(d);
 }
 function digestGet() { if (!digest) digest = normalizeDigest(null); return digest; }
 function digestRecord() {
@@ -6511,7 +6496,7 @@ function digestRunHtml() {
   if (!digestRun) return '';
   const link = digestRun.url ? ` <a href="${escAttr(digestRun.url)}" target="_blank" rel="noopener">Open run</a>` : '';
   const dismiss = (digestRun.error || digestRunDelivering()) ? ` <button class="dg-run-x" onclick="digestRunDismiss()" aria-label="Dismiss">×</button>` : '';
-  return `<div class="dg-run ${digestRun.error ? 'err' : ''}">${digestEsc(digestRunLabel())}${link}${dismiss}</div>`;
+  return `<div class="dg-run ${digestRun.error ? 'err' : ''}">${escAttr(digestRunLabel())}${link}${dismiss}</div>`;
 }
 
 /* ── sample digest: shows the card without any backend ── */
@@ -6541,9 +6526,8 @@ function digestClearLast() {
 }
 
 /* ── markdown → safe HTML (headings, lists, tables, code, links, bold) ── */
-function digestEsc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 function digestInline(s) {
-  let t = digestEsc(s);
+  let t = escAttr(s);
   const codes = [];
   t = t.replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
   t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, txt, url) => `<a href="${url}" target="_blank" rel="noopener">${txt}</a>`);
@@ -6568,7 +6552,7 @@ function digestRenderMd(md) {
       const buf = []; i++;
       while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
       i++;
-      out.push(`<pre><code>${digestEsc(buf.join('\n'))}</code></pre>`);
+      out.push(`<pre><code>${escAttr(buf.join('\n'))}</code></pre>`);
       continue;
     }
     if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
@@ -6656,7 +6640,7 @@ function homeDigestHtml() {
         <div class="dg-head">
           <div class="dg-title-wrap">
             <div class="dg-title">Email digest</div>
-            ${last ? `<div class="dg-meta">${digestEsc(digestMetaLine(last))}</div>` : ''}
+            ${last ? `<div class="dg-meta">${escAttr(digestMetaLine(last))}</div>` : ''}
           </div>
           <div class="dg-actions">${runBtn}${chevron}</div>
         </div>
@@ -6695,14 +6679,14 @@ function digestTasksHtml() {
   const rows = tasks.map(t => {
     const added = digestTaskIsAdded(t);
     const dup = dupes.get(t.id);
-    const due = t.due ? `<span class="dg-todo-due">${digestEsc(dbdLabelFor(t.due))}</span>` : '';
-    const why = t.why ? `<span class="dg-todo-why">${digestEsc(t.why)}</span>` : '';
+    const due = t.due ? `<span class="dg-todo-due">${escAttr(dbdLabelFor(t.due))}</span>` : '';
+    const why = t.why ? `<span class="dg-todo-why">${escAttr(t.why)}</span>` : '';
     return `
       <div class="dg-todo ${added ? 'added' : ''} ${dup ? 'dup' : ''}" data-dgt="${t.id}">
         <div class="dg-todo-main">
-          <div class="dg-todo-title">${digestEsc(t.title)}</div>
+          <div class="dg-todo-title">${escAttr(t.title)}</div>
           ${(why || due) ? `<div class="dg-todo-sub">${due}${why}</div>` : ''}
-          ${dup ? `<div class="dg-todo-dup">${digestEsc(digestDupLabel(dup))}</div>` : ''}
+          ${dup ? `<div class="dg-todo-dup">${escAttr(digestDupLabel(dup))}</div>` : ''}
         </div>
         ${added
           ? `<span class="dg-todo-added" title="It's in your lists">Added ✓</span>`
@@ -7480,24 +7464,21 @@ function bindStatic() {
     btn.addEventListener('click', () => closeModal(btn.dataset.close));
   });
 
+  /* closing the event and link modals also drops their edit state */
+  const closeOverlay = ov => {
+    if (ov.id === 'calEventModal') closeCalModal();
+    else if (ov.id === 'taskLinkModal') closeTaskLinkModal();
+    else ov.classList.remove('show');
+  };
   /* backdrop click closes any modal */
   document.querySelectorAll('.modal-overlay').forEach(ov => {
-    ov.addEventListener('click', e => {
-      if (e.target !== ov) return;
-      if (ov.id === 'calEventModal') closeCalModal();
-      else if (ov.id === 'taskLinkModal') closeTaskLinkModal();
-      else ov.classList.remove('show');
-    });
+    ov.addEventListener('click', e => { if (e.target === ov) closeOverlay(ov); });
   });
-
   /* Escape closes the topmost open modal */
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
     const open = Array.from(document.querySelectorAll('.modal-overlay.show')).pop();
-    if (!open) return;
-    if (open.id === 'calEventModal') closeCalModal();
-    else if (open.id === 'taskLinkModal') closeTaskLinkModal();
-    else open.classList.remove('show');
+    if (open) closeOverlay(open);
   });
 
   /* resize */
@@ -7930,8 +7911,6 @@ function bindTour() {
   setInterval(renderHome, 60 * 1000);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') dbdCheckRollover();
-  });
-  document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') saveToLocal();
   });
   window.addEventListener('pagehide', saveToLocal);
