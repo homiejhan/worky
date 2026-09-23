@@ -4,8 +4,9 @@ import { saveToLocal } from './persistence.js';
 import { dbdTodayKey } from './dbd.js';
 import { homeDesktopOpen, homeToggleDesktop, renderHome } from './home.js';
 import { desktopNavSync } from './views.js';
-import { calDesktopOpen, calToggleDesktop } from './calendar.js';
-import { PAY_REPEATS } from './runway.js';
+import { calDesktopOpen, calShiftSources, calToggleDesktop } from './calendar.js';
+import { shiftsOnDays } from './shifts.js';
+import { addDays, billsDueBetween, cashRunway, daysBetween, nextPayday, PAY_REPEATS } from './runway.js';
 
 /* budget state
  *   initial        — balance allocated at the start of today
@@ -104,13 +105,23 @@ function daysBetweenKeys(fromKey, toKey) {
 
 /* New-day rollover. The new initial balance is what you actually had left
  * (total balance) plus a fresh daily budget; purchases then clear, so the
- * total equals the initial again and today's balance is a full envelope. */
+ * total equals the initial again and today's balance is a full envelope.
+ * With a payday set (runwayOn) the balance is real cash between paychecks: no
+ * daily budget is added, and the bills due since the last rollover come out. */
+let budgetBillsPaid = [];   // what the last rollover took out, for its toast
 export function budgetRollover() {
   const today = dbdTodayKey();
   if (!budget.lastDate) { budget.lastDate = today; return false; }
   if (budget.lastDate === today) return false;
   const days = daysBetweenKeys(budget.lastDate, today);
-  budget.initial = round2(totalBalance() + budget.daily * days);
+  if (runwayOn()) {
+    // the daily budget is what you spend, not income; bills come out on their day
+    budgetBillsPaid = billsDueBetween(runway.bills, budget.lastDate, today);
+    budget.initial = round2(totalBalance() - budgetBillsPaid.reduce((t, b) => t + b.amount, 0));
+  } else {
+    budgetBillsPaid = [];
+    budget.initial = round2(totalBalance() + budget.daily * days);
+  }
   budget.purchases = [];
   budget.todayAllowance = null;
   budget.lastDate = today;
@@ -189,9 +200,11 @@ function budgetHtml() {
 
       <div class="budget-fields">
         ${budgetFieldHtml('today', "Today's balance", tb, 'Spending envelope — editing it won\'t change your total')}
-        ${budgetFieldHtml('daily', 'Daily budget', round2(budget.daily), 'Added to your balance each new day')}
-        ${budgetFieldHtml('initial', 'Initial balance', round2(budget.initial), 'Grows by the daily budget each morning')}
+        ${budgetFieldHtml('daily', 'Daily budget', round2(budget.daily), runwayOn() ? 'What you let yourself spend a day' : 'Added to your balance each new day')}
+        ${budgetFieldHtml('initial', 'Initial balance', round2(budget.initial), runwayOn() ? 'Your cash this morning: add each paycheck here' : 'Grows by the daily budget each morning')}
       </div>
+
+      ${runwayHtml()}
 
       <div class="budget-section-header">
         <span class="section-sublabel">Purchases today</span>
@@ -210,6 +223,139 @@ function budgetHtml() {
     </div>`;
 }
 
+/* ── cash runway (the math is in runway.js) ── */
+const RUNWAY_HORIZON = 60;
+const PAY_REPEAT_LABELS = { biweekly: 'Every 2 weeks', weekly: 'Every week', monthly: 'Every month', once: 'Just this once' };
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+function ordinal(n) {
+  const t = n % 100;
+  return n + (t >= 11 && t <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' })[n % 10] || 'th');
+}
+function fmtDayKey(key) {
+  return calKeyToDate(key).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+function billDayOptions(day) {
+  return Array.from({ length: 31 }, (_, i) => i + 1)
+    .map(d => `<option value="${d}"${d === day ? ' selected' : ''}>the ${ordinal(d)}</option>`).join('');
+}
+
+/* The runway right now: this budget, the shifts before the next payday
+ * (Focus, templates and Google), and the bills. null while no payday is set. */
+export function runwayResult() {
+  if (!runwayOn()) return null;
+  const today = dbdTodayKey();
+  const payday = nextPayday(runway.payday, runway.repeat, today);
+  const keys = Array.from({ length: payday ? Math.min(daysBetween(today, payday), 35) : 0 }, (_, i) => addDays(today, i));
+  const shifts = shiftsOnDays(keys, calShiftSources()).map(sh => ({ date: sh.date, pay: sh.pay }));
+  return {
+    today, payday, shiftCount: shifts.length,
+    ...cashRunway({
+      today, payday, balance: totalBalance(), todaySpend: Math.max(0, todayBalance()),
+      dailySpend: round2(budget.daily), shifts, bills: runway.bills, horizon: RUNWAY_HORIZON,
+    }),
+  };
+}
+
+function runwayHtml() {
+  const setup = `
+    <div class="runway-setup">
+      <label class="runway-field"><span>Next payday</span>
+        <input class="runway-input" type="date" data-rfield="payday" value="${runway.payday || ''}"></label>
+      <label class="runway-field"><span>Repeats</span>
+        <select class="runway-input" data-rfield="repeat">${PAY_REPEATS.map(r =>
+          `<option value="${r}"${r === runway.repeat ? ' selected' : ''}>${PAY_REPEAT_LABELS[r]}</option>`).join('')}</select></label>
+    </div>`;
+  if (!runwayOn()) return `
+    <div class="runway empty">
+      <div class="runway-label">Cash runway</div>
+      <div class="runway-sub">Set your next payday to see whether your cash lasts until then. From then on your daily budget is what you spend each day. It is no longer added to your balance each morning, so add each paycheck to your balance when it lands.</div>
+      ${setup}
+    </div>`;
+
+  const r = runwayResult();
+  let head;
+  if (!r.payday) {
+    head = `<div class="runway-value">No payday ahead</div>
+      <div class="runway-sub">Your payday has passed. Set the next one.</div>`;
+  } else {
+    const days = r.daysOfCash === null ? `${RUNWAY_HORIZON}+ days` : plural(r.daysOfCash, 'day');
+    const when = r.daysToPayday === 0 ? `Payday is today (${fmtDayKey(r.payday)})` : `Payday ${fmtDayKey(r.payday)} · in ${plural(r.daysToPayday, 'day')}`;
+    const why = r.runsOutWith.length ? ` when ${escAttr(r.runsOutWith.join(' and '))} ${r.runsOutWith.length === 1 ? 'is' : 'are'} due` : '';
+    const status = r.short
+      ? `Runs out ${fmtDayKey(r.runsOutOn)}${why}, ${plural(r.shortBy, 'day')} before payday.`
+      : r.daysToPayday === 0 ? 'Add your paycheck to the balance above.'
+      : `Covers you to payday${r.paycheck > 0 ? `, when about ${money(r.paycheck)} lands` : ''}.`;
+    const parts = [`${money(totalBalance())} now`, `${money(budget.daily)} a day`];
+    if (r.billsBeforePayday) parts.push(`−${money(r.billsBeforePayday)} bills before payday`);
+    const priced = r.shiftCount - r.unpricedShifts;
+    if (priced) parts.push(`+${money(r.paycheck)} from ${plural(priced, 'shift')} on payday`);
+    if (r.unpricedShifts) parts.push(`${plural(r.unpricedShifts, 'shift')} without a wage not counted`);
+    head = `<div class="runway-value">${days} of cash</div>
+      <div class="runway-sub">${when}</div>
+      <div class="runway-status">${status}</div>
+      <div class="runway-parts">${parts.join(' · ')}</div>` +
+      (budget.daily > 0 ? '' : '<div class="runway-parts">Set a daily budget above: the runway counts days at that pace.</div>');
+  }
+  const paid = budgetBillsPaid.length
+    ? `<div class="runway-parts">Taken out this morning: ${budgetBillsPaid.map(b => `${escAttr(b.name || 'Bill')} ${money(b.amount)}`).join(', ')}.</div>` : '';
+  const bills = runway.bills.map(b => `
+    <div class="runway-bill" data-bill-id="${b.id}">
+      <input class="runway-bill-name" data-bact="name" value="${escAttr(b.name)}" placeholder="Bill">
+      <span class="budget-currency">$</span>
+      <input class="runway-bill-amount" data-bact="amount" type="text" inputmode="decimal" value="${b.amount.toFixed(2)}">
+      <select class="runway-bill-day" data-bact="day" title="Day of the month it's due">${billDayOptions(b.day)}</select>
+      <button class="budget-purchase-del" data-bact="del" title="Remove">×</button>
+    </div>`).join('');
+  const billTotal = round2(runway.bills.reduce((t, b) => t + b.amount, 0));
+  return `
+    <div class="runway ${r.short ? 'short' : ''}">
+      <div class="runway-label">Cash runway</div>
+      ${head}
+      ${paid}
+      ${setup}
+      <div class="budget-section-header runway-bills-head">
+        <span class="section-sublabel">Monthly bills</span>
+        <span class="budget-spent">${money(billTotal)}</span>
+      </div>
+      <div class="runway-bill-list">${bills || '<div class="budget-empty">No bills yet. They come out of your balance on their day.</div>'}</div>
+      <div class="budget-add-row runway-add-row">
+        <input class="runway-new-name" placeholder="Rent, phone, bus pass…">
+        <input class="runway-new-amount" type="text" inputmode="decimal" placeholder="0.00">
+        <select class="runway-bill-day runway-new-day" title="Day of the month it's due">${billDayOptions(1)}</select>
+        <button class="add-btn budget-add-btn" data-bact="add">+ Add</button>
+      </div>
+    </div>`;
+}
+
+function setRunwayField(key, value) {
+  if (key === 'payday') runway.payday = /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+  if (key === 'repeat' && PAY_REPEATS.includes(value)) runway.repeat = value;
+  budgetChanged();
+}
+function billById(id) { return runway.bills.find(b => b.id === id); }
+function addBill(root) {
+  const name = (root.querySelector('.runway-new-name')?.value || '').trim();
+  const amount = parseMoney(root.querySelector('.runway-new-amount')?.value);
+  const day = parseInt(root.querySelector('.runway-new-day')?.value) || 1;
+  if (!name && !amount) { root.querySelector('.runway-new-name')?.focus(); return; }
+  const id = runway.bills.reduce((m, b) => Math.max(m, b.id), 0) + 1;
+  runway.bills.push({ id, name: name || 'Bill', amount: Math.max(0, amount), day });
+  budgetChanged();
+  root.querySelector('.runway-new-name')?.focus();
+}
+function setBillField(id, key, value) {
+  const b = billById(id);
+  if (!b) return;
+  if (key === 'name') { b.name = String(value).slice(0, 60); saveToLocal(); return; }
+  if (key === 'amount') b.amount = Math.max(0, parseMoney(value));
+  if (key === 'day') b.day = Math.min(31, Math.max(1, parseInt(value) || 1));
+  budgetChanged();
+}
+function removeBill(id) {
+  runway.bills = runway.bills.filter(b => b.id !== id);
+  budgetChanged();
+}
+
 /* Delegated listeners are attached once per container; innerHTML swaps the
  * children but never the container, so the bindings survive re-renders. */
 function bindBudgetContainer(root) {
@@ -217,12 +363,15 @@ function bindBudgetContainer(root) {
   root._budgetBound = true;
 
   root.addEventListener('focusin', e => {
-    if (e.target.matches('.budget-input, .budget-purchase-amount')) e.target.select();
+    if (e.target.matches('.budget-input, .budget-purchase-amount, .runway-bill-amount')) e.target.select();
   });
 
   root.addEventListener('change', e => {
     const el = e.target;
     if (el.dataset.bfield) { setBudgetField(el.dataset.bfield, el.value); return; }
+    if (el.dataset.rfield) { setRunwayField(el.dataset.rfield, el.value); return; }
+    const bill = el.closest('.runway-bill');
+    if (bill && el.dataset.bact) { setBillField(parseInt(bill.dataset.billId), el.dataset.bact, el.value); return; }
     const row = el.closest('.budget-purchase-row');
     if (!row) return;
     const id = parseInt(row.dataset.purchaseId);
@@ -231,6 +380,12 @@ function bindBudgetContainer(root) {
   });
 
   root.addEventListener('click', e => {
+    const bbtn = e.target.closest('button[data-bact]');
+    if (bbtn) {
+      if (bbtn.dataset.bact === 'add') addBill(root);
+      if (bbtn.dataset.bact === 'del') removeBill(parseInt(bbtn.closest('.runway-bill').dataset.billId));
+      return;
+    }
     const btn = e.target.closest('[data-pact]');
     if (!btn || btn.tagName !== 'BUTTON') return;
     if (btn.dataset.pact === 'add') { addPurchase(root); return; }
@@ -246,7 +401,10 @@ function bindBudgetContainer(root) {
     if (el.matches('.budget-new-title, .budget-new-amount')) {
       e.preventDefault();
       addPurchase(root);
-    } else if (el.matches('.budget-input, .budget-purchase-title, .budget-purchase-amount')) {
+    } else if (el.matches('.runway-new-name, .runway-new-amount')) {
+      e.preventDefault();
+      addBill(root);
+    } else if (el.matches('.budget-input, .budget-purchase-title, .budget-purchase-amount, .runway-bill-name, .runway-bill-amount')) {
       e.preventDefault();
       el.blur();          // commits via the change handler
     }
@@ -323,7 +481,9 @@ export function budgetTickDay() {
     saveToLocal();
     renderBudget();
     renderHome();
-    showToast('New day — budget rolled over ✓');
+    const paid = budgetBillsPaid.reduce((t, b) => t + b.amount, 0);
+    showToast(paid ? `New day — ${budgetBillsPaid.map(b => b.name || 'Bill').join(', ')} (${money(paid)}) came out of your balance`
+                   : 'New day — budget rolled over ✓');
   }
   setTimeout(budgetTickDay, 60000);
 }

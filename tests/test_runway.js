@@ -89,6 +89,92 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       JSON.stringify({ payday: null, repeat: 'biweekly', bills: [{ id: 1, name: 'x', amount: 0, day: 31 }] }), 'settings are normalized');
   }
 
+  console.log('\n── 6. Budget screen: off until a payday is set ──');
+  {
+    const { w, d } = await loadApp({ storage: { 'focus-tour-done': '1' } });
+    const card = () => d.querySelector('#budgetContainer-d .runway');
+    ok(card().classList.contains('empty'), 'runway starts empty');
+    ok(card().textContent.includes('Set your next payday'), 'and asks for a payday');
+    ok(d.querySelector('#budgetContainer-d').textContent.includes('Added to your balance each new day'), 'the daily budget still tops up the balance');
+    // old envelope behaviour is untouched without a payday
+    const today = w.eval('dbdTodayKey()');
+    w.eval(`budget = normalizeBudget({ initial: 100, daily: 20, lastDate: addDays('${today}', -2), purchases: [{ id: 1, title: 'x', amount: 5 }] })`);
+    ok(w.budgetRollover(), 'rolls over');
+    eq(w.eval('budget.initial'), 135, 'no payday: $95 left + 2 × $20 added');
+
+    // set a payday through the field
+    w.eval(`budget = normalizeBudget({ initial: 120, daily: 20, lastDate: '${today}', purchases: [] })`);
+    w.renderBudget();
+    const payday = w.addDays(today, 9);
+    const inp = d.querySelector('#budgetContainer-d [data-rfield="payday"]');
+    inp.value = payday; inp.dispatchEvent(new w.Event('change', { bubbles: true }));
+    eq(w.eval('runway.payday'), payday, 'payday saved');
+    eq(w.eval('runway.repeat'), 'biweekly', 'repeats every 2 weeks unless changed');
+    ok(!card().classList.contains('empty'), 'card fills in');
+    eq(card().querySelector('.runway-value').textContent, '6 days of cash', '$120 at $20/day, today\'s $20 included: 6 days');
+    ok(card().querySelector('.runway-sub').textContent.endsWith('in 9 days'), 'payday in 9 days');
+    ok(card().classList.contains('short') && /3 days before payday/.test(card().querySelector('.runway-status').textContent), 'short by 3 days, in red');
+    ok(d.querySelector('#budgetContainer-d').textContent.includes('What you let yourself spend a day'), 'the daily budget now reads as spending');
+    const sel = d.querySelector('#budgetContainer-d [data-rfield="repeat"]');
+    sel.value = 'monthly'; sel.dispatchEvent(new w.Event('change', { bubbles: true }));
+    eq(w.eval('runway.repeat'), 'monthly', 'repeat saved');
+    const saved = JSON.parse(w.localStorage.getItem('focus-app-state'));
+    eq(saved.runway.payday, payday, 'saved with the state');
+  }
+
+  console.log('\n── 7. Bills and the paycheck-to-paycheck rollover ──');
+  {
+    const { w, d } = await loadApp({ storage: { 'focus-tour-done': '1' } });
+    const today = w.eval('dbdTodayKey()');
+    const yesterday = w.addDays(today, -1), dayOfMonth = k => Number(k.slice(8, 10));
+    w.eval(`runway.payday = addDays('${today}', 12); budget = normalizeBudget({ initial: 400, daily: 15, lastDate: '${today}', purchases: [] }); renderBudget();`);
+    const root = d.querySelector('#budgetContainer-d');
+    root.querySelector('.runway-new-name').value = 'Phone';
+    root.querySelector('.runway-new-amount').value = '35';
+    root.querySelector('.runway-new-day').value = String(dayOfMonth(w.addDays(today, 3)));
+    root.querySelector('[data-bact="add"]').click();
+    eq(w.eval('JSON.stringify(runway.bills)'), JSON.stringify([{ id: 1, name: 'Phone', amount: 35, day: dayOfMonth(w.addDays(today, 3)) }]), 'bill added');
+    const row = () => d.querySelector('#budgetContainer-d .runway-bill');
+    ok(row() && row().querySelector('.runway-bill-name').value === 'Phone', 'and listed');
+    ok(/−\$35\.00 bills before payday/.test(d.querySelector('#budgetContainer-d .runway-parts').textContent), 'counted before payday');
+    const amt = row().querySelector('.runway-bill-amount');
+    amt.value = '40'; amt.dispatchEvent(new w.Event('change', { bubbles: true }));
+    eq(w.eval('runway.bills[0].amount'), 40, 'amount edited');
+    row().querySelector('[data-bact="del"]').click();
+    eq(w.eval('runway.bills.length'), 0, 'bill removed');
+
+    // a bill due yesterday comes out at the rollover, and the daily budget is not added
+    w.eval(`runway.bills = [{ id: 7, name: 'Rent', amount: 300, day: ${dayOfMonth(yesterday)} }];
+            budget = normalizeBudget({ initial: 400, daily: 15, lastDate: addDays('${today}', -2), purchases: [{ id: 1, title: 'Lunch', amount: 10 }] });`);
+    w.budgetTickDay();
+    const toast = d.getElementById('toast').textContent;
+    eq(w.eval('budget.initial'), 90, 'paycheck to paycheck: $390 left − $300 rent, no $15 added');
+    w.eval(`runway.bills.push({ id: 8, name: 'Tuition plan', amount: 500, day: ${dayOfMonth(w.addDays(today, 2))} }); renderBudget();`);
+    ok(/when Tuition plan is due, \d+ days? before payday\./.test(d.querySelector('#budgetContainer-d .runway-status').textContent), 'the card names the bill that empties the envelope');
+    ok(/Rent \(\$300\.00\) came out of your balance/.test(toast), 'the toast says what came out');
+    ok(d.querySelector('#budgetContainer-d').textContent.includes('Taken out this morning: Rent $300.00'), 'and the card');
+  }
+
+  console.log('\n── 8. Shifts before payday feed the runway ──');
+  {
+    const { w, d } = await loadApp({ storage: { 'focus-tour-done': '1' } });
+    const today = w.eval('dbdTodayKey()');
+    const tomorrow = w.addDays(today, 1);
+    w.eval(`runway.payday = addDays('${today}', 5); budget = normalizeBudget({ initial: 60, daily: 20, lastDate: '${today}', purchases: [] });
+            calEnsureDay('${tomorrow}'); calEvents['${tomorrow}'].push({ id: 8801, title: 'Campus cafe', start: '10:00', end: '16:00', color: '#22C55E', type: 'event', shift: true, wage: 15 },
+                                                                 { id: 8802, title: 'Tutoring', start: '17:00', end: '18:00', color: '#22C55E', type: 'event', shift: true });
+            renderBudget();`);
+    const card = d.querySelector('#budgetContainer-d .runway');
+    eq(card.querySelector('.runway-value').textContent, '3 days of cash', '$60 at $20/day: 3 days, even with a $90 shift tomorrow');
+    ok(/Runs out .*, 2 days before payday\./.test(card.querySelector('.runway-status').textContent), 'short by 2: the pay arrives on payday');
+    const parts = card.querySelector('.runway-parts').textContent;
+    ok(parts.includes('+$90.00 from 1 shift on payday'), 'the $90 shift is the projected paycheck');
+    ok(parts.includes('1 shift without a wage not counted'), 'the shift without a wage is named, not guessed');
+    w.eval(`budget.initial = 200; renderBudget();`);
+    ok(/Covers you to payday, when about \$90\.00 lands\./.test(d.querySelector('#budgetContainer-d .runway-status').textContent), 'with more cash: covered, and the paycheck is mentioned');
+    eq(w.runwayResult().daysOfCash, 14, 'and the paycheck stretches the runway past payday ($200 + $90 at $20/day)');
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
