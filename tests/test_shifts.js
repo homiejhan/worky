@@ -117,7 +117,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     eq(Object.keys(again.w.eval('normalizeShiftCals({ a: { shift: "yes", wage: -1 }, b: { wage: "13" }, c: {} })')).join(), 'b', 'empty or junk entries are dropped');
   }
 
-  console.log('\n── 6. The event editor: Paid shift and wage ──');
+  console.log('\n── 6. The event editor: Paid shift, wage, and the header total ──');
   {
     const { w, d } = await loadApp({ storage: { 'focus-tour-done': '1' } });
     const today = w.eval('calDateKey(calToday())');
@@ -135,6 +135,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await w.saveCalEvent();
     const ev = w.eval(`calEvents['${today}'].find(e => e.title === 'Campus cafe')`);
     ok(ev && ev.shift === true && ev.wage === 15, 'saved with shift: true, wage: 15');
+    eq(d.getElementById('calEarnings-m').textContent, 'Next 7 days: $60.00 from 1 shift · 4 h', 'header adds up the week');
+    ok(!d.getElementById('calEarnings-m').hidden, 'header line visible');
     ok(d.querySelector('#calMobileGrid .cal-event.cal-shift .cal-shift-badge')?.textContent === '$60', 'the event carries a $60 tag');
 
     // title detection, no toggle needed; the next shift's wage is prefilled
@@ -147,6 +149,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await w.saveCalEvent();
     const auto = w.eval(`calEvents['${today}'].find(e => e.title === '7shifts: Barista')`);
     ok(auto && !('shift' in auto) && !('wage' in auto), 'detected shifts store no flag (detection keeps working if renamed)');
+    eq(d.getElementById('calEarnings-m').textContent, 'Next 7 days: $60.00 from 2 shifts · 7 h · 1 without a wage', 'header notes the shift without a wage');
 
     // switching a detected shift off sticks
     w.openCalModal(today, auto.id);
@@ -154,6 +157,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     ok(!d.getElementById('calShiftBtn').classList.contains('active'), 'Paid shift turns off');
     await w.saveCalEvent();
     eq(w.eval(`calEvents['${today}'].find(e => e.title === '7shifts: Barista').shift`), false, 'saved as shift: false');
+    eq(d.getElementById('calEarnings-m').textContent, 'Next 7 days: $60.00 from 1 shift · 4 h', 'and no longer counted');
 
     // turning a new one on prefills the last wage
     w.openCalModal(today, null, '12:00');
@@ -173,6 +177,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     // a weekly template shift counts on the days it repeats
     w.openCalModal(today, w.eval(`calEvents['${today}'].find(e => e.title === 'Campus cafe').id`));
     await w.deleteCalEvent();
+    ok(d.getElementById('calEarnings-m').hidden, 'no shifts left → the header line hides');
     d.getElementById('fmtBtn').click();
     w.eval('openCalModalFmt(1, null, "18:00")');
     d.getElementById('calEventTitle').value = 'Library desk';
@@ -184,6 +189,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     const tmpl = w.eval('calTemplates.find(t => t.title === "Library desk")');
     ok(tmpl && tmpl.shift === true && tmpl.wage === 12.5, 'template saved as a $12.50 shift');
     d.getElementById('fmtBtn').click();   // Done
+    w.goTab('calendar', false);          // the header refreshes whenever the calendar is shown
+    eq(d.getElementById('calEarnings-m').textContent, 'Next 7 days: $100.00 from 2 shifts · 8 h', 'Mondays and Wednesdays in the next 7 days: 2 × 4 h × $12.50');
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

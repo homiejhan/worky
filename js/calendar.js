@@ -23,7 +23,7 @@ import {
 } from './gcal.js';
 import { budgetDesktopOpen, budgetToggleDesktop, money } from './budget.js';
 import {
-  isShift, normalizeWage, shiftAppIn, shiftMinutes, shiftPay, shiftReason,
+  isShift, normalizeWage, shiftAppIn, shiftMinutes, shiftPay, shiftReason, shiftsOnDays, sumShifts,
 } from './shifts.js';
 
 /* calendar state */
@@ -398,6 +398,7 @@ function calScrollToMorning(el) {
 export function calRenderDesktop() {
   const titleEl  = $('calDesktopTitle');
   const filterEl = $('calColorFilter-d');
+  calRenderEarnings();
   if (formatMode) {
     if (titleEl) titleEl.textContent = 'Template week — Sun through Sat';
     if (filterEl) filterEl.style.display = 'none';
@@ -461,6 +462,7 @@ export function calRenderMobile() {
   const titleEl  = $('calDayTitle');
   const filterEl = $('calColorFilter-m');
   const gridEl   = $('calMobileGrid');
+  calRenderEarnings();
   let dayCol;
   if (formatMode) {
     const dow = calFmtMobileDay;
@@ -538,7 +540,15 @@ export function calTickNow() {
   setTimeout(calTickNow, 60000);
 }
 
-/* ── shifts: which events are paid work (rules in shifts.js) ── */
+/* ── shifts: which events are paid work, and the week's pay (rules in shifts.js) ── */
+/* Everything shifts.js needs to find the shifts on some days. */
+export function calShiftSources() {
+  return {
+    calEvents, calTemplates,
+    gcalEvents: gcalIsConnected() ? gcalEvents : {},
+    calendars: gcalShiftCalendars(),
+  };
+}
 /* The Google calendar a Focus event was copied from, as shifts.js reads it. */
 function calCalOf(ev) {
   return (ev && ev.gcalCalId && gcalShiftCalendars()[ev.gcalCalId]) || {};
@@ -555,6 +565,27 @@ function calFmtHours(mins) {
   const h = Math.round(mins / 6) / 10;
   return `${h} h`;
 }
+/* Header line: what the shifts in view pay. It stays hidden while there are
+ * none, so the calendar looks as it always did to anyone who doesn't work. */
+export function calRenderEarnings() {
+  const els = [$('calEarnings-d'), $('calEarnings-m')].filter(Boolean);
+  if (!els.length) return;
+  const shifts = formatMode ? [] : shiftsOnDays(calDisplayDays().map(calDateKey), calShiftSources());
+  const sum = sumShifts(shifts);
+  let html = '';
+  if (sum.count) {
+    const label = calWeekMode === 'fixed' ? 'This week' : 'Next 7 days';
+    const n = `${sum.count} shift${sum.count === 1 ? '' : 's'} · ${calFmtHours(sum.minutes)}`;
+    html = sum.unpriced === sum.count
+      ? `${label}: ${n} <span class="cal-earnings-note">· add a wage to see pay</span>`
+      : `${label}: <b>${money(sum.pay)}</b> from ${n}` +
+        (sum.unpriced ? ` <span class="cal-earnings-note">· ${sum.unpriced} without a wage</span>` : '');
+  }
+  const detail = shifts.map(sh => `${calFmtShort(calKeyToDate(sh.date))} ${calFmtTime(sh.start)}–${calFmtTime(sh.end)} ${sh.title}` +
+    (sh.pay === null ? ' · no wage' : ` · ${money(sh.pay)}`)).join('\n');
+  els.forEach(el => { el.hidden = !html; el.innerHTML = html; el.title = detail; });
+}
+
 /* ── EVENT MODAL — state fully re-initialized on every open ── */
 function renderColorSwatches() {
   const swatchEl = $('calColorSwatches');

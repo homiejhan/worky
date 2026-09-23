@@ -265,6 +265,7 @@
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
         </div>
+        <div class="cal-earnings cal-earnings-m" id="calEarnings-m" hidden></div>
         <div class="cal-color-filter cal-color-filter-mobile" id="calColorFilter-m"></div>
         <div class="cal-grid-wrap" id="calMobileGrid"></div>
       </section>
@@ -292,6 +293,7 @@
 <div class="cal-desktop-panel" id="calDesktopPanel">
   <div class="cal-desktop-header">
     <div class="cal-desktop-title" id="calDesktopTitle"></div>
+    <div class="cal-earnings" id="calEarnings-d" hidden></div>
     <div class="cal-color-filter" id="calColorFilter-d"></div>
     <div class="cal-desktop-days" id="calDesktopDays"></div>
   </div>
@@ -335,6 +337,16 @@
         <button class="cal-type-btn" id="calTypeDivider">Divider</button>
       </div>
     </div>
+    <div class="cal-event-row cal-shift-row" id="calShiftRow">
+      <span class="cal-event-label">Work</span>
+      <button class="cal-type-btn cal-shift-btn" id="calShiftBtn" type="button" aria-pressed="false">Paid shift</button>
+      <div class="cal-wage" id="calWageWrap">
+        <span class="cal-wage-cur">$</span>
+        <input class="cal-event-input cal-wage-input" id="calEventWage" type="text" inputmode="decimal" placeholder="0.00" aria-label="Hourly wage" autocomplete="off">
+        <span class="cal-wage-unit">/hr</span>
+      </div>
+    </div>
+    <div class="modal-sub cal-shift-hint" id="calShiftHint"></div>
     <div class="cal-event-row cal-shift-row" id="calShiftRow">
       <span class="cal-event-label">Work</span>
       <button class="cal-type-btn cal-shift-btn" id="calShiftBtn" type="button" aria-pressed="false">Paid shift</button>
