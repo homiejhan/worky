@@ -97,7 +97,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     w.eval(`calEnsureDay('${today}'); calEvents['${today}'].push({ id: 9001, title: 'Shift', start: '10:00', end: '14:00', color: '#378ADD', type: 'event', shift: true, wage: 16 }, { id: 9002, title: 'Nope', start: '15:00', end: '16:00', color: '#378ADD', type: 'event', shift: false })`);
     w.eval(`shiftCals = { 'wiw@import.calendar.google.com': { shift: true, wage: 14 } }`);
     const st = w.gatherState();
-    eq(st.build, 4, 'state build 4 (shiftCals is new)');
+    ok(st.build >= 4, `state build ${st.build} (shiftCals arrived in build 4)`);
     const c = w.compressState(st);
     const shiftEv = c.cal.ce[today].find(e => e.i === 9001), noEv = c.cal.ce[today].find(e => e.i === 9002);
     ok(shiftEv.sh === 1 && shiftEv.wg === 16 && noEv.sh === 0 && !('wg' in noEv), 'Export writes sh/wg');

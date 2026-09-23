@@ -5,6 +5,7 @@ import { dbdTodayKey } from './dbd.js';
 import { homeDesktopOpen, homeToggleDesktop, renderHome } from './home.js';
 import { desktopNavSync } from './views.js';
 import { calDesktopOpen, calToggleDesktop } from './calendar.js';
+import { PAY_REPEATS } from './runway.js';
 
 /* budget state
  *   initial        — balance allocated at the start of today
@@ -23,6 +24,14 @@ export function setBudget(v) { budget = v; }
 export let purchaseIdCounter = 1;
 export function setPurchaseIdCounter(v) { purchaseIdCounter = v; }
 export function nextPurchaseId() { return purchaseIdCounter++; }
+
+/* cash runway settings (the math is in runway.js), synced with the state
+ *   payday — the payday the user entered ('YYYY-MM-DD'); null = no runway
+ *   repeat — how it repeats: 'biweekly' | 'weekly' | 'monthly' | 'once'
+ *   bills  — [{ id, name, amount, day }] monthly costs, due on `day`
+ * With a payday set the envelope runs paycheck to paycheck (budgetRollover). */
+export let runway = { payday: null, repeat: 'biweekly', bills: [] };
+export function setRunway(v) { runway = v; }
 
 /* ───────────────────────── BUDGET ─────────────────────────
  * Minimal daily-envelope budgeting.
@@ -58,6 +67,23 @@ export function normalizeBudget(b) {
     lastDate: b?.lastDate || null,
   };
 }
+
+export function normalizeRunway(r) {
+  const bills = Array.isArray(r?.bills) ? r.bills : [];
+  return {
+    payday: typeof r?.payday === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.payday) ? r.payday : null,
+    repeat: PAY_REPEATS.includes(r?.repeat) ? r.repeat : 'biweekly',
+    bills: bills.map((b, i) => ({
+      id: Number.isFinite(b?.id) ? b.id : i + 1,
+      name: String(b?.name ?? '').slice(0, 60),
+      amount: Math.max(0, round2(b?.amount)),
+      day: Math.min(31, Math.max(1, Math.round(Number(b?.day)) || 1)),
+    })),
+  };
+}
+/* Paycheck to paycheck: a payday is set, so the daily budget is spending, not
+ * money added to the balance each morning. */
+export function runwayOn() { return !!runway.payday; }
 
 function purchasesTotal() {
   return round2(budget.purchases.reduce((s, p) => s + (Number(p.amount) || 0), 0));
