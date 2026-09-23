@@ -256,6 +256,17 @@ export function runwayResult() {
   };
 }
 
+/* The last day whose shifts the runway counts, as the end of that day, when
+ * it lies past the displayed week (Google Calendar fetches through it). */
+export function runwayFetchUntil() {
+  const today = dbdTodayKey();
+  const payday = runwayOn() ? nextPayday(runway.payday, runway.repeat, today) : null;
+  if (!payday || payday <= today) return null;
+  const last = calKeyToDate(addDays(today, Math.min(daysBetween(today, payday), 35) - 1));
+  last.setHours(23, 59, 59, 999);
+  return last;
+}
+
 function runwayHtml() {
   const setup = `
     <div class="runway-setup">

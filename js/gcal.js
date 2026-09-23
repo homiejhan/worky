@@ -12,7 +12,7 @@ import {
   calColorHidden, calDisplayDays, calEnsureDay, calEvents, calPlaceEventEl, calRefresh, calSave,
   nextCalEventId, shiftBadgeEl,
 } from './calendar.js';
-import { money } from './budget.js';
+import { money, runwayFetchUntil } from './budget.js';
 import { isShift, normalizeWage, shiftAppIn, shiftMinutes, shiftPay, shiftReason } from './shifts.js';
 
 /* gcal state */
@@ -148,7 +148,9 @@ export async function gcalSyncAll() {
 
   const days = calDisplayDays();
   const timeMin = new Date(days[0]); timeMin.setHours(0,0,0,0);
-  const timeMax = new Date(days[days.length-1]); timeMax.setHours(23,59,59,999);
+  let timeMax = new Date(days[days.length-1]); timeMax.setHours(23,59,59,999);
+  const runwayUntil = runwayFetchUntil();          // shifts before a payday past this week
+  if (runwayUntil && runwayUntil > timeMax) timeMax = runwayUntil;
   const enabledCals = gcalCalendars.filter(c => c.enabled);
 
   gcalEvents = {};

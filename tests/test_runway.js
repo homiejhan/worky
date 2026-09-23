@@ -175,6 +175,36 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     eq(w.runwayResult().daysOfCash, 14, 'and the paycheck stretches the runway past payday ($200 + $90 at $20/day)');
   }
 
+  console.log('\n── 9. Google Calendar fetches shifts up to payday ──');
+  {
+    let fetched = [];
+    const { w } = await loadApp({
+      storage: {
+        'focus-tour-done': '1',
+        'focus-gcal-token': JSON.stringify({ access_token: 't', expires_at: Date.now() + 3600e3 }),
+        'focus-gcal-calendars': JSON.stringify([{ id: 'wiw', summary: 'When I Work', color: '#22C55E', enabled: true }]),
+      },
+      before: win => { win.fetch = async url => { fetched.push(String(url)); return { ok: true, status: 200, json: async () => ({ items: [] }) }; }; },
+    });
+    const today = w.eval('dbdTodayKey()');
+    w.eval(`runway.payday = addDays('${today}', 20); runway.repeat = 'weekly'`);
+    await sleep(30);                     // let the sync started at boot finish
+    fetched = [];
+    await w.gcalSyncAll();
+    await sleep(5);
+    const ev = fetched.find(u => u.includes('/events?'));
+    const timeMax = new URL(ev).searchParams.get('timeMax');
+    const last = new Date(timeMax);
+    const lastKey = `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, '0')}-${String(last.getDate()).padStart(2, '0')}`;
+    eq(lastKey, w.addDays(today, 19), 'events are fetched up to the day before payday');
+    w.eval('runway.payday = null');
+    fetched = [];
+    await w.gcalSyncAll();
+    await sleep(5);
+    const plain = new Date(new URL(fetched.find(u => u.includes('/events?'))).searchParams.get('timeMax'));
+    ok(plain - last < 0 && (plain - new Date()) / 86400000 < 8, 'without a payday, just the week on screen');
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
