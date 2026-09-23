@@ -3437,6 +3437,13 @@ function calBuildNowLine(col) {
 }
 
 /* ── event element ── */
+/* Position an event block on the day grid (never shorter than 15 minutes). */
+function calPlaceEventEl(el, ev) {
+  const startM = calTimeToMins(ev.start);
+  el.style.top    = calMinsToPx(startM) + 'px';
+  el.style.height = calMinsToPx(Math.max(15, calTimeToMins(ev.end) - startM)) + 'px';
+}
+
 function calMakeEventEl(ev, dateKeyOrDow, isFmtMode) {
   const el = document.createElement('div');
   if (ev.type === 'divider') {
@@ -3455,11 +3462,7 @@ function calMakeEventEl(ev, dateKeyOrDow, isFmtMode) {
   } else {
     el.className = 'cal-event';
     el.dataset.evId = ev.id;
-    const startM = calTimeToMins(ev.start);
-    const endM   = calTimeToMins(ev.end);
-    const durM   = Math.max(15, endM - startM);
-    el.style.top    = calMinsToPx(startM) + 'px';
-    el.style.height = calMinsToPx(durM) + 'px';
+    calPlaceEventEl(el, ev);
     el.style.background = ev.color + '33';
     el.style.borderLeft = `3px solid ${ev.color}`;
     el.style.color = ev.color;
@@ -3535,18 +3538,23 @@ function bindCalEventDrag(el, ev, dateKeyOrDow, isFmtMode) {
   });
 }
 
+/* Where an event or template dropped at `startMins` lands: same length (at
+ * least 15 minutes; dividers have none), kept inside the day. */
+function calSlotAt(item, startMins) {
+  const dur = item.type === 'divider' ? 0 : Math.max(15, calTimeToMins(item.end) - calTimeToMins(item.start));
+  const start = Math.max(0, Math.min(1440 - dur, startMins));
+  return { start: calMinsToStr(start), end: calMinsToStr(start + dur) };
+}
+
 function calMoveEvent(evId, fromKey, toKey, newStartMins) {
   const list = calEvents[fromKey] || [];
   const ev = list.find(e => e.id === evId);
   if (!ev) return;
-  const dur = ev.type === 'divider' ? 0 : Math.max(15, calTimeToMins(ev.end) - calTimeToMins(ev.start));
-  const start = Math.max(0, Math.min(1440 - dur, newStartMins));
   calEvents[fromKey] = list.filter(e => e.id !== evId);
   calEnsureDay(toKey);
   const moved = {
     ...ev,
-    start: calMinsToStr(start),
-    end:   calMinsToStr(start + dur),
+    ...calSlotAt(ev, newStartMins),
     fromTemplate: toKey !== fromKey ? false : ev.fromTemplate,
   };
   calEvents[toKey].push(moved);
@@ -3558,14 +3566,11 @@ function calMoveEvent(evId, fromKey, toKey, newStartMins) {
 function calMoveTemplate(tmplId, fromDow, toDow, newStartMins) {
   const tmpl = calTemplates.find(t => t.id === tmplId);
   if (!tmpl) return;
-  const dur = tmpl.type === 'divider' ? 0 : Math.max(15, calTimeToMins(tmpl.end) - calTimeToMins(tmpl.start));
-  const start = Math.max(0, Math.min(1440 - dur, newStartMins));
   if (fromDow !== null && fromDow !== toDow) {
     tmpl.repeatDays = (tmpl.repeatDays || []).filter(d => d !== fromDow);
     if (!tmpl.repeatDays.includes(toDow)) tmpl.repeatDays.push(toDow);
   }
-  tmpl.start = calMinsToStr(start);
-  tmpl.end   = calMinsToStr(start + dur);
+  Object.assign(tmpl, calSlotAt(tmpl, newStartMins));
   reseedTemplate(tmpl);
   calRefresh();
   calSave();
@@ -3663,15 +3668,31 @@ function calRenderColorFilter(el) {
   });
 }
 
-/* ── desktop render ── */
-function calRenderDesktop() {
-  if (formatMode) { calRenderDesktopFmt(); return; }
-  const days = calDisplayDays();
-  calPruneDays();
+/* An hour-lined day column: { dateKey } for a real day, { dow } for a template day. */
+function calDayColEl(className, data) {
+  const col = document.createElement('div');
+  col.className = className;
+  Object.assign(col.dataset, data);
+  calBuildLines(col);
+  return col;
+}
+/* Scroll a grid to just before 7am once it has laid out. */
+function calScrollToMorning(el) {
+  setTimeout(() => { if (el) el.scrollTop = 7 * CAL_HOUR_PX - 14; }, 50);
+}
 
-  const titleEl = $('calDesktopTitle');
-  if (titleEl) titleEl.textContent = calFmtFull(calToday());
-  calRenderColorFilter($('calColorFilter-d'));
+/* ── desktop render: the 7-day week, or the template week while Formats is open ── */
+function calRenderDesktop() {
+  const titleEl  = $('calDesktopTitle');
+  const filterEl = $('calColorFilter-d');
+  if (formatMode) {
+    if (titleEl) titleEl.textContent = 'Template week — Sun through Sat';
+    if (filterEl) filterEl.style.display = 'none';
+  } else {
+    calPruneDays();
+    if (titleEl) titleEl.textContent = calFmtFull(calToday());
+    calRenderColorFilter(filterEl);
+  }
 
   const daysEl = $('calDesktopDays');
   const gridEl = $('calDesktopGrid');
@@ -3684,147 +3705,86 @@ function calRenderDesktop() {
   gridEl.innerHTML = '';
   calBuildTimeCol(timeEl);
 
-  days.forEach(day => {
-    const key = calDateKey(day);
-    const isToday = key === calDateKey(calToday());
-
+  const addHeader = (name, date, isToday) => {
     const hdr = document.createElement('div');
     hdr.className = 'cal-day-header' + (isToday ? ' today' : '');
     const hName = document.createElement('div');
-    hName.textContent = calFmtShort(day);
-    const hDate = document.createElement('div');
-    hDate.className = 'cal-day-header-date';
-    hDate.textContent = day.getDate();
-    hdr.appendChild(hName);
-    hdr.appendChild(hDate);
-    daysEl.appendChild(hdr);
-
-    const col = document.createElement('div');
-    col.className = 'cal-day-col' + (isToday ? ' today-col' : '');
-    col.dataset.dateKey = key;
-    calBuildLines(col);
-    calRenderDayCol(col, key);
-    gridEl.appendChild(col);
-  });
-
-  gridEl.style.height = CAL_TOTAL_PX + 'px';
-  const sc = $('calScrollArea');
-  setTimeout(() => { if (sc) sc.scrollTop = 7 * CAL_HOUR_PX - 14; }, 50);
-}
-
-function calRenderDesktopFmt() {
-  const titleEl = $('calDesktopTitle');
-  if (titleEl) titleEl.textContent = 'Template week — Sun through Sat';
-  const filtD = $('calColorFilter-d');
-  if (filtD) filtD.style.display = 'none';
-
-  const daysEl = $('calDesktopDays');
-  const gridEl = $('calDesktopGrid');
-  const timeEl = $('calTimeCol');
-  if (!daysEl || !gridEl || !timeEl) return;
-
-  daysEl.style.gridTemplateColumns = 'repeat(7,1fr)';
-  daysEl.innerHTML = '';
-  gridEl.style.gridTemplateColumns = 'repeat(7,1fr)';
-  gridEl.innerHTML = '';
-  calBuildTimeCol(timeEl);
-
-  CAL_DOW.forEach((name, dow) => {
-    const hdr = document.createElement('div');
-    hdr.className = 'cal-day-header';
-    const hName = document.createElement('div');
     hName.textContent = name;
     hdr.appendChild(hName);
+    if (date) {
+      const hDate = document.createElement('div');
+      hDate.className = 'cal-day-header-date';
+      hDate.textContent = date;
+      hdr.appendChild(hDate);
+    }
     daysEl.appendChild(hdr);
+  };
 
-    const col = document.createElement('div');
-    col.className = 'cal-day-col cal-fmt-col';
-    col.dataset.dow = dow;
-    calBuildLines(col);
-    calRenderFmtCol(col, dow);
-    gridEl.appendChild(col);
-  });
+  if (formatMode) {
+    CAL_DOW.forEach((name, dow) => {
+      addHeader(name);
+      const col = calDayColEl('cal-day-col cal-fmt-col', { dow });
+      calRenderFmtCol(col, dow);
+      gridEl.appendChild(col);
+    });
+  } else {
+    const todayKey = calDateKey(calToday());
+    calDisplayDays().forEach(day => {
+      const key = calDateKey(day);
+      const isToday = key === todayKey;
+      addHeader(calFmtShort(day), day.getDate(), isToday);
+      const col = calDayColEl('cal-day-col' + (isToday ? ' today-col' : ''), { dateKey: key });
+      calRenderDayCol(col, key);
+      gridEl.appendChild(col);
+    });
+  }
 
   gridEl.style.height = CAL_TOTAL_PX + 'px';
-  const sc = $('calScrollArea');
-  setTimeout(() => { if (sc) sc.scrollTop = 7 * CAL_HOUR_PX - 14; }, 50);
+  calScrollToMorning($('calScrollArea'));
 }
 
-/* ── mobile render ── */
+/* ── mobile render: one day, or one template day while Formats is open ── */
 function calRenderMobile() {
-  if (formatMode) { calRenderMobileFmt(); return; }
-  calPruneDays();
-  const days = calDisplayDays();
-  const day = days[Math.min(calMobileDay, days.length - 1)];
-  const key = calDateKey(day);
+  const titleEl  = $('calDayTitle');
+  const filterEl = $('calColorFilter-m');
+  const gridEl   = $('calMobileGrid');
+  let dayCol;
+  if (formatMode) {
+    const dow = calFmtMobileDay;
+    if (titleEl) titleEl.textContent = `Template: ${CAL_DOW[dow]}`;
+    if (filterEl) filterEl.style.display = 'none';
+    if (!gridEl) return;
+    dayCol = calDayColEl('cal-mobile-day-col cal-fmt-col', { dow });
+    calRenderFmtCol(dayCol, dow);
+  } else {
+    calPruneDays();
+    const days = calDisplayDays();
+    const day = days[Math.min(calMobileDay, days.length - 1)];
+    const key = calDateKey(day);
+    if (titleEl) titleEl.textContent = calFmtFull(day);
+    calRenderColorFilter(filterEl);
+    if (!gridEl) return;
+    dayCol = calDayColEl('cal-mobile-day-col', { dateKey: key });
+    calRenderDayCol(dayCol, key);
+  }
 
-  const titleEl = $('calDayTitle');
-  if (titleEl) titleEl.textContent = calFmtFull(day);
-  calRenderColorFilter($('calColorFilter-m'));
-
-  const gridEl = $('calMobileGrid');
-  if (!gridEl) return;
   gridEl.innerHTML = '';
-
   const body = document.createElement('div');
   body.className = 'cal-mobile-body';
   body.style.width = '100%';
-
   const timeCol = document.createElement('div');
   timeCol.className = 'cal-mobile-time-col';
   calBuildTimeCol(timeCol);
-
-  const dayCol = document.createElement('div');
-  dayCol.className = 'cal-mobile-day-col';
-  dayCol.dataset.dateKey = key;
-  calBuildLines(dayCol);
-  calRenderDayCol(dayCol, key);
-
   body.appendChild(timeCol);
   body.appendChild(dayCol);
   gridEl.appendChild(body);
-  setTimeout(() => { gridEl.scrollTop = 7 * CAL_HOUR_PX - 14; }, 50);
-}
-
-function calRenderMobileFmt() {
-  const dow = calFmtMobileDay;
-  const titleEl = $('calDayTitle');
-  if (titleEl) titleEl.textContent = `Template: ${CAL_DOW[dow]}`;
-  const filtM = $('calColorFilter-m');
-  if (filtM) filtM.style.display = 'none';
-
-  const gridEl = $('calMobileGrid');
-  if (!gridEl) return;
-  gridEl.innerHTML = '';
-
-  const body = document.createElement('div');
-  body.className = 'cal-mobile-body';
-  body.style.width = '100%';
-
-  const timeCol = document.createElement('div');
-  timeCol.className = 'cal-mobile-time-col';
-  calBuildTimeCol(timeCol);
-
-  const dayCol = document.createElement('div');
-  dayCol.className = 'cal-mobile-day-col cal-fmt-col';
-  dayCol.dataset.dow = dow;
-  calBuildLines(dayCol);
-  calRenderFmtCol(dayCol, dow);
-
-  body.appendChild(timeCol);
-  body.appendChild(dayCol);
-  gridEl.appendChild(body);
-  setTimeout(() => { gridEl.scrollTop = 7 * CAL_HOUR_PX - 14; }, 50);
+  calScrollToMorning(gridEl);
 }
 
 function calNavDay(dir) {
-  if (formatMode) {
-    calFmtMobileDay = Math.max(0, Math.min(6, calFmtMobileDay + dir));
-    calRenderMobileFmt();
-  } else {
-    calMobileDay = Math.max(0, Math.min(6, calMobileDay + dir));
-    calRenderMobile();
-  }
+  if (formatMode) calFmtMobileDay = Math.max(0, Math.min(6, calFmtMobileDay + dir));
+  else            calMobileDay    = Math.max(0, Math.min(6, calMobileDay + dir));
+  calRenderMobile();
 }
 
 function calToggleDesktop() {
@@ -4368,11 +4328,7 @@ function gcalDisconnect() {
 function gcalMakeEventEl(ev) {
   const el = document.createElement('div');
   el.className = 'cal-event gcal-event';
-  const startM = calTimeToMins(ev.start);
-  const endM   = calTimeToMins(ev.end);
-  const durM   = Math.max(15, endM - startM);
-  el.style.top        = calMinsToPx(startM) + 'px';
-  el.style.height     = calMinsToPx(durM) + 'px';
+  calPlaceEventEl(el, ev);
   el.style.background = ev.color + '22';
   el.style.borderLeft = `3px solid ${ev.color}`;
   el.style.color      = ev.color;
