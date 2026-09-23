@@ -445,9 +445,9 @@ function gatherState() {
   };
 }
 
-function applyState(state) {
-  const st = decompressState(state);
-  if (!st || st.version !== 1) { showToast('Invalid or unsupported file.'); return; }
+/* Copy a v1 state record into the live variables. No rendering: shared by
+ * the localStorage load (which every cloud apply goes through) and Import. */
+function hydrateState(st) {
   stateCaptureExtra(st);
   wokenUp = !!st.wokenUp;
   if (st.timerDefaults) TIMER_DEFAULTS = st.timerDefaults;
@@ -471,22 +471,37 @@ function applyState(state) {
   views = normalizeViews(st.views);
   theme = normalizeTheme(st.theme);
   digest = normalizeDigest(st.digest);
-  applyTheme();
-  budgetRollover();
   if (st.calendar) {
     calEvents     = st.calendar.calEvents     || {};
     calTemplates  = st.calendar.calTemplates  || [];
     calEventIdCtr = st.calendar.calEventIdCtr || 1;
-    calSave();
-    calPruneDays();
   }
+}
+
+/* After a whole state was swapped in (Import, or a copy from the cloud):
+ * settle it for today (calendar window, budget day) and redraw everything. */
+function renderLoadedState() {
+  calSave();
+  calPruneDays();
+  budgetRollover();
   syncWakeupUI();
   renderTimers();
   renderTodos();
   renderDbd();
   renderBudget();
   applyViewVisibility();
+  applyTheme();
+  renderThemeUI();
   calRefresh();
+  renderHome();
+  updateTimerSummary();
+}
+
+function applyState(state) {
+  const st = decompressState(state);
+  if (!st || st.version !== 1) { showToast('Invalid or unsupported file.'); return; }
+  hydrateState(st);
+  renderLoadedState();
   saveToLocal();
   showToast('State restored ✓');
 }
@@ -504,34 +519,7 @@ function loadFromLocal() {
     if (!raw) return false;
     const state = JSON.parse(raw);
     if (!state || state.version !== 1) return false;
-    stateCaptureExtra(state);
-    wokenUp = !!state.wokenUp;
-    if (state.timerDefaults) TIMER_DEFAULTS = state.timerDefaults;
-    timers = state.timers.map(t => ({
-      id: t.id, label: t.label, color: t.color,
-      seconds: t.seconds, running: t.running,
-      startedAt: t.startedAt, secondsAtStart: t.secondsAtStart,
-    }));
-    todoIdCounter = state.todoIdCounter ?? todoIdCounter;
-    taskIdCounter = state.taskIdCounter ?? taskIdCounter;
-    todoLists = state.todoLists.map(l => ({
-      id: l.id, title: l.title, color: l.color, isDefault: !!l.isDefault,
-      starred: !!l.starred,
-      activeDays: Array.isArray(l.activeDays) ? l.activeDays : null,
-      tasks: l.tasks.map(cloneTask)
-    }));
-    dbdTasks = (state.dbdTasks || []).map(t => ({ id: t.id, text: t.text, due: t.due, done: !!t.done, doneOn: t.doneOn }));
-    dbdIdCounter = state.dbdIdCounter ?? dbdIdCounter;
-    budget = normalizeBudget(state.budget);
-    purchaseIdCounter = state.purchaseIdCounter ?? purchaseIdCounter;
-    views = normalizeViews(state.views);
-    theme = normalizeTheme(state.theme);
-    digest = normalizeDigest(state.digest);
-    if (state.calendar) {
-      calEvents     = state.calendar.calEvents     || {};
-      calTemplates  = state.calendar.calTemplates  || [];
-      calEventIdCtr = state.calendar.calEventIdCtr || 1;
-    }
+    hydrateState(state);
     return true;
   } catch(e) {
     try { localStorage.removeItem(LS_KEY); } catch(_) {}
@@ -5104,20 +5092,7 @@ function syncApplyRemote(remoteStr, remoteUpdatedAt) {
   try {
     localStorage.setItem(LS_KEY, effective);
     if (!loadFromLocal()) return;             // corrupt payload — keep local
-    calSave();
-    calPruneDays();
-    budgetRollover();
-    syncWakeupUI();
-    renderTimers();
-    renderTodos();
-    renderDbd();
-    renderBudget();
-    applyViewVisibility();
-    applyTheme();
-    renderThemeUI();
-    calRefresh();
-    renderHome();
-    updateTimerSummary();
+    renderLoadedState();
     try { remoteFp = syncFingerprint(JSON.parse(remoteStr)); } catch(e) {}
   } finally {
     if (remoteFp) { syncLastSeenFp = remoteFp; syncAgree(remoteFp, { editAt: remoteUpdatedAt || Date.now() }); }
