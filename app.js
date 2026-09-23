@@ -1,9 +1,10 @@
 /* ═══════════════════════════════════════════════════════
    FOCUS — app.js
-   Sections: CONFIG · STATE · UTIL · PERSISTENCE · TIMERS ·
-   WAKEUP · TODOS · DRAG ENGINE · FORMAT MODE · FORMAT TEMPLATES · DATA ·
-   TASK↔CALENDAR LINKS · TABS · CALENDAR · GOOGLE CALENDAR · CLOUD SYNC ·
-   THEME · EMAIL DIGEST · BINDINGS · INIT
+   Sections: CONFIG · STATE · UTIL · PERSISTENCE · TIMERS · WAKEUP ·
+   TODO LISTS · DRAG ENGINE · FORMAT MODE · FORMAT TEMPLATES · DAY-BY-DAY ·
+   TASK↔CALENDAR LINKS · EXPORT/IMPORT · HOME · VIEWS + TABS · CALENDAR ·
+   GOOGLE CALENDAR · BUDGET · CLOUD SYNC · THEME · EMAIL DIGEST ·
+   BINDINGS · ONBOARDING · INIT
    ═══════════════════════════════════════════════════════ */
 
 /* ───────────────────────── CONFIG ───────────────────────── */
@@ -966,7 +967,7 @@ function parentTasksForList(list) {
   return out;
 }
 
-// Returns true when every task in the list is done (or the list has no tasks).
+// True when the list has tasks and every one of them is done (an empty list never is).
 function isListComplete(list) {
   return list.tasks.length > 0 && list.tasks.every(t => t.done);
 }

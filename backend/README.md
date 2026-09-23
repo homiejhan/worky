@@ -2,8 +2,8 @@
 
 The email digest, running on GitHub's free Actions runner instead of your laptop.
 Once a day the workflow restores a 4-bit Qwen3.5-4B (2.7 GB) from cache, starts
-`llama-server` on the runner, reads the last 24 hours of Gmail, builds the same
-five-section digest `app.js` builds, and drops the result into Firebase. The app
+`llama-server` on the runner, reads the last 24 hours of Gmail, builds the digest
+(five sections by default, see below), and drops the result into Firebase. The app
 merges it into the digest card and suggestion pool the next time it syncs.
 No paid API is involved; the recurring cost is $0.
 
@@ -11,6 +11,7 @@ No paid API is involved; the recurring cost is $0.
 backend/
 ├── digest.py         the pipeline (Gmail → llama-server → Firebase)
 ├── gmail_auth.py     one-time: prints the Gmail refresh token
+├── prompts.json      the original prompts and sections (the app's editor reads it too)
 ├── requirements.txt  requests + google-auth
 └── README.md
 .github/workflows/digest.yml   the daily cron
@@ -25,10 +26,13 @@ conflict resolution. The backend never writes there. It writes a sibling node:
 users/<uid>/digestInbox = { at, markdown, count, model, source: "github", tasks: [...] }
 ```
 
-`app.js` (`digestInboxSeen` / `digestInboxFlush`) watches for it, merges it exactly
-like a local run, saves, and the next sync push — which rewrites the user node —
-clears the inbox. If two digests land before a device syncs, only the newest is
-kept; that's a deliberate simplification.
+`app.js` (`digestInboxSeen` / `digestInboxFlush`) watches for it, and every device
+merges it for itself when it is newer than the digest that device holds. Sync
+pushes use `update()`, which leaves sibling nodes alone, so the inbox stays until
+the next run overwrites it: a device opened hours later still finds it. **Clear
+digest** records `clearedAt`, so the copy that stays behind doesn't pop back in.
+If two runs land before a device opens, only the newest is kept; that's a
+deliberate simplification.
 
 ## Prompts and sections
 

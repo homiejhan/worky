@@ -75,6 +75,7 @@ Device-local (localStorage): `focus-digest-ui` (collapsed), `focus-digest-github
 
 ```
 npm install                      # once (jsdom)
-node tests/test_digest.js        # state, pool, rendering, delivery merge, Run now against a fake GitHub API
-node tests/test_sync.js          # two devices converging: deliveries, a phone opening late, Clear, Import
+npm test                         # every suite in tests/
+node tests/test_digest.js        # just the digest: state, pool, rendering, delivery merge, Run now against a fake GitHub API
+node tests/test_sync.js          # just sync: two devices converging (deliveries, a phone opening late, Clear, Import)
 ```
