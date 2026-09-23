@@ -2,10 +2,10 @@
 """
 One-time setup: get a Gmail *refresh token* for the digest backend.
 
-Why this exists: the app's in-browser Gmail login hands out a token that dies
-after an hour, which is fine when you're sitting there but useless for a cron
-job. A refresh token is a long-lived credential the backend trades for a fresh
-one-hour token every run. You get it once, here, and store it as a secret.
+Why this exists: the digest runs as an unattended GitHub Actions job, with
+nobody there to sign in to Google. A refresh token is a long-lived credential
+the backend trades for a fresh one-hour token every run. You get it once, here,
+and store it as a secret.
 
 Steps (5 minutes):
   1. Google Cloud Console → APIs & Services → Credentials → Create credentials

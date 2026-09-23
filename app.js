@@ -1,9 +1,10 @@
 /* ═══════════════════════════════════════════════════════
    FOCUS — app.js
-   Sections: CONFIG · STATE · UTIL · PERSISTENCE · TIMERS ·
-   WAKEUP · TODOS · DRAG ENGINE · FORMAT MODE · FORMAT TEMPLATES · DATA ·
-   TASK↔CALENDAR LINKS · TABS · CALENDAR · GOOGLE CALENDAR · CLOUD SYNC ·
-   THEME · EMAIL DIGEST · BINDINGS · INIT
+   Sections: CONFIG · STATE · UTIL · PERSISTENCE · TIMERS · WAKEUP ·
+   TODO LISTS · DRAG ENGINE · FORMAT MODE · FORMAT TEMPLATES · DAY-BY-DAY ·
+   TASK↔CALENDAR LINKS · EXPORT/IMPORT · HOME · VIEWS + TABS · CALENDAR ·
+   GOOGLE CALENDAR · BUDGET · CLOUD SYNC · THEME · EMAIL DIGEST ·
+   BINDINGS · ONBOARDING · INIT
    ═══════════════════════════════════════════════════════ */
 
 /* ───────────────────────── CONFIG ───────────────────────── */
@@ -34,11 +35,9 @@ const FIREBASE_CONFIG = {
   projectId: "worky-b3e3a",
   appId: "1:996860584518:web:61b0638c1f8512c6786047",
 };
-/* Sign-in reuses the same Google OAuth client + redirect that the
- * Google Calendar connection already uses (proven to work in the
- * iOS PWA). The `state` tag tells the two redirect handlers apart. */
-const SYNC_CLIENT_ID   = GCAL_CLIENT_ID;
-const SYNC_REDIRECT    = GCAL_REDIRECT;
+/* Sign-in reuses the Google OAuth client + redirect of the Google Calendar
+ * connection (GCAL_CLIENT_ID / GCAL_REDIRECT, proven to work in the iOS PWA).
+ * The `state` tag tells the two redirect handlers apart. */
 const SYNC_STATE_TAG   = 'worky-sync';
 const SYNC_META_LS_KEY = 'focus-sync-meta';
 
@@ -61,6 +60,7 @@ let TIMER_DEFAULTS = [
 
 let formatMode = false;
 let formatTimerIdCounter = 900;
+let preFormatTimerState = [];   // live timer progress, parked while Formats shows the defaults
 let wokenUp = false;
 let theme = null;          // normalized theme record (see THEME section)
 
@@ -136,8 +136,9 @@ let budget = {
 };
 let purchaseIdCounter = 1;
 
-/* view visibility — which sections appear in the UI.
- * 'home' is always on and is not stored. */
+/* view visibility — which sections appear in the UI, in tab-bar order.
+ * 'home' is always on and is not stored. On mobile every view is one swipe
+ * panel, and currentView holds the key of the one showing. */
 const VIEW_DEFS = [
   { key: 'home',     label: 'Home' },
   { key: 'timers',   label: 'Timers' },
@@ -147,18 +148,6 @@ const VIEW_DEFS = [
   { key: 'budget',   label: 'Budget' },
 ];
 let views = { timers: true, daily: true, lists: true, calendar: true, budget: true };
-
-/* Mobile swipe panels, in tab-bar order. Every view has its own panel
- * (Daily used to share the Lists panel). A panel is visible when any of
- * the views it hosts is on. currentView holds a panel key. */
-const MOBILE_PANELS = [
-  { key: 'home',     views: ['home'] },
-  { key: 'timers',   views: ['timers'] },
-  { key: 'lists',    views: ['lists'] },
-  { key: 'daily',    views: ['daily'] },
-  { key: 'calendar', views: ['calendar'] },
-  { key: 'budget',   views: ['budget'] },
-];
 let currentView = 'home';
 
 /* Desktop: Lists and Daily are separate pages that share the right panel.
@@ -166,12 +155,13 @@ let currentView = 'home';
  * Budget) is covering it. */
 let desktopPage = 'lists';
 
-/* misc */
-let currentTab = 0;   // index within the currently visible tabs
-let preFormatTimerState = [];
-
 /* ───────────────────────── UTIL ───────────────────────── */
 function $(id) { return document.getElementById(id); }
+/* Which layout the CSS is showing (the breakpoint lives in style.css). */
+function isMobileLayout() {
+  const m = $('mobileApp');
+  return !!m && getComputedStyle(m).display !== 'none';
+}
 
 function fmt(s) {
   s = Math.max(0, Math.round(s));
@@ -198,6 +188,7 @@ const DOTS_SVG = '<svg width="4" height="14" viewBox="0 0 4 14" fill="none"><cir
 const SYNC_SVG  = '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M5.8 8.2a2.4 2.4 0 0 1 0-3.4l1.5-1.5a2.4 2.4 0 0 1 3.4 3.4l-.8.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M8.2 5.8a2.4 2.4 0 0 1 0 3.4l-1.5 1.5a2.4 2.4 0 0 1-3.4-3.4l.8-.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
 // Badge shown on a task that has a linked child list, and on the child list header.
 const CHILD_SVG = '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><rect x="1" y="1.5" width="12" height="3.5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="9" width="12" height="3.5" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M7 5v4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+const CHECK_SVG = '<svg width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const STAR_SVG  = '<svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 1.3l1.75 3.55 3.92.57-2.84 2.77.67 3.9L7 10.25l-3.5 1.84.67-3.9L1.33 5.42l3.92-.57L7 1.3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none" class="star-path"/></svg>';
 
 /* Plain-object task copy that keeps the optional due/doneOn fields
@@ -226,6 +217,10 @@ function showToast(msg) {
 function calToday() { const d = new Date(); d.setHours(0,0,0,0); return d; }
 function calDateKey(d) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function calKeyToDate(key) {   // 'YYYY-MM-DD' → local midnight
+  const [y, m, d] = String(key).split('-').map(Number);
+  return new Date(y, m - 1, d);
 }
 function calRollingDays() {
   const t = calToday();
@@ -445,9 +440,9 @@ function gatherState() {
   };
 }
 
-function applyState(state) {
-  const st = decompressState(state);
-  if (!st || st.version !== 1) { showToast('Invalid or unsupported file.'); return; }
+/* Copy a v1 state record into the live variables. No rendering: shared by
+ * the localStorage load (which every cloud apply goes through) and Import. */
+function hydrateState(st) {
   stateCaptureExtra(st);
   wokenUp = !!st.wokenUp;
   if (st.timerDefaults) TIMER_DEFAULTS = st.timerDefaults;
@@ -471,22 +466,37 @@ function applyState(state) {
   views = normalizeViews(st.views);
   theme = normalizeTheme(st.theme);
   digest = normalizeDigest(st.digest);
-  applyTheme();
-  budgetRollover();
   if (st.calendar) {
     calEvents     = st.calendar.calEvents     || {};
     calTemplates  = st.calendar.calTemplates  || [];
     calEventIdCtr = st.calendar.calEventIdCtr || 1;
-    calSave();
-    calPruneDays();
   }
+}
+
+/* After a whole state was swapped in (Import, or a copy from the cloud):
+ * settle it for today (calendar window, budget day) and redraw everything. */
+function renderLoadedState() {
+  calSave();
+  calPruneDays();
+  budgetRollover();
   syncWakeupUI();
   renderTimers();
   renderTodos();
   renderDbd();
   renderBudget();
   applyViewVisibility();
+  applyTheme();
+  renderThemeUI();
   calRefresh();
+  renderHome();
+  updateTimerSummary();
+}
+
+function applyState(state) {
+  const st = decompressState(state);
+  if (!st || st.version !== 1) { showToast('Invalid or unsupported file.'); return; }
+  hydrateState(st);
+  renderLoadedState();
   saveToLocal();
   showToast('State restored ✓');
 }
@@ -504,34 +514,7 @@ function loadFromLocal() {
     if (!raw) return false;
     const state = JSON.parse(raw);
     if (!state || state.version !== 1) return false;
-    stateCaptureExtra(state);
-    wokenUp = !!state.wokenUp;
-    if (state.timerDefaults) TIMER_DEFAULTS = state.timerDefaults;
-    timers = state.timers.map(t => ({
-      id: t.id, label: t.label, color: t.color,
-      seconds: t.seconds, running: t.running,
-      startedAt: t.startedAt, secondsAtStart: t.secondsAtStart,
-    }));
-    todoIdCounter = state.todoIdCounter ?? todoIdCounter;
-    taskIdCounter = state.taskIdCounter ?? taskIdCounter;
-    todoLists = state.todoLists.map(l => ({
-      id: l.id, title: l.title, color: l.color, isDefault: !!l.isDefault,
-      starred: !!l.starred,
-      activeDays: Array.isArray(l.activeDays) ? l.activeDays : null,
-      tasks: l.tasks.map(cloneTask)
-    }));
-    dbdTasks = (state.dbdTasks || []).map(t => ({ id: t.id, text: t.text, due: t.due, done: !!t.done, doneOn: t.doneOn }));
-    dbdIdCounter = state.dbdIdCounter ?? dbdIdCounter;
-    budget = normalizeBudget(state.budget);
-    purchaseIdCounter = state.purchaseIdCounter ?? purchaseIdCounter;
-    views = normalizeViews(state.views);
-    theme = normalizeTheme(state.theme);
-    digest = normalizeDigest(state.digest);
-    if (state.calendar) {
-      calEvents     = state.calendar.calEvents     || {};
-      calTemplates  = state.calendar.calTemplates  || [];
-      calEventIdCtr = state.calendar.calEventIdCtr || 1;
-    }
+    hydrateState(state);
     return true;
   } catch(e) {
     try { localStorage.removeItem(LS_KEY); } catch(_) {}
@@ -555,11 +538,12 @@ function calLoad() {
 
 /* ───────────────────────── TIMERS ───────────────────────── */
 function timerById(id) { return timers.find(x => x.id === id); }
+/* A timer's default (template) record: TIMER_DEFAULTS runs parallel to timers. */
+function timerDefault(id) { return TIMER_DEFAULTS[timers.findIndex(x => x.id === id)]; }
 
 /* Fraction of the timer's default budget still remaining (0–1). */
 function timerPct(t) {
-  const idx = timers.findIndex(x => x.id === t.id);
-  const def = TIMER_DEFAULTS[idx];
+  const def = timerDefault(t.id);
   const total = def && def.seconds > 0 ? def.seconds : (t.secondsAtStart || t.seconds || 0);
   if (!total) return 0;
   return Math.max(0, Math.min(1, getRemaining(t) / total));
@@ -619,10 +603,8 @@ function setTimerLabel(id, value) {
   const t = timerById(id);
   if (!t) return;
   t.label = value;
-  if (formatMode) {
-    const idx = timers.findIndex(x => x.id === id);
-    if (TIMER_DEFAULTS[idx]) TIMER_DEFAULTS[idx].label = value;
-  }
+  const def = timerDefault(id);
+  if (formatMode && def) def.label = value;
   saveToLocal();
 }
 
@@ -631,10 +613,8 @@ function changeTimerColor(id, color) {
   const t = timerById(id);
   if (!t) return;
   t.color = color;
-  if (formatMode) {
-    const idx = timers.findIndex(x => x.id === id);
-    if (TIMER_DEFAULTS[idx]) TIMER_DEFAULTS[idx].color = color;
-  }
+  const def = timerDefault(id);
+  if (formatMode && def) def.color = color;
   document.querySelectorAll(`.tbar-${id}`).forEach(el => el.style.background = color);
   saveToLocal();
 }
@@ -674,7 +654,7 @@ function startEditTimer(id, pfx) {
   const edit = document.querySelector(`.tedit-${id}-${pfx}`);
   if (edit) {
     edit.style.display = 'block';
-    edit.value = fmt(formatMode ? t.seconds : t.seconds);
+    edit.value = fmt(t.seconds);
     edit.focus(); edit.select();
   }
 }
@@ -688,10 +668,8 @@ function commitEditTimer(id, pfx) {
     if (!isNaN(parsed) && parsed >= 0) {
       t.seconds = parsed;
       if (t.running) { t.startedAt = Date.now(); t.secondsAtStart = parsed; }
-      if (formatMode) {
-        const idx = timers.findIndex(x => x.id === id);
-        if (TIMER_DEFAULTS[idx]) TIMER_DEFAULTS[idx].seconds = parsed;
-      }
+      const def = timerDefault(id);
+      if (formatMode && def) def.seconds = parsed;
     }
     edit.style.display = 'none';
   }
@@ -706,8 +684,7 @@ function commitEditTimer(id, pfx) {
 function resetTimer(id) {
   const t = timerById(id);
   if (!t) return;
-  const idx = timers.findIndex(x => x.id === id);
-  const def = TIMER_DEFAULTS[idx];
+  const def = timerDefault(id);
   t.running = false;
   t.seconds = def ? def.seconds : t.seconds;
   t.startedAt = null;
@@ -844,9 +821,7 @@ function buildCard(list, pfx) {
         ${rowHandle}
         <div class="task-check task-checks-${task.id} ${task.done?'done':''}" style="${checkStyle}"
           onclick="toggleTask(${list.id},${task.id})">
-          <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
-            <path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
+          ${CHECK_SVG}
         </div>
         <input class="task-text task-text-${task.id} ${task.done?'done':''}"
           value="${escAttr(task.text)}" placeholder="Task…"
@@ -896,8 +871,7 @@ const CALICON_SVG = '<svg width="11" height="11" viewBox="0 0 12 12" fill="none"
 
 function taskDateChipLabel(due) {
   const today = calToday();
-  const [y, m, d] = due.split('-').map(Number);
-  const date = new Date(y, m - 1, d);
+  const date = calKeyToDate(due);
   const diff = Math.round((date - today) / 86400000);
   if (diff === 0) return 'Today';
   if (diff === 1) return 'Tmrw';
@@ -993,7 +967,7 @@ function parentTasksForList(list) {
   return out;
 }
 
-// Returns true when every task in the list is done (or the list has no tasks).
+// True when the list has tasks and every one of them is done (an empty list never is).
 function isListComplete(list) {
   return list.tasks.length > 0 && list.tasks.every(t => t.done);
 }
@@ -1918,8 +1892,7 @@ function dbdTodayKey() { return calDateKey(calToday()); }
 
 function dbdLabelFor(key) {
   const today = calToday();
-  const [y, m, d] = key.split('-').map(Number);
-  const date = new Date(y, m - 1, d);
+  const date = calKeyToDate(key);
   const diff = Math.round((date - today) / 86400000);
   if (diff === 0)  return 'Today';
   if (diff === 1)  return 'Tomorrow';
@@ -2098,9 +2071,7 @@ function dbdRowHtml(entry, overdue, showDate) {
          data-list-id="${list.id}" data-task-id="${t.id}">
       <div class="task-check dbd-check task-checks-${t.id} ${t.done ? 'done' : ''}" style="${checkStyle}"
         onclick="toggleTask(${list.id},${t.id})">
-        <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
-          <path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        ${CHECK_SVG}
       </div>
       <input class="task-text task-text-${t.id} ${t.done ? 'done' : ''}" value="${escAttr(t.text)}" placeholder="Task…"
         oninput="setTaskText(${list.id},${t.id},this.value)"
@@ -2114,9 +2085,7 @@ function dbdRowHtml(entry, overdue, showDate) {
   return `
     <div class="task-row dbd-row ${overdue ? 'dbd-overdue-row' : ''}" data-dbd-id="${t.id}">
       <div class="task-check dbd-check ${t.done ? 'done' : ''}" onclick="toggleDbdTask(${t.id})">
-        <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
-          <path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        ${CHECK_SVG}
       </div>
       <input class="task-text ${t.done ? 'done' : ''}" value="${escAttr(t.text)}" placeholder="Task…"
         oninput="setDbdText(${t.id}, this.value)"
@@ -2131,11 +2100,10 @@ function dbdRowHtml(entry, overdue, showDate) {
 function renderDbd() {
   const todayKey = dbdTodayKey();
   const all = dbdAllEntries();
-  const byDue = dbdCompare;
 
-  const overdue   = all.filter(e => !e.task.done && e.task.due < todayKey).sort(byDue);
-  const upcoming  = all.filter(e => e.task.due >= todayKey).sort(byDue);
-  const donePast  = all.filter(e => e.task.done && e.task.due < todayKey).sort(byDue);
+  const overdue   = all.filter(e => !e.task.done && e.task.due < todayKey).sort(dbdCompare);
+  const upcoming  = all.filter(e => e.task.due >= todayKey).sort(dbdCompare);
+  const donePast  = all.filter(e => e.task.done && e.task.due < todayKey).sort(dbdCompare);
 
   // Group upcoming by due-date key, preserving ascending order.
   const groups = [];
@@ -2522,14 +2490,20 @@ function taskLinkRenderEvents() {
   });
 }
 
-/* Core: attach `ref` (default: modal task) to an existing local event. */
-async function taskLinkAttach(ref, dateKey, ev, { silent } = {}) {
-  const res = taskLinkResolveTask(ref);
-  if (!res || !ev) return false;
+/* Link the task `res` (resolved from `ref`) to `ev` on `dateKey`: the event
+ * takes the task's name and the task moves to the event's day. */
+function taskLinkBind(ref, res, ev, dateKey) {
   taskLinkClearAll(ref, ev);          // a task links to one event only
   taskLinkSetOnEvent(ev, ref);
   ev.title = res.task.text;
   if (res.task.due !== dateKey) res.task.due = dateKey;   // undated list task → Day by Day
+}
+
+/* Core: attach `ref` (default: modal task) to an existing local event. */
+async function taskLinkAttach(ref, dateKey, ev, { silent } = {}) {
+  const res = taskLinkResolveTask(ref);
+  if (!res || !ev) return false;
+  taskLinkBind(ref, res, ev, dateKey);
   calSave();
   calRefresh();
   renderTodos();
@@ -2651,10 +2625,7 @@ function taskLinkApplyFromModal(ev, dateKey) {
   const ref = taskLinkParseOption(sel.value);
   const res = taskLinkResolveTask(ref);
   if (!res) { taskLinkSetOnEvent(ev, null); return; }
-  taskLinkClearAll(ref, ev);
-  taskLinkSetOnEvent(ev, ref);
-  ev.title = res.task.text;
-  if (res.task.due !== dateKey) res.task.due = dateKey;
+  taskLinkBind(ref, res, ev, dateKey);
   renderTodos();
   renderDbd();
 }
@@ -2809,9 +2780,6 @@ function confirmClearStorage() {
  * live-update hooks keep it fresh: tickAll drives .tdisp-N timer text, and
  * paintTaskState drives .task-checks-N / .task-text-N on starred lists. */
 let homeDesktopOpen = false;
-
-const HOME_CHECK_SVG = `<svg width="9" height="9" viewBox="0 0 9 9" fill="none">
-  <path d="M1.5 4.5L3.5 6.5L7.5 2.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
 /* Keep the sidebar nav in step with whichever desktop panel is showing. */
 function desktopNavSync() {
@@ -2969,7 +2937,7 @@ function homeDbdRow(entry, tone) {
   return `
     <div class="task-row home-dbd-row home-tone-${tone}">
       <div class="task-check home-dbd-check ${tagged ? `task-checks-${t.id} ` : ''}${t.done ? 'done' : ''}"${checkStyle} onclick="${toggle}">
-        ${HOME_CHECK_SVG}
+        ${CHECK_SVG}
       </div>
       ${tagDot}
       <span class="home-task-text ${tagged ? `task-text-${t.id} ` : ''}${t.done ? 'done' : ''}">${escAttr(t.text)}</span>
@@ -2981,10 +2949,9 @@ function homeDbdRow(entry, tone) {
 function homeDbdHtml() {
   const todayKey = dbdTodayKey();
   const all = dbdAllEntries();
-  const byDue = dbdCompare;
-  const overdue  = all.filter(e => !e.task.done && e.task.due <  todayKey).sort(byDue);
-  const today    = all.filter(e =>                 e.task.due === todayKey).sort(byDue);
-  const upcoming = all.filter(e => !e.task.done && e.task.due >  todayKey).sort(byDue).slice(0, 3);
+  const overdue  = all.filter(e => !e.task.done && e.task.due <  todayKey).sort(dbdCompare);
+  const today    = all.filter(e =>                 e.task.due === todayKey).sort(dbdCompare);
+  const upcoming = all.filter(e => !e.task.done && e.task.due >  todayKey).sort(dbdCompare).slice(0, 3);
   if (!overdue.length && !today.length && !upcoming.length) return '';
   const emptyToday = (!overdue.length && !today.length)
     ? '<div class="home-muted-note">Nothing due today.</div>' : '';
@@ -3008,7 +2975,7 @@ function homeListCard(list) {
       <div class="task-row home-list-row">
         <div class="task-check task-checks-${task.id} ${task.done ? 'done' : ''}" style="${checkStyle}"
           onclick="toggleTask(${list.id},${task.id})">
-          ${HOME_CHECK_SVG}
+          ${CHECK_SVG}
         </div>
         <span class="home-task-text task-text-${task.id} ${task.done ? 'done' : ''}">${escAttr(task.text)}</span>
       </div>`;
@@ -3133,17 +3100,9 @@ function viewEnabled(key) {
   return views[key] !== false;
 }
 function visibleViews() { return VIEW_DEFS.filter(v => viewEnabled(v.key)); }
-
-/* Mobile panel helpers — see MOBILE_PANELS. */
-function panelForView(key) {
-  const p = MOBILE_PANELS.find(p => p.views.includes(key));
-  return p ? p.key : key;
-}
-function panelEnabled(key) {
-  const p = MOBILE_PANELS.find(p => p.key === key);
-  return !!p && p.views.some(viewEnabled);
-}
-function visiblePanels() { return MOBILE_PANELS.filter(p => panelEnabled(p.key)); }
+/* Mobile: is there a swipe panel showing for this key? Unlike viewEnabled,
+ * a key that isn't a view at all counts as off. */
+function panelEnabled(key) { return VIEW_DEFS.some(v => v.key === key) && viewEnabled(key); }
 
 /* Show/hide every element tagged with data-view, close any desktop overlay
  * whose view was just disabled, and rebuild the mobile tab strip. */
@@ -3185,26 +3144,20 @@ function setSwipePanelWidths() {
     b.style.display = on ? '' : 'none';
     b.classList.toggle('active', b.dataset.view === currentView);
   });
-  const vis = visiblePanels();
+  const vis = visibleViews();
   const idx = Math.max(0, vis.findIndex(v => v.key === currentView));
   if (track) {
     track.style.width = (w * vis.length) + 'px';
     track.style.transition = 'none';
     track.style.transform = `translateX(${-idx * w}px)`;
   }
-  currentTab = idx;
 }
 
-/* Accepts a view key ('budget', 'daily') or a legacy numeric index.
- * View keys are mapped to the mobile panel that hosts them. */
-function goTab(target, animate) {
-  let key = (typeof target === 'number') ? (VIEW_DEFS[target] || {}).key : target;
-  key = panelForView(key);
-  if (!key || !panelEnabled(key)) key = 'home';
+/* Mobile: slide to a view's panel (Home when that view is off). */
+function goTab(key, animate) {
+  if (!panelEnabled(key)) key = 'home';
   currentView = key;
-  const vis = visiblePanels();
-  const idx = Math.max(0, vis.findIndex(v => v.key === key));
-  currentTab = idx;
+  const idx = Math.max(0, visibleViews().findIndex(v => v.key === key));
   const w = swipeFrameWidth();
   const track = $('swipeTrack');
   if (track) {
@@ -3222,8 +3175,7 @@ function goTab(target, animate) {
 /* Total-balance chip on Home opens Budget on whichever layout is active. */
 function openBudgetTab() {
   if (!viewEnabled('budget')) return;
-  const mobile = $('mobileApp') && getComputedStyle($('mobileApp')).display !== 'none';
-  if (mobile) goTab('budget', true);
+  if (isMobileLayout()) goTab('budget', true);
   else budgetToggleDesktop(true);
 }
 
@@ -3367,7 +3319,7 @@ function initSwipe() {
     const dx = e.changedTouches[0].clientX - sx;
     const dy = e.changedTouches[0].clientY - sy;
     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
-      const vis = visiblePanels();
+      const vis = visibleViews();
       const at = Math.max(0, vis.findIndex(v => v.key === currentView));
       const next = dx < 0 ? Math.min(at + 1, vis.length - 1) : Math.max(at - 1, 0);
       goTab(vis[next].key, true);
@@ -3427,7 +3379,7 @@ function initViewportGuard() {
 /* ───────────────────────── CALENDAR ───────────────────────── */
 function calEnsureDay(key) {
   if (!calEvents[key]) {
-    const dow = new Date(key + 'T00:00:00').getDay();
+    const dow = calKeyToDate(key).getDay();
     calEvents[key] = calTemplates
       .filter(t => t.repeatDays && t.repeatDays.includes(dow))
       .map(t => ({ ...t, id: calEventIdCtr++, fromTemplate: true, templateId: t.id }));
@@ -3486,6 +3438,13 @@ function calBuildNowLine(col) {
 }
 
 /* ── event element ── */
+/* Position an event block on the day grid (never shorter than 15 minutes). */
+function calPlaceEventEl(el, ev) {
+  const startM = calTimeToMins(ev.start);
+  el.style.top    = calMinsToPx(startM) + 'px';
+  el.style.height = calMinsToPx(Math.max(15, calTimeToMins(ev.end) - startM)) + 'px';
+}
+
 function calMakeEventEl(ev, dateKeyOrDow, isFmtMode) {
   const el = document.createElement('div');
   if (ev.type === 'divider') {
@@ -3504,11 +3463,7 @@ function calMakeEventEl(ev, dateKeyOrDow, isFmtMode) {
   } else {
     el.className = 'cal-event';
     el.dataset.evId = ev.id;
-    const startM = calTimeToMins(ev.start);
-    const endM   = calTimeToMins(ev.end);
-    const durM   = Math.max(15, endM - startM);
-    el.style.top    = calMinsToPx(startM) + 'px';
-    el.style.height = calMinsToPx(durM) + 'px';
+    calPlaceEventEl(el, ev);
     el.style.background = ev.color + '33';
     el.style.borderLeft = `3px solid ${ev.color}`;
     el.style.color = ev.color;
@@ -3568,11 +3523,8 @@ function bindCalEventDrag(el, ev, dateKeyOrDow, isFmtMode) {
 
       // grab offset within the event so the drop lands where it visually sits
       const ghostTop = ghost ? parseFloat(ghost.style.top) : y;
-      const colRect  = col.getBoundingClientRect();
-      const localY   = ghostTop - colRect.top;
-      const sc = col.closest('.cal-scroll-area, .cal-grid-wrap');
-      const scrollAdj = 0; // colRect already reflects scroll position
-      const mins = calPxToMins(localY + scrollAdj);
+      const colRect  = col.getBoundingClientRect();   // already reflects the scroll position
+      const mins = calPxToMins(ghostTop - colRect.top);
 
       if (isFmtMode || formatMode) {
         const toDow = parseInt(col.dataset.dow);
@@ -3587,18 +3539,23 @@ function bindCalEventDrag(el, ev, dateKeyOrDow, isFmtMode) {
   });
 }
 
+/* Where an event or template dropped at `startMins` lands: same length (at
+ * least 15 minutes; dividers have none), kept inside the day. */
+function calSlotAt(item, startMins) {
+  const dur = item.type === 'divider' ? 0 : Math.max(15, calTimeToMins(item.end) - calTimeToMins(item.start));
+  const start = Math.max(0, Math.min(1440 - dur, startMins));
+  return { start: calMinsToStr(start), end: calMinsToStr(start + dur) };
+}
+
 function calMoveEvent(evId, fromKey, toKey, newStartMins) {
   const list = calEvents[fromKey] || [];
   const ev = list.find(e => e.id === evId);
   if (!ev) return;
-  const dur = ev.type === 'divider' ? 0 : Math.max(15, calTimeToMins(ev.end) - calTimeToMins(ev.start));
-  const start = Math.max(0, Math.min(1440 - dur, newStartMins));
   calEvents[fromKey] = list.filter(e => e.id !== evId);
   calEnsureDay(toKey);
   const moved = {
     ...ev,
-    start: calMinsToStr(start),
-    end:   calMinsToStr(start + dur),
+    ...calSlotAt(ev, newStartMins),
     fromTemplate: toKey !== fromKey ? false : ev.fromTemplate,
   };
   calEvents[toKey].push(moved);
@@ -3610,14 +3567,11 @@ function calMoveEvent(evId, fromKey, toKey, newStartMins) {
 function calMoveTemplate(tmplId, fromDow, toDow, newStartMins) {
   const tmpl = calTemplates.find(t => t.id === tmplId);
   if (!tmpl) return;
-  const dur = tmpl.type === 'divider' ? 0 : Math.max(15, calTimeToMins(tmpl.end) - calTimeToMins(tmpl.start));
-  const start = Math.max(0, Math.min(1440 - dur, newStartMins));
   if (fromDow !== null && fromDow !== toDow) {
     tmpl.repeatDays = (tmpl.repeatDays || []).filter(d => d !== fromDow);
     if (!tmpl.repeatDays.includes(toDow)) tmpl.repeatDays.push(toDow);
   }
-  tmpl.start = calMinsToStr(start);
-  tmpl.end   = calMinsToStr(start + dur);
+  Object.assign(tmpl, calSlotAt(tmpl, newStartMins));
   reseedTemplate(tmpl);
   calRefresh();
   calSave();
@@ -3715,15 +3669,31 @@ function calRenderColorFilter(el) {
   });
 }
 
-/* ── desktop render ── */
-function calRenderDesktop() {
-  if (formatMode) { calRenderDesktopFmt(); return; }
-  const days = calDisplayDays();
-  calPruneDays();
+/* An hour-lined day column: { dateKey } for a real day, { dow } for a template day. */
+function calDayColEl(className, data) {
+  const col = document.createElement('div');
+  col.className = className;
+  Object.assign(col.dataset, data);
+  calBuildLines(col);
+  return col;
+}
+/* Scroll a grid to just before 7am once it has laid out. */
+function calScrollToMorning(el) {
+  setTimeout(() => { if (el) el.scrollTop = 7 * CAL_HOUR_PX - 14; }, 50);
+}
 
-  const titleEl = $('calDesktopTitle');
-  if (titleEl) titleEl.textContent = calFmtFull(calToday());
-  calRenderColorFilter($('calColorFilter-d'));
+/* ── desktop render: the 7-day week, or the template week while Formats is open ── */
+function calRenderDesktop() {
+  const titleEl  = $('calDesktopTitle');
+  const filterEl = $('calColorFilter-d');
+  if (formatMode) {
+    if (titleEl) titleEl.textContent = 'Template week — Sun through Sat';
+    if (filterEl) filterEl.style.display = 'none';
+  } else {
+    calPruneDays();
+    if (titleEl) titleEl.textContent = calFmtFull(calToday());
+    calRenderColorFilter(filterEl);
+  }
 
   const daysEl = $('calDesktopDays');
   const gridEl = $('calDesktopGrid');
@@ -3736,147 +3706,86 @@ function calRenderDesktop() {
   gridEl.innerHTML = '';
   calBuildTimeCol(timeEl);
 
-  days.forEach(day => {
-    const key = calDateKey(day);
-    const isToday = key === calDateKey(calToday());
-
+  const addHeader = (name, date, isToday) => {
     const hdr = document.createElement('div');
     hdr.className = 'cal-day-header' + (isToday ? ' today' : '');
     const hName = document.createElement('div');
-    hName.textContent = calFmtShort(day);
-    const hDate = document.createElement('div');
-    hDate.className = 'cal-day-header-date';
-    hDate.textContent = day.getDate();
-    hdr.appendChild(hName);
-    hdr.appendChild(hDate);
-    daysEl.appendChild(hdr);
-
-    const col = document.createElement('div');
-    col.className = 'cal-day-col' + (isToday ? ' today-col' : '');
-    col.dataset.dateKey = key;
-    calBuildLines(col);
-    calRenderDayCol(col, key);
-    gridEl.appendChild(col);
-  });
-
-  gridEl.style.height = CAL_TOTAL_PX + 'px';
-  const sc = $('calScrollArea');
-  setTimeout(() => { if (sc) sc.scrollTop = 7 * CAL_HOUR_PX - 14; }, 50);
-}
-
-function calRenderDesktopFmt() {
-  const titleEl = $('calDesktopTitle');
-  if (titleEl) titleEl.textContent = 'Template week — Sun through Sat';
-  const filtD = $('calColorFilter-d');
-  if (filtD) filtD.style.display = 'none';
-
-  const daysEl = $('calDesktopDays');
-  const gridEl = $('calDesktopGrid');
-  const timeEl = $('calTimeCol');
-  if (!daysEl || !gridEl || !timeEl) return;
-
-  daysEl.style.gridTemplateColumns = 'repeat(7,1fr)';
-  daysEl.innerHTML = '';
-  gridEl.style.gridTemplateColumns = 'repeat(7,1fr)';
-  gridEl.innerHTML = '';
-  calBuildTimeCol(timeEl);
-
-  CAL_DOW.forEach((name, dow) => {
-    const hdr = document.createElement('div');
-    hdr.className = 'cal-day-header';
-    const hName = document.createElement('div');
     hName.textContent = name;
     hdr.appendChild(hName);
+    if (date) {
+      const hDate = document.createElement('div');
+      hDate.className = 'cal-day-header-date';
+      hDate.textContent = date;
+      hdr.appendChild(hDate);
+    }
     daysEl.appendChild(hdr);
+  };
 
-    const col = document.createElement('div');
-    col.className = 'cal-day-col cal-fmt-col';
-    col.dataset.dow = dow;
-    calBuildLines(col);
-    calRenderFmtCol(col, dow);
-    gridEl.appendChild(col);
-  });
+  if (formatMode) {
+    CAL_DOW.forEach((name, dow) => {
+      addHeader(name);
+      const col = calDayColEl('cal-day-col cal-fmt-col', { dow });
+      calRenderFmtCol(col, dow);
+      gridEl.appendChild(col);
+    });
+  } else {
+    const todayKey = calDateKey(calToday());
+    calDisplayDays().forEach(day => {
+      const key = calDateKey(day);
+      const isToday = key === todayKey;
+      addHeader(calFmtShort(day), day.getDate(), isToday);
+      const col = calDayColEl('cal-day-col' + (isToday ? ' today-col' : ''), { dateKey: key });
+      calRenderDayCol(col, key);
+      gridEl.appendChild(col);
+    });
+  }
 
   gridEl.style.height = CAL_TOTAL_PX + 'px';
-  const sc = $('calScrollArea');
-  setTimeout(() => { if (sc) sc.scrollTop = 7 * CAL_HOUR_PX - 14; }, 50);
+  calScrollToMorning($('calScrollArea'));
 }
 
-/* ── mobile render ── */
+/* ── mobile render: one day, or one template day while Formats is open ── */
 function calRenderMobile() {
-  if (formatMode) { calRenderMobileFmt(); return; }
-  calPruneDays();
-  const days = calDisplayDays();
-  const day = days[Math.min(calMobileDay, days.length - 1)];
-  const key = calDateKey(day);
+  const titleEl  = $('calDayTitle');
+  const filterEl = $('calColorFilter-m');
+  const gridEl   = $('calMobileGrid');
+  let dayCol;
+  if (formatMode) {
+    const dow = calFmtMobileDay;
+    if (titleEl) titleEl.textContent = `Template: ${CAL_DOW[dow]}`;
+    if (filterEl) filterEl.style.display = 'none';
+    if (!gridEl) return;
+    dayCol = calDayColEl('cal-mobile-day-col cal-fmt-col', { dow });
+    calRenderFmtCol(dayCol, dow);
+  } else {
+    calPruneDays();
+    const days = calDisplayDays();
+    const day = days[Math.min(calMobileDay, days.length - 1)];
+    const key = calDateKey(day);
+    if (titleEl) titleEl.textContent = calFmtFull(day);
+    calRenderColorFilter(filterEl);
+    if (!gridEl) return;
+    dayCol = calDayColEl('cal-mobile-day-col', { dateKey: key });
+    calRenderDayCol(dayCol, key);
+  }
 
-  const titleEl = $('calDayTitle');
-  if (titleEl) titleEl.textContent = calFmtFull(day);
-  calRenderColorFilter($('calColorFilter-m'));
-
-  const gridEl = $('calMobileGrid');
-  if (!gridEl) return;
   gridEl.innerHTML = '';
-
   const body = document.createElement('div');
   body.className = 'cal-mobile-body';
   body.style.width = '100%';
-
   const timeCol = document.createElement('div');
   timeCol.className = 'cal-mobile-time-col';
   calBuildTimeCol(timeCol);
-
-  const dayCol = document.createElement('div');
-  dayCol.className = 'cal-mobile-day-col';
-  dayCol.dataset.dateKey = key;
-  calBuildLines(dayCol);
-  calRenderDayCol(dayCol, key);
-
   body.appendChild(timeCol);
   body.appendChild(dayCol);
   gridEl.appendChild(body);
-  setTimeout(() => { gridEl.scrollTop = 7 * CAL_HOUR_PX - 14; }, 50);
-}
-
-function calRenderMobileFmt() {
-  const dow = calFmtMobileDay;
-  const titleEl = $('calDayTitle');
-  if (titleEl) titleEl.textContent = `Template: ${CAL_DOW[dow]}`;
-  const filtM = $('calColorFilter-m');
-  if (filtM) filtM.style.display = 'none';
-
-  const gridEl = $('calMobileGrid');
-  if (!gridEl) return;
-  gridEl.innerHTML = '';
-
-  const body = document.createElement('div');
-  body.className = 'cal-mobile-body';
-  body.style.width = '100%';
-
-  const timeCol = document.createElement('div');
-  timeCol.className = 'cal-mobile-time-col';
-  calBuildTimeCol(timeCol);
-
-  const dayCol = document.createElement('div');
-  dayCol.className = 'cal-mobile-day-col cal-fmt-col';
-  dayCol.dataset.dow = dow;
-  calBuildLines(dayCol);
-  calRenderFmtCol(dayCol, dow);
-
-  body.appendChild(timeCol);
-  body.appendChild(dayCol);
-  gridEl.appendChild(body);
-  setTimeout(() => { gridEl.scrollTop = 7 * CAL_HOUR_PX - 14; }, 50);
+  calScrollToMorning(gridEl);
 }
 
 function calNavDay(dir) {
-  if (formatMode) {
-    calFmtMobileDay = Math.max(0, Math.min(6, calFmtMobileDay + dir));
-    calRenderMobileFmt();
-  } else {
-    calMobileDay = Math.max(0, Math.min(6, calMobileDay + dir));
-    calRenderMobile();
-  }
+  if (formatMode) calFmtMobileDay = Math.max(0, Math.min(6, calFmtMobileDay + dir));
+  else            calMobileDay    = Math.max(0, Math.min(6, calMobileDay + dir));
+  calRenderMobile();
 }
 
 function calToggleDesktop() {
@@ -3905,9 +3814,7 @@ function calToggleWeekMode() {
 function calRefresh() {
   if (taskLinkSyncTitles()) calSave();
   if (calDesktopOpen) calRenderDesktop();
-  if (document.querySelector('.mobile-app') && getComputedStyle($('mobileApp')).display !== 'none') {
-    calRenderMobile();
-  }
+  if (isMobileLayout()) calRenderMobile();
 }
 
 function calTickNow() {
@@ -4293,9 +4200,9 @@ async function gcalSyncAll() {
         if (ev.start.dateTime) {
           const sd = new Date(ev.start.dateTime);
           const ed = new Date(ev.end?.dateTime || ev.start.dateTime);
-          localDateKey = `${sd.getFullYear()}-${String(sd.getMonth()+1).padStart(2,'0')}-${String(sd.getDate()).padStart(2,'0')}`;
-          startLocal = `${String(sd.getHours()).padStart(2,'0')}:${String(sd.getMinutes()).padStart(2,'0')}`;
-          endLocal   = `${String(ed.getHours()).padStart(2,'0')}:${String(ed.getMinutes()).padStart(2,'0')}`;
+          localDateKey = calDateKey(sd);
+          startLocal = calMinsToStr(sd.getHours() * 60 + sd.getMinutes());
+          endLocal   = calMinsToStr(ed.getHours() * 60 + ed.getMinutes());
           allDay = false;
         } else {
           localDateKey = (ev.start.date || '').slice(0, 10);
@@ -4310,7 +4217,6 @@ async function gcalSyncAll() {
           gcalId:   ev.id,
           calId:    cal.id,
           calName:  cal.summary,
-          calColor: cal.color,
           title:    ev.summary || '(no title)',
           start:    startLocal,
           end:      endLocal,
@@ -4361,20 +4267,24 @@ function gcalReconcile() {
 }
 
 /* ── push / update / delete ── */
+/* Request body for creating or updating `ev` on `dateKey`, in this device's time zone. */
+function gcalEventBody(ev, dateKey) {
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return JSON.stringify({
+    summary: ev.title,
+    start: { dateTime: `${dateKey}T${ev.start}:00`, timeZone },
+    end:   { dateTime: `${dateKey}T${ev.end}:00`,   timeZone },
+  });
+}
+
 async function gcalPushEvent(ev, dateKey, calId) {
   if (!gcalIsConnected()) return null;
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const body = {
-    summary: ev.title,
-    start: { dateTime: `${dateKey}T${ev.start}:00`, timeZone: tz },
-    end:   { dateTime: `${dateKey}T${ev.end}:00`,   timeZone: tz },
-  };
   try {
     const res = await fetch(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`,
       { method: 'POST',
         headers: { Authorization: `Bearer ${gcalToken.access_token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body) }
+        body: gcalEventBody(ev, dateKey) }
     );
     const data = await res.json();
     return data.id || null;
@@ -4383,18 +4293,12 @@ async function gcalPushEvent(ev, dateKey, calId) {
 
 async function gcalUpdateEvent(gcalId, calId, ev, dateKey) {
   if (!gcalIsConnected() || !gcalId) return;
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const body = {
-    summary: ev.title,
-    start: { dateTime: `${dateKey}T${ev.start}:00`, timeZone: tz },
-    end:   { dateTime: `${dateKey}T${ev.end}:00`,   timeZone: tz },
-  };
   try {
     await fetch(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events/${gcalId}`,
       { method: 'PUT',
         headers: { Authorization: `Bearer ${gcalToken.access_token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body) }
+        body: gcalEventBody(ev, dateKey) }
     );
   } catch(e) { showToast('Could not update GCal event.'); }
 }
@@ -4425,11 +4329,7 @@ function gcalDisconnect() {
 function gcalMakeEventEl(ev) {
   const el = document.createElement('div');
   el.className = 'cal-event gcal-event';
-  const startM = calTimeToMins(ev.start);
-  const endM   = calTimeToMins(ev.end);
-  const durM   = Math.max(15, endM - startM);
-  el.style.top        = calMinsToPx(startM) + 'px';
-  el.style.height     = calMinsToPx(durM) + 'px';
+  calPlaceEventEl(el, ev);
   el.style.background = ev.color + '22';
   el.style.borderLeft = `3px solid ${ev.color}`;
   el.style.color      = ev.color;
@@ -4655,11 +4555,7 @@ function todayBalance() { return round2(todayAllowance() - purchasesTotal()); }
 function totalBalance() { return round2(budget.initial - purchasesTotal()); }
 
 function daysBetweenKeys(fromKey, toKey) {
-  const [y1, m1, d1] = fromKey.split('-').map(Number);
-  const [y2, m2, d2] = toKey.split('-').map(Number);
-  const a = new Date(y1, m1 - 1, d1);
-  const b = new Date(y2, m2 - 1, d2);
-  const diff = Math.round((b - a) / 86400000);
+  const diff = Math.round((calKeyToDate(toKey) - calKeyToDate(fromKey)) / 86400000);
   return Math.max(1, Math.min(diff, 366));   // clamp: never negative, never absurd
 }
 
@@ -4822,41 +4718,10 @@ function renderBudget() {
   });
 }
 
-/* Re-render everything except the container holding focus, so committing one
- * field never yanks the cursor out of another. */
-function budgetChanged(skipRoot) {
+function budgetChanged() {
   saveToLocal();
-  [$('budgetContainer-d'), $('budgetContainer-m')].forEach(el => {
-    if (!el) return;
-    if (el === skipRoot) return;
-    el.innerHTML = budgetHtml();
-    bindBudgetContainer(el);
-  });
-  if (skipRoot) budgetPatchFigures(skipRoot);
+  renderBudget();
   renderHome();
-}
-
-/* Update the derived read-outs in place for the container being edited. */
-function budgetPatchFigures(root) {
-  const tb = todayBalance();
-  const total = totalBalance();
-  const spent = purchasesTotal();
-  const fig = root.querySelector('.budget-figure');
-  if (fig) {
-    fig.classList.toggle('over', total < 0);
-    const v = fig.querySelector('.budget-figure-value');
-    const s = fig.querySelector('.budget-figure-sub');
-    if (v) v.textContent = money(total);
-    if (s) s.textContent = `${money(round2(budget.initial))} initial − ${money(spent)} spent today`;
-  }
-  const sp = root.querySelector('.budget-spent');
-  if (sp) sp.textContent = money(spent);
-  root.querySelectorAll('[data-bfield]').forEach(inp => {
-    if (inp === document.activeElement) return;
-    const k = inp.dataset.bfield;
-    const val = k === 'today' ? tb : k === 'daily' ? round2(budget.daily) : round2(budget.initial);
-    inp.value = val.toFixed(2);
-  });
 }
 
 function setBudgetField(key, raw) {
@@ -5141,20 +5006,7 @@ function syncApplyRemote(remoteStr, remoteUpdatedAt) {
   try {
     localStorage.setItem(LS_KEY, effective);
     if (!loadFromLocal()) return;             // corrupt payload — keep local
-    calSave();
-    calPruneDays();
-    budgetRollover();
-    syncWakeupUI();
-    renderTimers();
-    renderTodos();
-    renderDbd();
-    renderBudget();
-    applyViewVisibility();
-    applyTheme();
-    renderThemeUI();
-    calRefresh();
-    renderHome();
-    updateTimerSummary();
+    renderLoadedState();
     try { remoteFp = syncFingerprint(JSON.parse(remoteStr)); } catch(e) {}
   } finally {
     if (remoteFp) { syncLastSeenFp = remoteFp; syncAgree(remoteFp, { editAt: remoteUpdatedAt || Date.now() }); }
@@ -5334,8 +5186,8 @@ function syncChooseExport() {
 /* ── Sign-in flow ── */
 function syncConnect() {
   const params = new URLSearchParams({
-    client_id:     SYNC_CLIENT_ID,
-    redirect_uri:  SYNC_REDIRECT,
+    client_id:     GCAL_CLIENT_ID,
+    redirect_uri:  GCAL_REDIRECT,
     response_type: 'token',
     scope:         'openid email profile',
     prompt:        'select_account',
@@ -5879,8 +5731,17 @@ function renderThemeUI() {
   }
   const urlIn = $('thBgUrl');
   if (urlIn && document.activeElement !== urlIn) urlIn.value = t.bgMode === 'url' ? t.bgUrl : '';
-  const rst = $('thResetBtn');
-  if (rst) rst.textContent = t.preset === 'custom' ? 'Reset to Midnight' : `Reset to ${themePreset(t.preset).name}`;
+  themeRenderResetBtn();
+}
+
+/* The preset Reset returns to: the current one, or Midnight from a custom theme. */
+function themeResetTarget() {
+  const t = themeGet();
+  return themePreset(t.preset === 'custom' ? 'midnight' : t.preset);
+}
+function themeRenderResetBtn() {
+  const r = $('thResetBtn');
+  if (r) r.textContent = `Reset to ${themeResetTarget().name}`;
 }
 
 function openThemeEditor() {
@@ -5892,10 +5753,7 @@ function openThemeEditor() {
 function bindTheme() {
   $('themeOpenBtn')?.addEventListener('click', openThemeEditor);
   $('thDoneBtn')?.addEventListener('click', () => closeModal('themeModal'));
-  $('thResetBtn')?.addEventListener('click', () => {
-    const t = themeGet();
-    themeApplyPreset(t.preset === 'custom' ? 'midnight' : t.preset);
-  });
+  $('thResetBtn')?.addEventListener('click', () => themeApplyPreset(themeResetTarget().id));
   /* preset chips live in two places (settings + editor) — unique ids, one handler */
   ['themePresets-s', 'themePresets-m'].forEach(id => {
     $(id)?.addEventListener('click', e => {
@@ -5950,9 +5808,7 @@ function bindTheme() {
       saveToLocal();
       renderThemePresets('themePresets-m');
       renderThemePresets('themePresets-s');
-      const t = themeGet();
-      const r = $('thResetBtn');
-      if (r) r.textContent = t.preset === 'custom' ? 'Reset to Midnight' : `Reset to ${themePreset(t.preset).name}`;
+      themeRenderResetBtn();
     }
   });
   $('thFontCustom')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } });
@@ -6260,8 +6116,7 @@ function digestDupCandidates() {
   const today = calToday();
   const recent = key => {
     if (!key) return false;
-    const [y, m, d] = String(key).split('-').map(Number);
-    return Math.abs(Math.round((new Date(y, m - 1, d) - today) / 86400000)) <= DIGEST_DUP_DONE_DAYS;
+    return Math.abs(Math.round((calKeyToDate(key) - today) / 86400000)) <= DIGEST_DUP_DONE_DAYS;
   };
   const stale = t => t.done && t.due && !(recent(t.doneOn) || recent(t.due));
   const out = [];
@@ -6393,13 +6248,12 @@ function digestNormalizeTasks(arr, resolve) {
   });
   return out.slice(0, 10);
 }
-function digestDateKey(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 /* Accepts ISO dates plus a few relative words; anything in the past becomes
  * today, anything more than ~3 months out (or unparseable) becomes "". */
 function digestNormalizeDue(v) {
   const s = String(v || '').trim().toLowerCase();
   if (!s || s === 'none' || s === 'null') return '';
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const today = calToday();
   let d = null;
   const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (iso) d = new Date(+iso[1], +iso[2] - 1, +iso[3]);
@@ -6412,9 +6266,9 @@ function digestNormalizeDue(v) {
   }
   if (!d || isNaN(d)) return '';
   const diff = (d - today) / 86400000;
-  if (diff < 0) return digestDateKey(today);
+  if (diff < 0) return calDateKey(today);
   if (diff > 100) return '';
-  return digestDateKey(d);
+  return calDateKey(d);
 }
 function digestGet() { if (!digest) digest = normalizeDigest(null); return digest; }
 function digestRecord() {
@@ -6599,7 +6453,7 @@ function digestRunHtml() {
   if (!digestRun) return '';
   const link = digestRun.url ? ` <a href="${escAttr(digestRun.url)}" target="_blank" rel="noopener">Open run</a>` : '';
   const dismiss = (digestRun.error || digestRunDelivering()) ? ` <button class="dg-run-x" onclick="digestRunDismiss()" aria-label="Dismiss">×</button>` : '';
-  return `<div class="dg-run ${digestRun.error ? 'err' : ''}">${digestEsc(digestRunLabel())}${link}${dismiss}</div>`;
+  return `<div class="dg-run ${digestRun.error ? 'err' : ''}">${escAttr(digestRunLabel())}${link}${dismiss}</div>`;
 }
 
 /* ── sample digest: shows the card without any backend ── */
@@ -6629,9 +6483,8 @@ function digestClearLast() {
 }
 
 /* ── markdown → safe HTML (headings, lists, tables, code, links, bold) ── */
-function digestEsc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 function digestInline(s) {
-  let t = digestEsc(s);
+  let t = escAttr(s);
   const codes = [];
   t = t.replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
   t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, txt, url) => `<a href="${url}" target="_blank" rel="noopener">${txt}</a>`);
@@ -6656,7 +6509,7 @@ function digestRenderMd(md) {
       const buf = []; i++;
       while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
       i++;
-      out.push(`<pre><code>${digestEsc(buf.join('\n'))}</code></pre>`);
+      out.push(`<pre><code>${escAttr(buf.join('\n'))}</code></pre>`);
       continue;
     }
     if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
@@ -6700,7 +6553,7 @@ function digestRenderMd(md) {
 }
 
 function digestShowHome() {
-  if (window.innerWidth <= 768) goTab('home', true); else homeToggleDesktop(true);
+  if (isMobileLayout()) goTab('home', true); else homeToggleDesktop(true);
 }
 
 /* ── Home card ── */
@@ -6744,7 +6597,7 @@ function homeDigestHtml() {
         <div class="dg-head">
           <div class="dg-title-wrap">
             <div class="dg-title">Email digest</div>
-            ${last ? `<div class="dg-meta">${digestEsc(digestMetaLine(last))}</div>` : ''}
+            ${last ? `<div class="dg-meta">${escAttr(digestMetaLine(last))}</div>` : ''}
           </div>
           <div class="dg-actions">${runBtn}${chevron}</div>
         </div>
@@ -6783,14 +6636,14 @@ function digestTasksHtml() {
   const rows = tasks.map(t => {
     const added = digestTaskIsAdded(t);
     const dup = dupes.get(t.id);
-    const due = t.due ? `<span class="dg-todo-due">${digestEsc(dbdLabelFor(t.due))}</span>` : '';
-    const why = t.why ? `<span class="dg-todo-why">${digestEsc(t.why)}</span>` : '';
+    const due = t.due ? `<span class="dg-todo-due">${escAttr(dbdLabelFor(t.due))}</span>` : '';
+    const why = t.why ? `<span class="dg-todo-why">${escAttr(t.why)}</span>` : '';
     return `
       <div class="dg-todo ${added ? 'added' : ''} ${dup ? 'dup' : ''}" data-dgt="${t.id}">
         <div class="dg-todo-main">
-          <div class="dg-todo-title">${digestEsc(t.title)}</div>
+          <div class="dg-todo-title">${escAttr(t.title)}</div>
           ${(why || due) ? `<div class="dg-todo-sub">${due}${why}</div>` : ''}
-          ${dup ? `<div class="dg-todo-dup">${digestEsc(digestDupLabel(dup))}</div>` : ''}
+          ${dup ? `<div class="dg-todo-dup">${escAttr(digestDupLabel(dup))}</div>` : ''}
         </div>
         ${added
           ? `<span class="dg-todo-added" title="It's in your lists">Added ✓</span>`
@@ -6875,7 +6728,7 @@ function digestRenderSettings() {
    * digest shows on one device and not another is that this differs */
   const via = $('digestSyncHint');
   if (via) {
-    const signedIn = !!(typeof syncUser !== 'undefined' && syncUser);
+    const signedIn = !!syncUser;
     via.classList.toggle('warn', !signedIn);
     via.textContent = signedIn
       ? `This device receives digests through cloud sync as ${syncUser.email || 'your Google account'}. Every device signed in to that same account shows the same digest.`
@@ -7055,9 +6908,7 @@ function digestPromptFlat() {               // the stored node, minus updatedAt,
 }
 
 /* ── editor state ── */
-function digestPromptSignedIn() {
-  return !!(typeof syncUser !== 'undefined' && syncUser && typeof syncRef !== 'undefined' && syncRef);
-}
+function digestPromptSignedIn() { return !!(syncUser && syncRef); }
 function digestPromptCanSave() {
   return digestPromptSignedIn() && digestPromptsSaved !== undefined && digestPromptDefaultsState === 'ok';
 }
@@ -7570,24 +7421,21 @@ function bindStatic() {
     btn.addEventListener('click', () => closeModal(btn.dataset.close));
   });
 
+  /* closing the event and link modals also drops their edit state */
+  const closeOverlay = ov => {
+    if (ov.id === 'calEventModal') closeCalModal();
+    else if (ov.id === 'taskLinkModal') closeTaskLinkModal();
+    else ov.classList.remove('show');
+  };
   /* backdrop click closes any modal */
   document.querySelectorAll('.modal-overlay').forEach(ov => {
-    ov.addEventListener('click', e => {
-      if (e.target !== ov) return;
-      if (ov.id === 'calEventModal') closeCalModal();
-      else if (ov.id === 'taskLinkModal') closeTaskLinkModal();
-      else ov.classList.remove('show');
-    });
+    ov.addEventListener('click', e => { if (e.target === ov) closeOverlay(ov); });
   });
-
   /* Escape closes the topmost open modal */
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
     const open = Array.from(document.querySelectorAll('.modal-overlay.show')).pop();
-    if (!open) return;
-    if (open.id === 'calEventModal') closeCalModal();
-    else if (open.id === 'taskLinkModal') closeTaskLinkModal();
-    else open.classList.remove('show');
+    if (open) closeOverlay(open);
   });
 
   /* resize */
@@ -7773,10 +7621,6 @@ let tourReoffer  = false;   // welcome was hidden by the cloud-sync choice modal
 let _tourRaf     = 0;
 let _tourTimer   = null;
 
-function tourIsMobile() {
-  const m = $('mobileApp');
-  return !!m && getComputedStyle(m).display !== 'none';
-}
 function tourSeen() {
   try { return localStorage.getItem(TOUR_LS_KEY) === '1'; } catch (e) { return false; }
 }
@@ -7847,7 +7691,7 @@ function tourKeydown(e) {
  * views are overlays over the right panel, so opening one closes the rest. */
 function tourGoView(view) {
   if (!view) return;
-  if (tourIsMobile()) { goTab(view, false); return; }
+  if (isMobileLayout()) { goTab(view, false); return; }
   switch (view) {
     case 'home':
     case 'timers':
@@ -7863,7 +7707,7 @@ function tourGoView(view) {
 
 function tourTargets(step) {
   if (!step.target) return [];
-  const sel = step.target[tourIsMobile() ? 'm' : 'd'];
+  const sel = step.target[isMobileLayout() ? 'm' : 'd'];
   const list = Array.isArray(sel) ? sel : [sel];
   return list.map(s => document.querySelector(s)).filter(el => el && el.getClientRects().length > 0);
 }
@@ -7941,8 +7785,8 @@ function tourLayout() {
 
   /* card placement: mobile pins it above the data bar; desktop tries beside,
    * below, above the spotlight, and finally the screen centre */
-  card.classList.toggle('bottom', tourIsMobile());
-  if (tourIsMobile()) { card.style.left = card.style.top = ''; return; }
+  card.classList.toggle('bottom', isMobileLayout());
+  if (isMobileLayout()) { card.style.left = card.style.top = ''; return; }
 
   const cw = card.offsetWidth, ch = card.offsetHeight, gap = 14;
   let left, top;
@@ -8024,8 +7868,6 @@ function bindTour() {
   setInterval(renderHome, 60 * 1000);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') dbdCheckRollover();
-  });
-  document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') saveToLocal();
   });
   window.addEventListener('pagehide', saveToLocal);

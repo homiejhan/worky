@@ -1,10 +1,10 @@
 /* Lists / Daily tab split — mobile panels + desktop right-panel pages.
- * Run: node test_tabs.js */
-const { JSDOM } = require('/home/claude/node_modules/jsdom');
+ * Run: node tests/test_tabs.js */
+const { JSDOM } = require('jsdom');
 const fs = require('fs');
 const path = require('path');
 
-const DIR = __dirname;
+const DIR = path.join(__dirname, '..');   // repo root (tests live in tests/)
 const html = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8')
   .replace(/<script src="[^"]*"><\/script>/g, '')
   .replace(/<link[^>]*fonts\.googleapis[^>]*>/g, '');
@@ -28,6 +28,8 @@ function boot(storageSeed) {
 /* app state lives in top-level let/const, so read it through eval */
 const get = (w, expr) => w.eval(expr);
 const shown = el => el.style.display !== 'none';
+/* which panel the swipe track is slid to, read off its transform */
+const trackIdx = (w, d) => -parseFloat(d.getElementById('swipeTrack').style.transform.replace('translateX(', '')) / get(w, 'swipeFrameWidth()');
 
 console.log('\n── 1. Mobile: six tabs, Daily has its own panel ──');
 {
@@ -36,7 +38,7 @@ console.log('\n── 1. Mobile: six tabs, Daily has its own panel ──');
   eq(tabs.join(','), 'home,timers,lists,daily,calendar,budget', 'tab bar order');
   const panels = [...d.querySelectorAll('.swipe-panel')].map(p => p.dataset.view);
   eq(panels.join(','), tabs.join(','), 'swipe panels match the tab bar');
-  eq(get(w, 'MOBILE_PANELS.map(p => p.key).join(",")'), tabs.join(','), 'MOBILE_PANELS matches the DOM order');
+  eq(get(w, 'VIEW_DEFS.map(v => v.key).join(",")'), tabs.join(','), 'VIEW_DEFS matches the DOM order');
   eq(new Set([...d.querySelectorAll('.tab-btn')].map(b => b.id)).size, 6, 'tab ids are unique');
 
   const listsPanel = d.querySelector('.swipe-panel[data-view="lists"]');
@@ -54,13 +56,12 @@ console.log('\n── 2. Mobile: navigation ──');
   const { w, d } = boot();
   d.querySelector('.tab-btn[data-view="daily"]').click();
   eq(get(w, 'currentView'), 'daily', 'tapping Daily selects the daily panel');
-  eq(get(w, 'currentTab'), 3, 'Daily is the 4th panel');
+  eq(trackIdx(w, d), 3, 'track slides to the 4th panel');
   ok(d.querySelector('.tab-btn[data-view="daily"]').classList.contains('active'), 'Daily tab is highlighted');
   ok(!d.querySelector('.tab-btn[data-view="lists"]').classList.contains('active'), 'Lists tab is not');
   w.goTab('lists', false);
   eq(get(w, 'currentView'), 'lists', 'goTab("lists") lands on Lists');
-  eq(get(w, 'currentTab'), 2, 'Lists is the 3rd panel');
-  eq(get(w, 'panelForView("daily")'), 'daily', 'daily no longer maps to the lists panel');
+  eq(trackIdx(w, d), 2, 'track slides to the 3rd panel');
 }
 
 console.log('\n── 3. Mobile: daily cards render in the Daily panel ──');
@@ -122,7 +123,7 @@ console.log('\n── 5. Settings toggles ──');
   ok(shown(d.querySelector('.tab-btn[data-view="lists"]')), 'Lists tab unaffected');
   ok(shown(d.getElementById('listsDesktopNavTab')), 'Lists sidebar button unaffected');
   eq(d.getElementById('rightPanel').dataset.page, 'lists', 'desktop falls over to the Lists page');
-  eq(get(w, 'visiblePanels().map(p => p.key).join(",")'), 'home,timers,lists,calendar,budget', 'swipe order skips Daily');
+  eq(get(w, 'visibleViews().map(v => v.key).join(",")'), 'home,timers,lists,calendar,budget', 'swipe order skips Daily');
 
   w.setViewEnabled('lists', false);
   ok(!shown(d.getElementById('listsDesktopNavTab')), 'Lists off → sidebar button hidden');
@@ -165,8 +166,7 @@ console.log('\n── 7. Daily empty states ──');
 console.log('\n── 8. Tour opens the right desktop page ──');
 {
   const { w, d } = boot();
-  w.tourIsMobile = () => false;
-  w.eval('tourIsMobile = () => false');
+  w.eval('isMobileLayout = () => false');
   w.tourGoView('daily');
   eq(d.getElementById('rightPanel').dataset.page, 'daily', 'Daily step → Daily page');
   w.tourGoView('lists');

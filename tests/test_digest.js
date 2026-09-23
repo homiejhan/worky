@@ -56,7 +56,7 @@ console.log('\n── 0. Sample digest carries suggested tasks ──');
   eq(d.querySelectorAll('#homeContainer-d .dg-todo').length, 3, 'still hidden');
   eq(w.digestSugKey('Confirm Fabrikam recruiter screen!'), w.digestSugKey('  confirm fabrikam   recruiter screen'), 'title key ignores case/punctuation/spacing');
   eq(w.digestNormalizeDue('2099-01-01'), '', 'far-future dates dropped');
-  eq(w.digestNormalizeDue('tomorrow'), (() => { const x = new Date(); x.setDate(x.getDate()+1); return w.digestDateKey(x); })(), 'tomorrow resolves');
+  eq(w.digestNormalizeDue('tomorrow'), (() => { const x = new Date(); x.setDate(x.getDate()+1); return w.calDateKey(x); })(), 'tomorrow resolves');
   eq(w.digestNormalizeDue('whenever'), '', 'unparseable → empty');
 }
 
@@ -259,7 +259,7 @@ console.log('\n── 8a. Redundancy: how two titles are scored ──');
 console.log('\n── 8b. Redundancy: a suggestion that repeats an existing task is flagged, not added ──');
 {
   const { w, d } = boot();
-  const day = n => { const x = new Date(); x.setDate(x.getDate() + n); return w.digestDateKey(x); };
+  const day = n => { const x = new Date(); x.setDate(x.getDate() + n); return w.calDateKey(x); };
   w.eval(`dbdTasks.push({ id: dbdIdCounter++, text: 'Northwind OA', due: '${day(1)}', done: false })`);
   w.eval(`todoLists.push({ id: todoIdCounter++, title: 'Bills', color: '#378ADD', isDefault: false, tasks: [{ id: taskIdCounter++, text: 'water bill', done: false }] })`);
   w.eval('syncReconciled = true');
@@ -308,7 +308,7 @@ console.log('\n── 8b. Redundancy: a suggestion that repeats an existing task
 console.log('\n── 8c. Redundancy: finished tasks only count while they are recent ──');
 {
   const { w, d } = boot();
-  const day = n => { const x = new Date(); x.setDate(x.getDate() + n); return w.digestDateKey(x); };
+  const day = n => { const x = new Date(); x.setDate(x.getDate() + n); return w.calDateKey(x); };
   w.eval(`dbdTasks.push({ id: dbdIdCounter++, text: 'Pay the water bill', due: '${day(-31)}', done: true, doneOn: '${day(-30)}' })`);
   w.eval(`dbdTasks.push({ id: dbdIdCounter++, text: 'Fabrikam phone screen', due: '${day(-1)}', done: true, doneOn: '${day(-1)}' })`);
   w.eval('syncReconciled = true');

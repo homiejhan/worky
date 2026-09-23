@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """
-Worky email digest — backend edition.
-
-Does exactly what the in-browser digest in app.js does, but unattended:
+Worky email digest, built unattended on GitHub Actions:
   1. reads the last 24 hours of Gmail with a long-lived refresh token
-  2. routes each email into a section (TLDR / ByteByteGo / newsletters / jobs / misc)
+  2. routes each email into a section (by default TLDR / ByteByteGo / newsletters / jobs / misc)
   3. asks a local OpenAI-compatible model (llama-server) to summarize each section
   4. writes the "Top of the inbox" overview + action checklist
   5. extracts task candidates as schema-constrained JSON
@@ -36,6 +34,7 @@ Usage:
 import argparse
 import base64
 import concurrent.futures as cf
+import copy
 import datetime as dt
 import html
 import json
@@ -184,7 +183,7 @@ TASKS_SCHEMA = {
 
 
 def tasks_schema(sections):
-    sc = json.loads(json.dumps(TASKS_SCHEMA))
+    sc = copy.deepcopy(TASKS_SCHEMA)
     sc["properties"]["tasks"]["items"]["properties"]["section"]["enum"] = [s["id"] for s in sections]
     return sc
 
@@ -273,8 +272,8 @@ def decode_body(data):
 
 
 class _TextExtractor(HTMLParser):
-    """HTML → text. Mirrors digestHtmlToText: drop script/style, keep links as 'text (href)',
-    and put newlines around block elements so the model sees structure."""
+    """HTML → text: drop script/style, keep links as 'text (href)', and put newlines
+    around block elements so the model sees structure."""
     SKIP = {"script", "style", "head", "title", "noscript"}
     BLOCK = {"p", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "table", "br"}
 
@@ -355,7 +354,7 @@ def body_text(payload):
 
 
 def parse_message(msg):
-    e = {
+    return {
         "id": msg.get("id"),
         "from": header(msg, "From"),
         "subject": header(msg, "Subject") or "(no subject)",
@@ -363,7 +362,6 @@ def parse_message(msg):
         "date": int(msg.get("internalDate") or 0) or int(time.time() * 1000),
         "text": body_text(msg.get("payload")) or msg.get("snippet", ""),
     }
-    return e
 
 
 def classify(e, sections):
