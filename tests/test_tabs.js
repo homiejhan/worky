@@ -1,10 +1,10 @@
 /* Lists / Daily tab split — mobile panels + desktop right-panel pages.
- * Run: node test_tabs.js */
-const { JSDOM } = require('/home/claude/node_modules/jsdom');
+ * Run: node tests/test_tabs.js */
+const { JSDOM } = require('jsdom');
 const fs = require('fs');
 const path = require('path');
 
-const DIR = __dirname;
+const DIR = path.join(__dirname, '..');   // repo root (tests live in tests/)
 const html = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8')
   .replace(/<script src="[^"]*"><\/script>/g, '')
   .replace(/<link[^>]*fonts\.googleapis[^>]*>/g, '');

@@ -1,8 +1,8 @@
-const { JSDOM } = require('/home/claude/node_modules/jsdom');
+const { JSDOM } = require('jsdom');
 const fs = require('fs');
 const path = require('path');
 
-const DIR = __dirname;
+const DIR = path.join(__dirname, '..');   // repo root (tests live in tests/)
 const html = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8')
   // strip external scripts/links; we inject app.js ourselves
   .replace(/<script src="[^"]*"><\/script>/g, '')
@@ -27,20 +27,25 @@ function boot(storageSeed) {
 
 const rootVar = (w, name) => w.document.documentElement.style.getPropertyValue(name).trim();
 const savedTheme = (w) => JSON.parse(w.localStorage.getItem('focus-app-state')).theme;
+/* Expected colors come from the app's own preset table, so retuning a palette
+ * doesn't break these checks; what they verify is that the preset is applied. */
+const preset = (w, id) => w.eval(`themePreset(${JSON.stringify(id)})`);
+const rgb = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)).join(',');
 
 console.log('\n── 1. Default boot applies Midnight ──');
 {
   const { w, d } = boot();
-  eq(rootVar(w, '--bg-solid'), '#0b0c0e', 'bg-solid is midnight bg');
+  const mid = preset(w, 'midnight');
+  eq(rootVar(w, '--bg-solid'), mid.bg, 'bg-solid is midnight bg');
   eq(rootVar(w, '--scheme'), 'dark', 'scheme dark');
-  eq(rootVar(w, '--accent-rgb'), '93,202,165', 'accent rgb triplet');
-  eq(rootVar(w, '--radius-md'), '10px', 'radius md');
+  eq(rootVar(w, '--accent-rgb'), rgb(mid.accent), 'accent rgb triplet');
+  eq(rootVar(w, '--radius-md'), mid.radius + 'px', 'radius md');
   eq(rootVar(w, '--font-size'), '14px', 'font size');
   ok(rootVar(w, '--font-sans').includes("'DM Sans'"), 'font stack DM Sans');
   eq(d.getElementById('themeBg').classList.contains('on'), false, 'no bg image layer');
   w.saveToLocal();
   eq(savedTheme(w).preset, 'midnight', 'saved state carries theme');
-  eq(d.querySelector('meta[name="theme-color"]').getAttribute('content'), '#0b0c0e', 'meta theme-color');
+  eq(d.querySelector('meta[name="theme-color"]').getAttribute('content'), mid.bg, 'meta theme-color');
 }
 
 console.log('\n── 2. Settings → preset chip switches theme ──');
@@ -49,18 +54,19 @@ console.log('\n── 2. Settings → preset chip switches theme ──');
   d.getElementById('settingsBtn').click();
   ok(d.getElementById('settingsModal').classList.contains('show'), 'settings opens');
   const chips = d.querySelectorAll('#themePresets-s .theme-chip');
-  eq(chips.length, 7, 'seven preset chips rendered');
+  eq(chips.length, w.eval('THEME_PRESETS.length'), 'one chip per preset');
   ok(d.querySelector('#themePresets-s .theme-chip.active').dataset.preset === 'midnight', 'midnight chip active');
   d.querySelector('#themePresets-s [data-preset="daylight"]').click();
-  eq(rootVar(w, '--bg-solid'), '#f2f3f5', 'daylight bg applied');
+  const day = preset(w, 'daylight');
+  eq(rootVar(w, '--bg-solid'), day.bg, 'daylight bg applied');
   eq(rootVar(w, '--scheme'), 'light', 'scheme flips to light');
-  ok(rootVar(w, '--border').startsWith('rgba(21,23,27'), 'borders derived from dark ink for light theme');
-  eq(rootVar(w, '--accent'), '#2a63c6', 'accent updated');
+  ok(rootVar(w, '--border').startsWith(`rgba(${rgb(day.ink)}`), 'borders derived from dark ink for light theme');
+  eq(rootVar(w, '--accent'), day.accent, 'accent updated');
   eq(savedTheme(w).preset, 'daylight', 'preset persisted');
   ok(d.querySelector('#themePresets-s .theme-chip.active').dataset.preset === 'daylight', 'chip active state re-rendered');
   d.querySelector('#themePresets-s [data-preset="forest"]').click();
   ok(rootVar(w, '--font-sans').includes("'Manrope'"), 'forest switches font');
-  eq(rootVar(w, '--radius-md'), '12px', 'forest radius');
+  eq(rootVar(w, '--radius-md'), preset(w, 'forest').radius + 'px', 'forest radius');
   const link = d.getElementById('themeFontLink');
   ok(link && link.href.includes('Manrope'), 'google font link injected');
 }
@@ -88,7 +94,7 @@ console.log('\n── 3. Editor: live color edit detaches preset; hex + swatch s
   hex.value = '#zzzzzz';
   hex.dispatchEvent(new w.Event('input', { bubbles: true }));
   ok(hex.classList.contains('bad'), 'invalid hex flagged');
-  eq(rootVar(w, '--bg-solid'), '#0b0c0e', 'invalid hex not applied');
+  eq(rootVar(w, '--bg-solid'), preset(w, 'midnight').bg, 'invalid hex not applied');
   hex.value = '#101820';
   hex.dispatchEvent(new w.Event('input', { bubbles: true }));
   eq(rootVar(w, '--bg-solid'), '#101820', 'valid typed hex applied');
@@ -103,7 +109,7 @@ console.log('\n── 3. Editor: live color edit detaches preset; hex + swatch s
   eq(rootVar(w, '--radius-lg'), '0px', 'radius 0 → square corners');
   // reset to preset restores palette but keeps font size (not a palette field)
   d.getElementById('thResetBtn').click();
-  eq(rootVar(w, '--accent'), '#5dcaa5', 'reset restores midnight accent');
+  eq(rootVar(w, '--accent'), preset(w, 'midnight').accent, 'reset restores midnight accent');
   eq(savedTheme(w).preset, 'midnight', 'reset sets preset id');
   eq(rootVar(w, '--font-size'), '16px', 'text size survives reset');
 }
@@ -149,12 +155,13 @@ console.log('\n── 5. Background image via URL + glass/dim/blur ──');
   ok(layer.style.backgroundImage.includes('https://example.com/pic.jpg'), 'bg image url set');
   eq(savedTheme(w).bgMode, 'url', 'bgMode url persisted');
   eq(savedTheme(w).bgUrl, 'https://example.com/pic.jpg', 'url persisted');
-  ok(rootVar(w, '--bg-base').startsWith('rgba(11,12,14,0.65'), 'panels go translucent (35% glass default)');
-  ok(rootVar(w, '--theme-bg-dim').startsWith('rgba(11,12,14,0.4'), 'dim overlay 40% default');
+  const bgRgb = rgb(preset(w, 'midnight').bg);
+  ok(rootVar(w, '--bg-base').startsWith(`rgba(${bgRgb},0.65`), 'panels go translucent (35% glass default)');
+  ok(rootVar(w, '--theme-bg-dim').startsWith(`rgba(${bgRgb},0.4`), 'dim overlay 40% default');
   eq(d.getElementById('thBgControls').style.display, '', 'image sliders revealed');
   const glass = d.getElementById('thBgGlass');
   glass.value = '0'; glass.dispatchEvent(new w.Event('input', { bubbles: true }));
-  eq(rootVar(w, '--bg-base'), '#0b0c0e', 'glass 0 → opaque panels again');
+  eq(rootVar(w, '--bg-base'), `rgba(${bgRgb},1)`, 'glass 0 → opaque panels again');
   const blur = d.getElementById('thBgBlur');
   blur.value = '8'; blur.dispatchEvent(new w.Event('input', { bubbles: true }));
   eq(layer.style.filter, 'blur(8px)', 'blur applied to layer');
@@ -170,7 +177,7 @@ console.log('\n── 6. Preset switch keeps the background image ──');
   w.themeSetBgUrl('https://example.com/a.png');
   w.themeApplyPreset('ocean');
   eq(savedTheme(w).bgMode, 'url', 'image survives preset switch');
-  eq(savedTheme(w).bg, '#091120', 'ocean palette applied');
+  eq(savedTheme(w).bg, preset(w, 'ocean').bg, 'ocean palette applied');
 }
 
 console.log('\n── 7. Persistence round-trip (reload) ──');
@@ -181,7 +188,7 @@ console.log('\n── 7. Persistence round-trip (reload) ──');
   first.w.saveToLocal();
   const seed = { 'focus-app-state': first.w.localStorage.getItem('focus-app-state') };
   const { w } = boot(seed);
-  eq(rootVar(w, '--bg-solid'), '#15100d', 'ember bg restored after reload');
+  eq(rootVar(w, '--bg-solid'), preset(w, 'ember').bg, 'ember bg restored after reload');
   eq(rootVar(w, '--accent'), '#123456', 'custom accent restored');
   eq(savedTheme(w).preset, 'custom', 'custom preset restored');
 }
@@ -199,7 +206,8 @@ console.log('\n── 8. Local uploaded image is device-only; other device degra
   // "other device": same state, no local image
   const other = boot({ 'focus-app-state': JSON.stringify(state) });
   ok(!other.d.getElementById('themeBg').classList.contains('on'), 'no image layer without local file');
-  eq(rootVar(other.w, '--bg-base'), '#15100d'.replace('#15100d', rootVar(other.w, '--bg-solid')), 'panels stay opaque when image missing');
+  eq(rootVar(other.w, '--bg-surface'), preset(other.w, 'midnight').surface, 'panels stay opaque when image missing');
+  eq(rootVar(other.w, '--bg-base'), 'transparent', 'canvas shows the ambient wash, as with no image at all');
 }
 
 console.log('\n── 9. Compress / decompress (export + cloud format) ──');
@@ -217,20 +225,27 @@ console.log('\n── 9. Compress / decompress (export + cloud format) ──');
   eq(legacy.theme.preset, 'midnight', 'missing th → midnight default');
   // applyState (import) applies theme live
   w.applyState(back);
-  eq(rootVar(w, '--bg-solid'), '#13111c', 'import applies theme');
+  eq(rootVar(w, '--bg-solid'), preset(w, 'lavender').bg, 'import applies theme');
 }
 
 console.log('\n── 10. normalizeTheme hardening ──');
 {
   const { w } = boot();
+  const mid = preset(w, 'midnight');
   const n = w.normalizeTheme({ preset: 'nope', bg: 'red', fontSize: 99, radius: -4, bgMode: 'url', bgUrl: '', bgDim: 'x', font: '   ' });
   eq(n.preset, 'midnight', 'unknown preset → midnight');
-  eq(n.bg, '#0b0c0e', 'non-hex color ignored');
+  eq(n.bg, mid.bg, 'named preset keeps its own palette');
+  eq(n.radius, mid.radius, 'named preset keeps its own radius');
   eq(n.fontSize, 18, 'font size clamped');
-  eq(n.radius, 0, 'radius clamped');
   eq(n.bgMode, '', 'url mode without url dropped');
   eq(n.bgDim, 40, 'bad number → default');
   eq(n.font, 'DM Sans', 'blank font → preset font');
+  /* only a custom theme carries its own colors and shape, so that is where
+   * junk has to be filtered and values clamped */
+  const c = w.normalizeTheme({ preset: 'custom', bg: 'red', accent: '#ABCDEF', radius: -4 });
+  eq(c.bg, mid.bg, 'custom: non-hex color ignored');
+  eq(c.accent, '#abcdef', 'custom: hex color kept, lower-cased');
+  eq(c.radius, 0, 'custom: radius clamped');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

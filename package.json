@@ -1,5 +1,8 @@
 {
-  "dependencies": {
+  "scripts": {
+    "test": "node tests/test_digest.js && node tests/test_sync.js && node tests/test_settings.js && node tests/test_tabs.js && node tests/test_theme.js"
+  },
+  "devDependencies": {
     "jsdom": "^30.1.0"
   }
 }
