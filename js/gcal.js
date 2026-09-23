@@ -10,9 +10,10 @@ import { renderTodos } from './lists.js';
 import { renderDbd } from './dbd.js';
 import {
   calColorHidden, calDisplayDays, calEnsureDay, calEvents, calPlaceEventEl, calRefresh, calSave,
-  nextCalEventId,
+  nextCalEventId, shiftBadgeEl,
 } from './calendar.js';
-import { normalizeWage } from './shifts.js';
+import { money } from './budget.js';
+import { isShift, normalizeWage, shiftAppIn, shiftMinutes, shiftPay, shiftReason } from './shifts.js';
 
 /* gcal state */
 let gcalToken     = null;
@@ -47,6 +48,14 @@ export function gcalShiftCalendars() {
   gcalCalendars.forEach(c => { out[c.id] = { ...(out[c.id] || {}), name: c.summary }; });
   return out;
 }
+function gcalCalOf(calId, name) {
+  return { name, ...(gcalShiftCalendars()[calId] || {}) };
+}
+/* Does this calendar hold shifts? Its setting, else its name. */
+function gcalCalIsShifts(cal) {
+  return typeof cal.shift === 'boolean' ? cal.shift : !!shiftAppIn(cal.name);
+}
+
 /* ───────────────────────── GOOGLE CALENDAR ───────────────────────── */
 function gcalSaveToken(t) {
   gcalToken = t;
@@ -163,13 +172,14 @@ export async function gcalSyncAll() {
         if (!ev.start) return;
 
         /* parse in LOCAL timezone (UTC slicing caused mismatches) */
-        let localDateKey, startLocal, endLocal, allDay;
+        let localDateKey, startLocal, endLocal, allDay, mins = 0;
         if (ev.start.dateTime) {
           const sd = new Date(ev.start.dateTime);
           const ed = new Date(ev.end?.dateTime || ev.start.dateTime);
           localDateKey = calDateKey(sd);
           startLocal = calMinsToStr(sd.getHours() * 60 + sd.getMinutes());
           endLocal   = calMinsToStr(ed.getHours() * 60 + ed.getMinutes());
+          mins = Math.max(0, Math.round((ed - sd) / 60000));   // real length, even past midnight
           allDay = false;
         } else {
           localDateKey = (ev.start.date || '').slice(0, 10);
@@ -187,6 +197,7 @@ export async function gcalSyncAll() {
           title:    ev.summary || '(no title)',
           start:    startLocal,
           end:      endLocal,
+          mins,
           allDay,
           htmlLink: ev.htmlLink,
           color:    cal.color,
@@ -311,6 +322,8 @@ function gcalMakeEventEl(ev) {
   badge.textContent = ev.calName;
   el.appendChild(t);
   el.appendChild(badge);
+  const cal = gcalCalOf(ev.calId, ev.calName);
+  if (isShift(ev, cal)) { el.classList.add('cal-shift'); el.appendChild(shiftBadgeEl(shiftPay(ev, cal))); }
 
   el.addEventListener('click', e => { e.stopPropagation(); gcalOpenEventDetail(ev); });
   return el;
@@ -351,7 +364,56 @@ function gcalOpenEventDetail(ev) {
   delBtn.textContent = 'Delete from Google Calendar';
   delBtn.disabled = false;
 
+  gcalRenderShiftBox(ev);
   modal.classList.add('show');
+}
+
+/* ── shifts: a Google event is read-only, so the choice is made for its whole
+ * calendar (a work-schedule feed is all shifts, at one wage) ── */
+function gcalRenderShiftBox(ev) {
+  const box = $('gcalShiftBox');
+  if (!box) return;
+  box.hidden = !!ev.allDay;
+  if (ev.allDay) return;
+  const cal = gcalCalOf(ev.calId, ev.calName);
+  const calShifts = gcalCalIsShifts(cal);
+  const on = isShift(ev, cal);
+  $('gcalShiftLabel').textContent = `Events from “${ev.calName}” are paid shifts`;
+  $('gcalShiftToggle').checked = calShifts;
+  $('gcalShiftWageRow').style.display = on || calShifts ? '' : 'none';
+  const wage = normalizeWage(cal.wage);
+  $('gcalShiftWage').value = wage === null ? '' : wage.toFixed(2);
+  const why = shiftReason(ev, cal);
+  const lines = [];
+  if (why === 'calendar-name') lines.push(`Detected: “${ev.calName}” looks like a ${shiftAppIn(cal.name)} schedule.`);
+  if (why === 'title') lines.push(`Detected: the title names ${shiftAppIn(ev.title)}.`);
+  if (on) {
+    const pay = shiftPay(ev, cal), hrs = Math.round(shiftMinutes(ev) / 6) / 10;
+    lines.push(pay === null
+      ? 'Add the hourly wage to count what these shifts pay.'
+      : `This shift: ${hrs} h × ${money(wage)} = ${money(pay)}.`);
+  } else {
+    lines.push('Turn this on if this calendar holds your work schedule.');
+  }
+  $('gcalShiftHint').textContent = lines.join(' ');
+}
+function gcalShiftChanged(ev) {
+  saveToLocal();
+  calRefresh();               // pay tags and the header's weekly total
+  gcalRenderShiftBox(ev);
+  gcalRenderCalList();        // the "Shifts" tag
+}
+export function gcalShiftSetCal(checked) {
+  const ev = $('gcalDetailModal')._gcalEv;
+  if (!ev) return;
+  shiftCals = normalizeShiftCals({ ...shiftCals, [ev.calId]: { ...(shiftCals[ev.calId] || {}), shift: !!checked } });
+  gcalShiftChanged(ev);
+}
+export function gcalShiftSetWage(raw) {
+  const ev = $('gcalDetailModal')._gcalEv;
+  if (!ev) return;
+  shiftCals = normalizeShiftCals({ ...shiftCals, [ev.calId]: { ...(shiftCals[ev.calId] || {}), wage: normalizeWage(raw) } });
+  gcalShiftChanged(ev);
 }
 
 export function gcalSyncToApp() {
@@ -440,7 +502,7 @@ function gcalRenderCalList() {
     row.className = 'gcal-cal-row';
     row.innerHTML = `
       <div class="gcal-cal-dot" style="background:${cal.color}"></div>
-      <span class="gcal-cal-name">${escAttr(cal.summary)}</span>
+      <span class="gcal-cal-name">${escAttr(cal.summary)}${gcalCalIsShifts(gcalCalOf(cal.id, cal.summary)) ? '<span class="gcal-shift-tag">Shifts</span>' : ''}</span>
       <label class="gcal-toggle">
         <input type="checkbox" ${cal.enabled ? 'checked' : ''} onchange="gcalToggleCal(${idx}, this.checked)">
         <span class="gcal-toggle-track"></span>

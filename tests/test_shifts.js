@@ -193,6 +193,74 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     eq(d.getElementById('calEarnings-m').textContent, 'Next 7 days: $100.00 from 2 shifts · 8 h', 'Mondays and Wednesdays in the next 7 days: 2 × 4 h × $12.50');
   }
 
+  console.log('\n── 7. Google Calendar: a When I Work feed is a shift calendar ──');
+  {
+    const cals = [{ id: 'wiw@import.calendar.google.com', summary: 'When I Work', backgroundColor: '#22C55E' }, { id: 'me@example.com', summary: 'Me', backgroundColor: '#378ADD' }];
+    let day = null, tomorrow = null;
+    const fetchImpl = async url => {
+      const u = String(url);
+      const json = o => ({ ok: true, status: 200, json: async () => o });
+      if (u.includes('/calendarList')) return json({ items: cals });
+      if (u.includes(encodeURIComponent(cals[0].id))) return json({ items: [
+        { id: 'w1', summary: 'Barista', start: { dateTime: `${day}T17:00:00` }, end: { dateTime: `${day}T21:00:00` } },
+        { id: 'w2', summary: 'Close', start: { dateTime: `${day}T22:00:00` }, end: { dateTime: `${tomorrow}T06:00:00` } },
+      ] });
+      if (u.includes('/events')) return json({ items: [{ id: 'm1', summary: 'Study group', start: { dateTime: `${day}T12:00:00` }, end: { dateTime: `${day}T13:00:00` } }] });
+      return json({});
+    };
+    const { w, d } = await loadApp({
+      storage: {
+        'focus-tour-done': '1',
+        'focus-gcal-token': JSON.stringify({ access_token: 't', expires_at: Date.now() + 3600e3 }),
+        'focus-gcal-calendars': JSON.stringify(cals.map(c => ({ id: c.id, summary: c.summary, color: c.backgroundColor, enabled: true }))),
+      },
+      before: win => {
+        const t = new Date(); t.setHours(0, 0, 0, 0);
+        const k = x => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+        day = k(t); t.setDate(t.getDate() + 1); tomorrow = k(t);
+        win.fetch = fetchImpl;
+      },
+    });
+    await w.gcalSyncAll();
+    await sleep(10);
+    const close = w.eval(`gcalEvents['${day}'].find(e => e.gcalId === 'w2')`);
+    eq(close.mins, 480, 'a Google event keeps its real length (22:00 → 06:00 is 8 h)');
+    eq(d.getElementById('calEarnings-m').textContent, 'Next 7 days: 2 shifts · 12 h · add a wage to see pay', 'the feed\'s events count as shifts by the calendar\'s name');
+    ok(d.querySelectorAll('#calMobileGrid .gcal-event.cal-shift').length >= 1, 'Google shifts are tagged on the grid');
+    // set the wage once, for the whole feed
+    const shiftEl = [...d.querySelectorAll('#calMobileGrid .gcal-event')].find(el => el.textContent.includes('Barista'));
+    shiftEl.click();
+    ok(d.getElementById('gcalDetailModal').classList.contains('show'), 'detail opens');
+    ok(d.getElementById('gcalShiftToggle').checked, 'the calendar shows as a shift calendar (detected)');
+    ok(d.getElementById('gcalShiftHint').textContent.startsWith('Detected: “When I Work” looks like a When I Work schedule.'), 'and says why');
+    const inp = d.getElementById('gcalShiftWage');
+    inp.value = '14'; inp.dispatchEvent(new w.Event('change', { bubbles: true }));
+    eq(JSON.stringify(w.eval('shiftCals')), JSON.stringify({ 'wiw@import.calendar.google.com': { wage: 14 } }), 'wage saved for the calendar (the shift flag stays detected)');
+    eq(d.getElementById('gcalShiftHint').textContent, 'Detected: “When I Work” looks like a When I Work schedule. This shift: 4 h × $14.00 = $56.00.', 'hint shows this shift\'s pay');
+    eq(d.getElementById('calEarnings-m').textContent, 'Next 7 days: $168.00 from 2 shifts · 12 h', 'header: 4 h + 8 h at $14');
+    ok(JSON.parse(w.localStorage.getItem('focus-app-state')).shiftCals['wiw@import.calendar.google.com'].wage === 14, 'saved with the state (so it syncs)');
+    // a personal calendar turned into a shift calendar
+    const studyEl = [...d.querySelectorAll('#calMobileGrid .gcal-event')].find(el => el.textContent.includes('Study group'));
+    studyEl.click();
+    ok(!d.getElementById('gcalShiftToggle').checked, 'a personal calendar is not a shift calendar');
+    eq(d.getElementById('gcalShiftWageRow').style.display, 'none', 'so no wage field');
+    const tog = d.getElementById('gcalShiftToggle');
+    tog.checked = true; tog.dispatchEvent(new w.Event('change', { bubbles: true }));
+    eq(d.getElementById('calEarnings-m').textContent, 'Next 7 days: $168.00 from 3 shifts · 13 h · 1 without a wage', 'switching it on counts its events');
+    tog.checked = false; tog.dispatchEvent(new w.Event('change', { bubbles: true }));
+    eq(w.eval("shiftCals['me@example.com'].shift"), false, 'switching it off is remembered');
+    // copying a feed shift into Focus: counted once, with the calendar's wage
+    shiftEl.click();
+    d.getElementById('gcalSyncToAppBtn').click();
+    const copy = w.eval(`calEvents['${day}'].find(e => e.gcalId === 'w1')`);
+    ok(copy && copy.gcalCalId === 'wiw@import.calendar.google.com', 'Focus copy made');
+    eq(d.getElementById('calEarnings-m').textContent, 'Next 7 days: $168.00 from 2 shifts · 12 h', 'the copy and its original count once');
+    // calendars list tags the shift calendar
+    w.eval('gcalOpenModal()');
+    const names = [...d.querySelectorAll('#gcalCalList .gcal-cal-name')].map(n => n.textContent);
+    eq(names.join(' | '), 'When I WorkShifts | Me', 'calendars list tags When I Work as Shifts');
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

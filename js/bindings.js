@@ -18,7 +18,10 @@ import {
   calNavDay, calRenderShiftUI, calSendToGcal, calToggleDesktop, calToggleShift,
   calToggleWeekMode, closeCalModal, deleteCalEvent, saveCalEvent, setCalEventType,
 } from './calendar.js';
-import { gcalDeleteFromDetail, gcalDisconnect, gcalSyncAll, gcalSyncToApp } from './gcal.js';
+import {
+  gcalDeleteFromDetail, gcalDisconnect, gcalShiftSetCal, gcalShiftSetWage, gcalSyncAll,
+  gcalSyncToApp,
+} from './gcal.js';
 import { budgetToggleDesktop } from './budget.js';
 import { syncBtnClick, syncChooseExport, syncChooseImport } from './sync.js';
 import { bindTheme } from './theme.js';
@@ -127,6 +130,8 @@ export function bindStatic() {
   $('gcalSyncBtn')?.addEventListener('click', gcalSyncAll);
   $('gcalDetailDeleteBtn')?.addEventListener('click', gcalDeleteFromDetail);
   $('gcalSyncToAppBtn')?.addEventListener('click', gcalSyncToApp);
+  $('gcalShiftToggle')?.addEventListener('change', e => gcalShiftSetCal(e.target.checked));
+  $('gcalShiftWage')?.addEventListener('change', e => gcalShiftSetWage(e.target.value));
 
   /* modal-x close buttons */
   document.querySelectorAll('.modal-x[data-close]').forEach(btn => {

@@ -347,16 +347,6 @@
       </div>
     </div>
     <div class="modal-sub cal-shift-hint" id="calShiftHint"></div>
-    <div class="cal-event-row cal-shift-row" id="calShiftRow">
-      <span class="cal-event-label">Work</span>
-      <button class="cal-type-btn cal-shift-btn" id="calShiftBtn" type="button" aria-pressed="false">Paid shift</button>
-      <div class="cal-wage" id="calWageWrap">
-        <span class="cal-wage-cur">$</span>
-        <input class="cal-event-input cal-wage-input" id="calEventWage" type="text" inputmode="decimal" placeholder="0.00" aria-label="Hourly wage" autocomplete="off">
-        <span class="cal-wage-unit">/hr</span>
-      </div>
-    </div>
-    <div class="modal-sub cal-shift-hint" id="calShiftHint"></div>
     <div class="cal-dow-row" id="calDowRow"></div>
     <div class="modal-actions">
       <button class="modal-cancel" id="calModalCancel">Cancel</button>
@@ -710,6 +700,21 @@
     <div class="gcal-detail-meta">
       <div class="gcal-detail-cal" id="gcalDetailCal"></div>
       <div class="gcal-detail-time" id="gcalDetailTime"></div>
+    </div>
+    <div class="gcal-shift" id="gcalShiftBox">
+      <label class="gcal-shift-row">
+        <span class="gcal-toggle"><input type="checkbox" id="gcalShiftToggle"><span class="gcal-toggle-track"></span></span>
+        <span class="gcal-shift-label" id="gcalShiftLabel">Events from this calendar are paid shifts</span>
+      </label>
+      <div class="cal-event-row" id="gcalShiftWageRow">
+        <span class="cal-event-label">Hourly wage</span>
+        <div class="cal-wage">
+          <span class="cal-wage-cur">$</span>
+          <input class="cal-event-input cal-wage-input" id="gcalShiftWage" type="text" inputmode="decimal" placeholder="0.00" aria-label="Hourly wage for this calendar" autocomplete="off">
+          <span class="cal-wage-unit">/hr</span>
+        </div>
+      </div>
+      <div class="modal-sub" id="gcalShiftHint"></div>
     </div>
     <div class="modal-actions">
       <a id="gcalDetailLink" target="_blank" rel="noopener" class="gcal-open-link">
