@@ -70,6 +70,29 @@ function eq(a, b, msg) { ok(a === b, `${msg} (got ${JSON.stringify(a)})`); }
     ok(saved.views.budget !== false, 'and Budget on');
   }
 
+  console.log('\n── 4. A fresh device starts as a working student ──');
+  {
+    const { w, d } = await loadApp();
+    eq(w.eval('TIMER_DEFAULTS.map(t => t.label).join()'), 'Study,Work,Sleep', 'timer defaults');
+    eq(w.eval('timers.map(t => t.label + " " + t.seconds).join()'), 'Study 10800,Work 14400,Sleep 28800', 'timers, full');
+    eq(w.eval('todoLists.filter(l => l.isDefault).map(l => l.title).join(" | ")'), 'Before class or shift | Wind down | Sunday planning', 'Daily lists');
+    eq(JSON.stringify(w.eval('todoLists.find(l => l.title === "Sunday planning").activeDays')), '[0]', 'Sunday planning only on Sundays');
+    const dl = w.eval('todoLists.find(l => l.title === "Deadlines")');
+    ok(dl && !dl.isDefault && dl.starred, 'a starred custom Deadlines list');
+    eq(dl.tasks.filter(t => t.due).length, 2, 'with two dated sample deadlines');
+    ok(d.querySelector('#homeContainer-d .home-sec-lists') && d.querySelector('#homeContainer-d .home-sec-lists').textContent.includes('Deadlines'), 'Deadlines is starred on Home');
+    ok(d.querySelector('#homeContainer-d .home-sec-today').textContent.includes('Problem set 3'), 'the upcoming deadline shows under Today\'s tasks');
+    eq(w.eval('views.budget'), true, 'Budget (the envelope) is on');
+    ok(!!d.querySelector('#budgetContainer-d .budget-wrap'), 'and rendered');
+    eq(w.eval('calTemplates.map(t => t.title).join()'), 'Study block,Lunch,Plan the week,Lights out', 'weekly calendar blocks from the template');
+    eq(w.eval('dbdTasks.map(t => t.text).join(" | ")'), 'Take a look around Focus | Connect Google Calendar to bring in shifts | Mark a shift as paid and add your wage', 'Day by Day nudges toward shifts and wages');
+    eq(w.eval('theme.preset'), 'midnight', 'default theme unchanged');
+    ok(d.querySelector('.welcome-sub').textContent.includes('Deadlines list'), 'the welcome card describes the working-student setup');
+    const tour = w.eval('TOUR_STEPS.map(s => s.body).join(" ")');
+    ok(!/Morning routine|Weekend reset|Groceries|eight ready-made/i.test(tour), 'the tour no longer names the old starter content');
+    ok(/Sunday planning/.test(tour) && /Deadlines/.test(tour) && /paid shift/.test(tour), 'it names the new one');
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
