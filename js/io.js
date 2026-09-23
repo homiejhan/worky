@@ -2,7 +2,8 @@
 import { $, closeModal, showToast } from './util.js';
 import { applyState, compressState, gatherState, saveToLocal } from './persistence.js';
 import {
-  renderTimers, setWokenUp, syncWakeupUI, TIMER_DEFAULTS, timers, updateTimerSummary,
+  renderTimers, setWokenUp, syncWakeupUI, TIMER_DEFAULTS, timerLogOver, timers,
+  updateTimerSummary,
 } from './timers.js';
 import { renderTodos, todoLists } from './lists.js';
 import { renderHome } from './home.js';
@@ -60,10 +61,13 @@ export function resetAll() {
   closeModal('confirmOverlay');
   timers.forEach((t, i) => {
     const def = TIMER_DEFAULTS[i];
+    timerLogOver(t);            // an overrun still counts for today
     t.running = false;
     t.seconds = def ? def.seconds : t.seconds;
     t.startedAt = null;
     t.secondsAtStart = null;
+    t.over = 0;
+    t._overNoted = false;
   });
   setWokenUp(false);
   syncWakeupUI();

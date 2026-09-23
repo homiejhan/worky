@@ -75,7 +75,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     const today = w.eval('dbdTodayKey()');
     w.eval(`runway.payday = addDays('${today}', 20); runway.repeat = 'weekly'; runway.bills = [{ id: 3, name: 'Rent', amount: 650, day: 1 }]`);
     const st = w.gatherState();
-    eq(st.build, 5, 'state build 5 (runway is new)');
+    ok(st.build >= 5, `state build ${st.build} (runway arrived in build 5)`);
     const c = w.compressState(st);
     eq(JSON.stringify(c.rw), JSON.stringify({ p: st.runway.payday, r: 'weekly', b: [{ i: 3, n: 'Rent', a: 650, d: 1 }] }), 'Export writes rw');
     eq(JSON.stringify(w.decompressState(JSON.parse(JSON.stringify(c))).runway), JSON.stringify(st.runway), 'Import reads it back');

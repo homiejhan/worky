@@ -1,6 +1,7 @@
 /* timers.js — Timer state and cards, the woke-up checkbox and the time-remaining summary. */
 import {
-  $, escAttr, fmt, getRemaining, parseTime, pauseIcon, playIcon, resetIcon,
+  $, calDateKey, calToday, escAttr, fmt, getOvertime, getRemaining, parseTime, pauseIcon, playIcon,
+  resetIcon,
 } from './util.js';
 import { saveToLocal } from './persistence.js';
 import { formatMode } from './formats.js';
@@ -22,10 +23,64 @@ export let timers = TIMER_DEFAULTS.map((t, i) => ({
 }));
 export function setTimers(v) { timers = v; }
 
+/* Days a timer ran past zero, kept two weeks for the overrun insight (insights.js):
+ * { 'YYYY-MM-DD': { key: { label, over, budget } } }. `key` is the label in lower
+ * case, so a timer keeps its history through Formats and templates; `over` is the
+ * most it went over that day, in seconds, and `budget` its default length. */
+export let timerLog = {};
+export function setTimerLog(v) { timerLog = v; }
+const TIMER_LOG_DAYS = 14;
+const TIMER_LOG_MAX_OVER = 4 * 3600;   // a timer left running all night shouldn't skew the average
+export function normalizeTimerLog(v) {
+  const out = {};
+  if (!v || typeof v !== 'object') return out;
+  Object.entries(v).forEach(([day, entries]) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !entries || typeof entries !== 'object') return;
+    const e = {};
+    Object.entries(entries).forEach(([key, r]) => {
+      if (!key || !r || typeof r !== 'object') return;
+      e[key] = {
+        label: String(r.label ?? key).slice(0, 60),
+        over: Math.min(TIMER_LOG_MAX_OVER, Math.max(0, Math.round(Number(r.over) || 0))),
+        budget: Number.isFinite(r.budget) && r.budget > 0 ? Math.round(r.budget) : null,
+      };
+    });
+    if (Object.keys(e).length) out[day] = e;
+  });
+  return out;
+}
+/* Note in today's log that `t` went over, keeping the day's largest overrun.
+ * Called when a running timer reaches zero and whenever one that went over is
+ * paused, edited or reset, so the synced state doesn't change every second. */
+export function timerLogOver(t) {
+  if (!t || !(getOvertime(t) > 0 || (t.running && getRemaining(t) <= 0))) return;
+  const today = calDateKey(calToday());
+  const cutoff = new Date(calToday()); cutoff.setDate(cutoff.getDate() - TIMER_LOG_DAYS);
+  const oldest = calDateKey(cutoff);
+  const log = {};
+  Object.entries(timerLog).forEach(([day, e]) => { if (day > oldest) log[day] = e; });
+  const key = (t.label || '').trim().toLowerCase() || `timer ${t.id}`;
+  const prev = log[today] && log[today][key];
+  const def = timerDefault(t.id);
+  log[today] = { ...(log[today] || {}), [key]: {
+    label: t.label || 'Timer',
+    over: Math.min(TIMER_LOG_MAX_OVER, Math.max(prev ? prev.over : 0, Math.round(getOvertime(t)))),
+    budget: def && def.seconds > 0 ? def.seconds : (prev ? prev.budget : null),
+  } };
+  timerLog = log;
+}
+
 /* ───────────────────────── TIMERS ───────────────────────── */
 function timerById(id) { return timers.find(x => x.id === id); }
 /* A timer's default (template) record: TIMER_DEFAULTS runs parallel to timers. */
 function timerDefault(id) { return TIMER_DEFAULTS[timers.findIndex(x => x.id === id)]; }
+
+/* What a timer shows: time left, or +time over once it has passed zero. */
+export function timerDisplayText(t) {
+  const over = getOvertime(t);
+  return getRemaining(t) <= 0 && over >= 1 ? '+' + fmt(over) : fmt(getRemaining(t));
+}
+export function timerIsOver(t) { return getRemaining(t) <= 0 && getOvertime(t) >= 1; }
 
 /* Fraction of the timer's default budget still remaining (0–1). */
 function timerPct(t) {
@@ -50,7 +105,7 @@ function timerCardHTML(t, pfx) {
     </div>
     <div class="timer-body">
       <div class="timer-accent-bar tbar-${t.id}" style="background:${t.color}"></div>
-      <div class="timer-display tdisp-${t.id}" onclick="startEditTimer(${t.id}, '${pfx}')">${fmt(t.seconds)}</div>
+      <div class="timer-display tdisp-${t.id}" onclick="startEditTimer(${t.id}, '${pfx}')">${timerDisplayText(t)}</div>
       <input class="timer-time-edit tedit-${t.id}-${pfx}" type="text" placeholder="h:mm:ss"
         onblur="commitEditTimer(${t.id}, '${pfx}')"
         onkeydown="if(event.key==='Enter') commitEditTimer(${t.id}, '${pfx}')">
@@ -66,6 +121,7 @@ function timerCardHTML(t, pfx) {
     <div class="timer-sub tsub-${t.id}">${timerSubText(t)}</div>`;
 }
 function timerSubText(t) {
+  if (timerIsOver(t)) return t.running ? 'Over budget · still running' : `Paused · ${fmt(getOvertime(t))} over budget`;
   return t.running ? 'Running' : 'Paused · tap the time to edit';
 }
 
@@ -76,7 +132,7 @@ export function renderTimers() {
     stack.innerHTML = '';
     timers.forEach(t => {
       const card = document.createElement('div');
-      card.className = 'timer-card tcard-' + t.id + (t.running ? ' running' : '');
+      card.className = 'timer-card tcard-' + t.id + (t.running ? ' running' : '') + (timerIsOver(t) ? ' over' : '');
       card.style.setProperty('--tc', t.color);
       card.innerHTML = timerCardHTML(t, pfx);
       stack.appendChild(card);
@@ -109,10 +165,13 @@ export function toggleTimer(id) {
   const t = timerById(id);
   if (!t) return;
   if (t.running) {
+    t.over = Math.round(getOvertime(t));   // keep the time past zero; it shows as +m:ss
     t.seconds = getRemaining(t);
     t.running = false;
+    timerLogOver(t);
   } else {
-    if (t.seconds <= 0) return;
+    // At zero it starts anyway: the time counts as over budget.
+    t._overNoted = false;
     t.startedAt = Date.now();
     t.secondsAtStart = t.seconds;
     t.running = true;
@@ -129,7 +188,13 @@ export function updateTimerUI(id) {
     btn.classList.toggle('running', t.running);
   });
   document.querySelectorAll(`.tsub-${id}`).forEach(el => { el.textContent = timerSubText(t); });
-  document.querySelectorAll(`.tcard-${id}`).forEach(el => el.classList.toggle('running', t.running));
+  document.querySelectorAll(`.tcard-${id}`).forEach(el => {
+    el.classList.toggle('running', t.running);
+    el.classList.toggle('over', timerIsOver(t));
+  });
+  const txt = timerDisplayText(t);
+  document.querySelectorAll(`.tdisp-${id}`).forEach(el => { if (el.textContent !== txt) el.textContent = txt; });
+  document.querySelectorAll(`.hchip-${id}`).forEach(el => el.classList.toggle('over', timerIsOver(t)));
   timerPaintProgress(t);
 }
 
@@ -152,6 +217,9 @@ export function commitEditTimer(id, pfx) {
   if (edit) {
     const parsed = parseTime(edit.value);
     if (!isNaN(parsed) && parsed >= 0) {
+      timerLogOver(t);                     // a new time starts over: note any overrun first
+      t.over = 0;
+      t._overNoted = false;
       t.seconds = parsed;
       if (t.running) { t.startedAt = Date.now(); t.secondsAtStart = parsed; }
       const def = timerDefault(id);
@@ -161,9 +229,9 @@ export function commitEditTimer(id, pfx) {
   }
   document.querySelectorAll(`.tdisp-${id}`).forEach(el => {
     el.style.display = 'block';
-    el.textContent = fmt(t.seconds);
+    el.textContent = timerDisplayText(t);
   });
-  timerPaintProgress(t);
+  updateTimerUI(id);
   saveToLocal();
 }
 
@@ -171,10 +239,13 @@ export function resetTimer(id) {
   const t = timerById(id);
   if (!t) return;
   const def = timerDefault(id);
+  timerLogOver(t);
   t.running = false;
   t.seconds = def ? def.seconds : t.seconds;
   t.startedAt = null;
   t.secondsAtStart = null;
+  t.over = 0;
+  t._overNoted = false;
   document.querySelectorAll(`.tedit-${id}-d, .tedit-${id}-m`).forEach(el => el.style.display = 'none');
   document.querySelectorAll(`.tdisp-${id}`).forEach(el => {
     el.style.display = 'block';
@@ -196,10 +267,12 @@ export function tickAll() {
     timers.forEach(t => {
       if (!t.running) return;
       const rem = getRemaining(t);
-      const txt = fmt(rem);
+      const txt = timerDisplayText(t);
       document.querySelectorAll(`.tdisp-${t.id}`).forEach(el => { if (el.textContent !== txt) el.textContent = txt; });
       timerPaintProgress(t);
-      if (rem <= 0) { t.seconds = 0; t.running = false; updateTimerUI(t.id); }
+      // Past zero a timer keeps running as overtime. The first tick over notes
+      // the overrun in today's log and turns the card red.
+      if (rem <= 0 && !t._overNoted) { t._overNoted = true; timerLogOver(t); updateTimerUI(t.id); saveToLocal(); }
     });
     if (wokenUp) updateTimerSummary();
   }
