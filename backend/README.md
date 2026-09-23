@@ -19,14 +19,14 @@ backend/
 
 ## How the two halves meet
 
-`app.js` syncs the whole app as one JSON blob at `users/<uid>/state` with its own
+The app (`js/sync.js`) syncs everything as one JSON blob at `users/<uid>/state` with its own
 conflict resolution. The backend never writes there. It writes a sibling node:
 
 ```
 users/<uid>/digestInbox = { at, markdown, count, model, source: "github", tasks: [...] }
 ```
 
-`app.js` (`digestInboxSeen` / `digestInboxFlush`) watches for it, and every device
+`js/digest.js` (`digestInboxSeen` / `digestInboxFlush`) watches for it, and every device
 merges it for itself when it is newer than the digest that device holds. Sync
 pushes use `update()`, which leaves sibling nodes alone, so the inbox stays until
 the next run overwrites it: a device opened hours later still finds it. **Clear
