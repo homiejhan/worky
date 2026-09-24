@@ -1,39 +1,22 @@
 /* Lists / Daily tab split — mobile panels + desktop right-panel pages.
- * Run: node tests/test_tabs.js */
-const { JSDOM } = require('jsdom');
-const fs = require('fs');
-const path = require('path');
-
-const DIR = path.join(__dirname, '..');   // repo root (tests live in tests/)
-const html = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8')
-  .replace(/<script src="[^"]*"><\/script>/g, '')
-  .replace(/<link[^>]*fonts\.googleapis[^>]*>/g, '');
-const appJs = fs.readFileSync(path.join(DIR, 'app.js'), 'utf8');
+ * Run: npm test (or node --experimental-vm-modules tests/test_tabs.js) */
+const { loadApp } = require('./load-app');
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; console.log('  ✓', msg); } else { fail++; console.log('  ✗', msg); } }
 function eq(a, b, msg) { ok(a === b, `${msg} (got ${JSON.stringify(a)})`); }
 
-function boot(storageSeed) {
-  const dom = new JSDOM(html, { url: 'https://localhost/worky/', runScripts: 'dangerously', pretendToBeVisual: true });
-  const w = dom.window;
-  if (storageSeed) Object.entries(storageSeed).forEach(([k, v]) => w.localStorage.setItem(k, v));
-  Object.defineProperty(w, 'confirm', { value: () => true, writable: true, configurable: true });
-  w.matchMedia = w.matchMedia || (() => ({ matches: false, addListener() {}, removeListener() {} }));
-  const s = w.document.createElement('script');
-  s.textContent = appJs;
-  w.document.body.appendChild(s);
-  return { dom, w, d: w.document };
-}
+function boot(storageSeed) { return loadApp({ storage: storageSeed }); }
 /* app state lives in top-level let/const, so read it through eval */
 const get = (w, expr) => w.eval(expr);
 const shown = el => el.style.display !== 'none';
 /* which panel the swipe track is slid to, read off its transform */
 const trackIdx = (w, d) => -parseFloat(d.getElementById('swipeTrack').style.transform.replace('translateX(', '')) / get(w, 'swipeFrameWidth()');
 
+(async () => {   // the app boots asynchronously now (ES modules), so the checks run in here
 console.log('\n── 1. Mobile: six tabs, Daily has its own panel ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   const tabs = [...d.querySelectorAll('.tab-btn')].map(b => b.dataset.view);
   eq(tabs.join(','), 'home,timers,lists,daily,calendar,budget', 'tab bar order');
   const panels = [...d.querySelectorAll('.swipe-panel')].map(p => p.dataset.view);
@@ -53,7 +36,7 @@ console.log('\n── 1. Mobile: six tabs, Daily has its own panel ──');
 
 console.log('\n── 2. Mobile: navigation ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   d.querySelector('.tab-btn[data-view="daily"]').click();
   eq(get(w, 'currentView'), 'daily', 'tapping Daily selects the daily panel');
   eq(trackIdx(w, d), 3, 'track slides to the 4th panel');
@@ -66,7 +49,7 @@ console.log('\n── 2. Mobile: navigation ──');
 
 console.log('\n── 3. Mobile: daily cards render in the Daily panel ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   w.eval(`todoLists.push({ id: todoIdCounter++, title: 'Test routine', color: '#22C55E', isDefault: true, activeDays: null, tasks: [] });
           todoLists.push({ id: todoIdCounter++, title: 'Test custom',  color: '#8B5CF6', isDefault: false, tasks: [] });
           renderTodos();`);
@@ -78,7 +61,7 @@ console.log('\n── 3. Mobile: daily cards render in the Daily panel ──');
 
 console.log('\n── 4. Desktop: sidebar Daily button + right-panel pages ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   const rp = d.getElementById('rightPanel');
   const listsNav = d.getElementById('listsDesktopNavTab');
   const dailyNav = d.getElementById('dailyDesktopNavTab');
@@ -114,7 +97,7 @@ console.log('\n── 4. Desktop: sidebar Daily button + right-panel pages ─�
 
 console.log('\n── 5. Settings toggles ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   d.getElementById('dailyDesktopNavTab').click();
   w.setViewEnabled('daily', false);
   ok(!shown(d.querySelector('.tab-btn[data-view="daily"]')), 'Daily off → mobile tab hidden');
@@ -140,17 +123,17 @@ console.log('\n── 5. Settings toggles ──');
 
 console.log('\n── 6. Persisted: a saved "daily off" still hides the tab after reload ──');
 {
-  const a = boot();
+  const a = await boot();
   a.w.setViewEnabled('daily', false);
   const saved = a.w.localStorage.getItem('focus-app-state');
-  const b = boot({ 'focus-app-state': saved });
+  const b = await boot({ 'focus-app-state': saved });
   ok(!shown(b.d.querySelector('.tab-btn[data-view="daily"]')), 'tab hidden after reload');
   ok(!shown(b.d.getElementById('dailyDesktopNavTab')), 'sidebar button hidden after reload');
 }
 
 console.log('\n── 7. Daily empty states ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   w.eval('todoLists = todoLists.filter(l => !l.isDefault); renderTodos();');
   const hint = d.querySelector('#defaultContainer-m .daily-empty');
   ok(!!hint && /No daily lists yet/.test(hint.textContent), 'no daily lists → hint instead of a blank page');
@@ -165,7 +148,7 @@ console.log('\n── 7. Daily empty states ──');
 
 console.log('\n── 8. Tour opens the right desktop page ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   w.eval('isMobileLayout = () => false');
   w.tourGoView('daily');
   eq(d.getElementById('rightPanel').dataset.page, 'daily', 'Daily step → Daily page');
@@ -177,3 +160,4 @@ console.log('\n── 8. Tour opens the right desktop page ──');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
+})().catch(e => { console.error(e); process.exit(1); });

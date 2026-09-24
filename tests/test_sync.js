@@ -1,13 +1,8 @@
-/* Cloud sync — headless tests (node tests/test_sync.js; needs `npm i jsdom`).
+/* Cloud sync — headless tests. Run: npm test (or node --experimental-vm-modules tests/test_sync.js).
  * Two simulated devices share a fake Realtime Database node. Also simulates
  * an "older build" device that strips fields it does not know about — the
  * situation that made the digest revert and sync bounce forever. */
-const { JSDOM } = require('jsdom');
-const fs = require('fs');
-const path = require('path');
-const DIR = path.join(__dirname, '..');   // repo root (tests live in tests/)
-const html = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8').replace(/<script[^>]*src="[^"]*"[^>]*><\/script>/g, '');
-const src = fs.readFileSync(path.join(DIR, 'app.js'), 'utf8');
+const { loadApp } = require('./load-app');
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; console.log('  ✓', msg); } else { fail++; console.log('  ✗', msg); } }
@@ -31,21 +26,20 @@ function makeRef() {
     },
   };
 }
-function boot(name, storage = {}) {
-  const dom = new JSDOM(html, { runScripts: 'dangerously', pretendToBeVisual: true, url: 'https://localhost/worky/' });
-  const w = dom.window;
-  Object.entries(storage).forEach(([k, v]) => w.localStorage.setItem(k, v));
-  Object.defineProperty(w, 'confirm', { value: () => true, writable: true, configurable: true });
-  w.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} });
-  w.HTMLElement.prototype.scrollIntoView = function () {};
+async function boot(name, storage = {}) {
   let authCb = null;
-  w.firebase = { initializeApp() {}, auth: () => ({ onAuthStateChanged(cb) { authCb = cb; }, signOut() {} }), database: () => ({ ref: () => makeRef() }) };
-  w.__stats = { applies: 0, pushes: 0 };
-  const s = w.document.createElement('script');
-  s.textContent = src
-    .replace('function syncApplyRemote(remoteStr, remoteUpdatedAt) {', 'function syncApplyRemote(remoteStr, remoteUpdatedAt) { window.__stats.applies++;')
-    .replace('  syncRef.update(payload)', '  window.__stats.pushes++;\n  syncRef.update(payload)');
-  w.document.body.appendChild(s);
+  const { w } = await loadApp({
+    storage,
+    before: w => {
+      w.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} });
+      w.HTMLElement.prototype.scrollIntoView = function () {};
+      w.firebase = { initializeApp() {}, auth: () => ({ onAuthStateChanged(cb) { authCb = cb; }, signOut() {} }), database: () => ({ ref: () => makeRef() }) };
+      w.__stats = { applies: 0, pushes: 0 };
+    },
+    transform: src => src
+      .replace('function syncApplyRemote(remoteStr, remoteUpdatedAt) {', 'function syncApplyRemote(remoteStr, remoteUpdatedAt) { window.__stats.applies++;')
+      .replace('  syncRef.update(payload)', '  window.__stats.pushes++;\n  syncRef.update(payload)'),
+  });
   w.document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
   w.__signIn = () => authCb({ uid: 'u1', email: 'me@example.com', getIdToken: async () => 't' });
   return { name, w, d: w.document };
@@ -55,7 +49,7 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
 (async () => {
   console.log('\n── 1. Fingerprint is stable across save/load and ignores key order ──');
   {
-    const { w } = boot('solo');
+    const { w } = await boot('solo');
     const rt = () => { w.localStorage.setItem('focus-app-state', JSON.stringify(w.gatherState())); w.loadFromLocal(); };
     w.digestLoadSample(); w.digestAddTask(1);
     const a = fpOf(w); rt(); const b = fpOf(w); rt(); const c = fpOf(w);
@@ -69,11 +63,11 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
   }
 
   console.log('\n── 2. Two devices on the same build converge without echo applies ──');
-  const A = boot('A');
+  const A = await boot('A');
   A.w.localStorage.setItem('focus-sync-meta', JSON.stringify({ pushedAt: 1, knownHash: 'x' }));
   A.w.__signIn(); await sleep(60);
   ok(!!cloud.val, 'A seeded the cloud');
-  const B = boot('B', { 'focus-app-state': cloud.val.state, 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: A.w.eval('syncHash(syncFingerprint(gatherState()))') }) });
+  const B = await boot('B', { 'focus-app-state': cloud.val.state, 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: A.w.eval('syncHash(syncFingerprint(gatherState()))') }) });
   B.w.__signIn(); await sleep(120);
   eq(A.w.__stats.applies + B.w.__stats.applies, 0, 'identical devices: nothing applied on connect');
 
@@ -126,10 +120,10 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
   console.log('\n── 4. Backend delivers to digestInbox; both devices merge it; pushes leave the inbox in place ──');
   {
     cloud.val = null; cloud.listeners.length = 0; cloud.hooks.length = 0;
-    const L = boot('laptop', { 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }) });
+    const L = await boot('laptop', { 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }) });
     L.w.digestGet().enabled = true; L.w.saveToLocal();
     L.w.__signIn(); await sleep(80);
-    const P = boot('phone', { 'focus-app-state': cloud.val.state, 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: L.w.eval('syncHash(syncFingerprint(gatherState()))') }) });
+    const P = await boot('phone', { 'focus-app-state': cloud.val.state, 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: L.w.eval('syncHash(syncFingerprint(gatherState()))') }) });
     P.w.__signIn(); await sleep(120);
     eq(L.w.digestGet().last, null, 'laptop starts with no digest');
     eq(P.w.digestGet().last, null, 'phone starts with no digest');
@@ -183,7 +177,7 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
    * reconcile, and the digest vanished from BOTH devices with nothing to restore it. */
   {
     reset();
-    const L = boot('laptop', { 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }) });
+    const L = await boot('laptop', { 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }) });
     L.w.__signIn(); await sleep(80);
     const base = cloud.val.state, baseHash = hashOf(L.w);
     const at = Date.now();
@@ -191,7 +185,7 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
     ok(!!L.w.digestGet().last, 'laptop (the only device open) merged the digest');
     ok(!!JSON.parse(cloud.val.state).digest.last, 'and pushed it');
 
-    const P = boot('phone', { 'focus-app-state': base, 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: baseHash, editAt: 1 }) });
+    const P = await boot('phone', { 'focus-app-state': base, 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: baseHash, editAt: 1 }) });
     await sleep(30);
     P.w.eval("dbdTasks.push({ id: 9999, text: 'typed on the phone before sync connected', date: '2026-09-21', done: false }); saveToLocal();");
     P.w.__signIn(); await sleep(3200);
@@ -207,7 +201,7 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
   console.log('\n── 6. Merging a delivery is not a user edit: a stale phone must not stomp the laptop ──');
   {
     reset();
-    const L = boot('laptop', { 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }) });
+    const L = await boot('laptop', { 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }) });
     L.w.__signIn(); await sleep(80);
     const base = cloud.val.state, baseHash = hashOf(L.w);
     /* overnight: the laptop adds a task; the backend delivers while the laptop is in Formats (so it cannot merge yet) */
@@ -219,7 +213,7 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
     deliver(INBOX(at, 1)); await sleep(200);
     eq(L.w.digestGet().last, null, 'laptop holds the delivery while Formats is open');
     /* morning: the phone opens from yesterday's state; the inbox is newer than anything it has */
-    const P = boot('phone', { 'focus-app-state': base, 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: baseHash, editAt: 1 }) });
+    const P = await boot('phone', { 'focus-app-state': base, 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: baseHash, editAt: 1 }) });
     P.w.__signIn(); await sleep(2500);
     ok(P.w.eval("dbdTasks.some(t => t.id === 4242)"), "phone took the laptop's task instead of overwriting it");
     ok(!!P.w.digestGet().last && P.w.digestGet().last.at === at, 'and merged the digest on top');
@@ -233,9 +227,9 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
   console.log('\n── 7. Clear digest stays cleared even though the inbox is still in the cloud ──');
   {
     reset();
-    const L = boot('laptop', { 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }) });
+    const L = await boot('laptop', { 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }) });
     L.w.__signIn(); await sleep(80);
-    const P = boot('phone', { 'focus-app-state': cloud.val.state, 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: hashOf(L.w) }) });
+    const P = await boot('phone', { 'focus-app-state': cloud.val.state, 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: hashOf(L.w) }) });
     P.w.__signIn(); await sleep(120);
     const at = Date.now();
     deliver(INBOX(at, 1)); await sleep(1800);
@@ -248,7 +242,7 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
     eq(L.w.digestGet().last, null, 'a later cloud event does not bring it back on the laptop');
     eq(P.w.digestGet().last, null, 'nor on the phone');
     /* a device reopened from its saved state */
-    const P2 = boot('phone-reopened', { 'focus-app-state': JSON.stringify(P.w.gatherState()), 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: hashOf(P.w) }) });
+    const P2 = await boot('phone-reopened', { 'focus-app-state': JSON.stringify(P.w.gatherState()), 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: hashOf(P.w) }) });
     P2.w.__signIn(); await sleep(300);
     eq(P2.w.digestGet().last, null, 'nor after reopening the app');
     /* the next real delivery still arrives everywhere */
@@ -261,14 +255,14 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
   console.log('\n── 8. A device that signs in later (Import) still gets the delivered digest ──');
   {
     reset();
-    const L = boot('laptop', { 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }) });
+    const L = await boot('laptop', { 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }) });
     L.w.eval("dbdTasks.push({ id: 77, text: 'laptop task', date: '2026-09-21', done: false }); saveToLocal();");
     L.w.__signIn(); await sleep(80);
     const stateBefore = cloud.val.state;
     const at = Date.now();
     /* the delivery sits in the inbox but no open device has folded it into the state blob */
     cloud.val = { state: stateBefore, updatedAt: cloud.val.updatedAt, client: cloud.val.client, digestInbox: INBOX(at, 1) };
-    const N = boot('new-phone');                      // fresh install: no baseline → Import/Export modal
+    const N = await boot('new-phone');                      // fresh install: no baseline → Import/Export modal
     N.w.__signIn(); await sleep(200);
     ok(N.d.getElementById('syncChoiceModal').classList.contains('show'), 'new device is asked Import / Export');
     eq(N.w.digestGet().last, null, 'nothing merged while the choice is open');

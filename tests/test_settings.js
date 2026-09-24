@@ -1,36 +1,20 @@
 /* Settings master–detail — section list + one pane at a time.
- * Run: node tests/test_settings.js */
-const { JSDOM } = require('jsdom');
-const fs = require('fs');
-const path = require('path');
-
-const DIR = path.join(__dirname, '..');   // repo root (tests live in tests/)
-const html = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8')
-  .replace(/<script src="[^"]*"><\/script>/g, '')
-  .replace(/<link[^>]*fonts\.googleapis[^>]*>/g, '');
-const appJs = fs.readFileSync(path.join(DIR, 'app.js'), 'utf8');
+ * Run: npm test (or node --experimental-vm-modules tests/test_settings.js) */
+const { loadApp } = require('./load-app');
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; console.log('  ✓', msg); } else { fail++; console.log('  ✗', msg); } }
 function eq(a, b, msg) { ok(a === b, `${msg} (got ${JSON.stringify(a)})`); }
 
-function boot() {
-  const dom = new JSDOM(html, { url: 'https://localhost/worky/', runScripts: 'dangerously', pretendToBeVisual: true });
-  const w = dom.window;
-  Object.defineProperty(w, 'confirm', { value: () => true, writable: true, configurable: true });
-  w.matchMedia = w.matchMedia || (() => ({ matches: false, addListener() {}, removeListener() {} }));
-  const s = w.document.createElement('script');
-  s.textContent = appJs;
-  w.document.body.appendChild(s);
-  return { w, d: w.document };
-}
+function boot() { return loadApp(); }
 const activeSections = d => [...d.querySelectorAll('.settings-section.active')].map(s => s.dataset.settingsSection);
 const activeNav = d => [...d.querySelectorAll('.settings-nav-item.active')].map(b => b.dataset.settingsNav);
 const KEYS = 'views,appearance,gcal,sync,digest,help,data';
 
+(async () => {   // the app boots asynchronously now (ES modules), so the checks run in here
 console.log('\n── 1. Structure: every old control still exists, in exactly one section ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   d.getElementById('settingsBtn').click();
   ok(d.getElementById('settingsModal').classList.contains('show'), 'gear opens Settings');
   eq([...d.querySelectorAll('[data-settings-nav]')].map(b => b.dataset.settingsNav).join(','), KEYS, 'nav lists all seven sections');
@@ -52,7 +36,7 @@ console.log('\n── 1. Structure: every old control still exists, in exactly o
 
 console.log('\n── 2. Only one section shows at a time ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   d.getElementById('settingsBtn').click();
   eq(d.getElementById('settingsBox').dataset.stage, 'list', 'plain open → mobile starts on the list');
   eq(activeSections(d).join(','), 'views', 'first section is the default pane');
@@ -69,7 +53,7 @@ console.log('\n── 2. Only one section shows at a time ──');
 
 console.log('\n── 3. Back button + reopen behaviour ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   d.getElementById('settingsBtn').click();
   d.querySelector('[data-settings-nav="appearance"]').click();
   d.getElementById('settingsBackBtn').click();
@@ -84,7 +68,7 @@ console.log('\n── 3. Back button + reopen behaviour ──');
 
 console.log('\n── 4. Deep links ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   w.openSettings('digest');
   eq(d.getElementById('settingsBox').dataset.stage, 'detail', 'openSettings("digest") skips the list');
   eq(activeSections(d).join(','), 'digest', 'and lands on Email Digest');
@@ -99,7 +83,7 @@ console.log('\n── 4. Deep links ──');
 
 console.log('\n── 5. Controls inside panes still work ──');
 {
-  const { w, d } = boot();
+  const { w, d } = await boot();
   d.getElementById('settingsBtn').click();
   d.querySelector('[data-settings-nav="views"]').click();
   const t = d.querySelector('[data-viewtoggle="budget"]');
@@ -115,3 +99,4 @@ console.log('\n── 5. Controls inside panes still work ──');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
+})().catch(e => { console.error(e); process.exit(1); });
