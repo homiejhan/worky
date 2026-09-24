@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Help — Focus</title>
+  <meta name="description" content="How to use Focus: timers, lists, the calendar and shifts, Google Calendar, the budget and cash runway, cloud sync, bank accounts, and the privacy policy.">
+  <meta name="theme-color" content="#0d0f15">
+  <link rel="icon" href="../icon-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:ital,opsz,wght,SOFT@0,9..144,400..700,100;1,9..144,400..700,100&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0d0f15; --surface: #151823; --elevated: #1c202c;
+      --border: rgba(238,240,244,0.07); --border-mid: rgba(238,240,244,0.12);
+      --ink: #eef0f4; --ink-2: #c3c9d4; --ink-3: #8a93a3;
+      --accent: #5dcaa5; --accent-dim: rgba(93,202,165,0.12);
+      --warn: #e0a23b;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0; background: var(--bg); color: var(--ink-2);
+      font: 16px/1.65 "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--accent); text-underline-offset: 2px; }
+    code, pre { font-family: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .88em; }
+    code { background: var(--elevated); padding: .1em .35em; border-radius: 4px; color: var(--ink); overflow-wrap: anywhere; }
+    pre { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; }
+    pre code { background: none; padding: 0; }
+    strong, b { color: var(--ink); font-weight: 600; }
+
+    .page { max-width: 760px; margin: 0 auto; padding: 36px 20px 96px; }
+    @media (min-width: 1180px) {
+      .page { max-width: 1060px; display: grid; grid-template-columns: 224px minmax(0, 1fr); column-gap: 64px; }
+      .page > header { grid-column: 1 / -1; }
+      .toc { position: sticky; top: 24px; align-self: start; max-height: calc(100vh - 48px); overflow-y: auto; }
+      .toc ol { grid-template-columns: 1fr !important; }
+    }
+
+    .back { display: inline-block; margin-bottom: 26px; color: var(--ink-3); text-decoration: none; font-weight: 500; }
+    .back:hover { color: var(--ink); }
+    h1, h2 { font-family: "Fraunces", Georgia, serif; font-weight: 600; color: var(--ink); letter-spacing: -.01em; line-height: 1.15; }
+    h1 { font-size: 2.6rem; margin: 0 0 10px; }
+    .lede { font-size: 1.08rem; margin: 0 0 30px; max-width: 640px; }
+    h2 { font-size: 1.75rem; margin: 0 0 12px; }
+    h3 { font-size: 1.05rem; color: var(--ink); margin: 28px 0 6px; }
+    section, h3[id] { scroll-margin-top: 16px; }
+    section { padding-top: 44px; }
+    section + section { border-top: 1px solid var(--border); margin-top: 44px; }
+    main > section:first-child { padding-top: 0; }
+    p { margin: 0 0 14px; }
+    ul, ol { padding-left: 22px; margin: 0 0 14px; }
+    li { margin: 6px 0; }
+    .where { color: var(--ink-3); font-size: .95rem; margin-top: -4px; }
+
+    .toc { margin-bottom: 36px; }
+    .toc-title { font-size: .78rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 8px; }
+    .toc ol { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 2px 16px; }
+    .toc li { margin: 0; }
+    .toc a { display: block; padding: 5px 10px; margin-left: -10px; border-radius: 8px; color: var(--ink-2); text-decoration: none; font-size: .95rem; }
+    .toc a:hover { background: var(--surface); color: var(--ink); }
+
+    ol.steps { list-style: none; counter-reset: step; padding: 0; }
+    ol.steps > li { counter-increment: step; position: relative; padding-left: 40px; margin: 12px 0; }
+    ol.steps > li::before {
+      content: counter(step); position: absolute; left: 0; top: 1px;
+      width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+      background: var(--accent-dim); color: var(--accent); font-size: .85rem; font-weight: 700;
+    }
+
+    figure { margin: 22px 0 26px; }
+    figure img { display: block; width: 100%; height: auto; border-radius: 14px; border: 1px solid var(--border-mid); background: var(--surface); }
+    figcaption { margin-top: 8px; font-size: .9rem; color: var(--ink-3); }
+    figure.small { max-width: 440px; }
+    .phones { display: flex; flex-wrap: wrap; gap: 18px; margin: 22px 0 26px; }
+    .phones figure { flex: 1 1 200px; max-width: 290px; margin: 0; }
+    .phones img { border-radius: 24px; }
+    @media (max-width: 640px) { .swap-phone img { max-width: 290px; border-radius: 24px; } }
+
+    .note { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 12px; padding: 14px 16px; margin: 20px 0; }
+    .note > :last-child { margin-bottom: 0; }
+    .note-title { display: block; color: var(--ink); font-weight: 600; margin-bottom: 4px; }
+    .note.admin { border-left-color: var(--warn); }
+
+    #privacy h2 { margin-bottom: 4px; }
+    .updated { color: var(--ink-3); margin: 0 0 18px; font-size: .95rem; }
+    .top { display: inline-block; margin-top: 8px; font-size: .9rem; color: var(--ink-3); text-decoration: none; }
+    .top:hover { color: var(--ink); }
+    footer { margin-top: 56px; color: var(--ink-3); font-size: .9rem; }
+  </style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <a class="back" href="../">← Back to Focus</a>
+    <h1>Focus help</h1>
+    <p class="lede">Focus (also called Worky) is a planner for students who work: classes, shifts and cash on one page. This page shows how each part works, how to connect cloud sync, Google Calendar and a bank, and what Focus does with your data.</p>
+  </header>
+
+  <nav class="toc" aria-label="Contents">
+    <p class="toc-title">Contents</p>
+    <ol>
+      <li><a href="#start">Start here</a></li>
+      <li><a href="#home">Home and Heads up</a></li>
+      <li><a href="#timers">Timers</a></li>
+      <li><a href="#lists">Lists and Day by Day</a></li>
+      <li><a href="#daily">Daily routines</a></li>
+      <li><a href="#calendar">Calendar and shifts</a></li>
+      <li><a href="#google-calendar">Google Calendar and work schedules</a></li>
+      <li><a href="#budget">Budget and cash runway</a></li>
+      <li><a href="#cloud">Cloud sync</a></li>
+      <li><a href="#bank">Bank accounts</a></li>
+      <li><a href="#digest">Email digest</a></li>
+      <li><a href="#formats">Formats and templates</a></li>
+      <li><a href="#data">Your data</a></li>
+      <li><a href="#privacy">Privacy policy</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <section id="start">
+      <h2>Start here</h2>
+      <p>Focus runs in your web browser, so there is nothing to install. It keeps working without a connection once it has loaded, and it saves as you go.</p>
+      <ul>
+        <li><strong>Keep it on your phone:</strong> on an iPhone, open Focus in Safari and choose Share → <strong>Add to Home Screen</strong>. On Android, open it in Chrome and choose <strong>Install app</strong> or <strong>Add to Home screen</strong> from the menu.</li>
+        <li><strong>Your first visit</strong> loads the <strong>Working student</strong> setup: Study, Work and Sleep timers, Daily routines, a Deadlines list and a few blocks on the calendar. Change any of it in <a href="#formats">Formats</a>.</li>
+        <li><strong>Where things are:</strong> on a computer, the sidebar on the left has Home, Lists, Daily, Calendar and Budget, your timers, and at the bottom Formats, Settings (the gear), Export, Import and Reset the day. On a phone, the pages (and Timers) are tabs along the bottom; Formats, Settings and ⋯ (Export, Import, Reset the day) are at the top.</li>
+        <li><strong>The tour</strong> walks through every section one step at a time. Replay it from <strong>Settings → Help → Take the tour</strong>.</li>
+      </ul>
+      <figure>
+        <img src="img/home.webp" width="800" height="500" alt="Focus on a computer: the sidebar with Woke up, the pages and the timers; Home with Good morning, a daily balance of $7.50, three Heads up cards, today's tasks and the next four hours.">
+        <figcaption>Home on a computer, with a sample week of shifts, deadlines and bills.</figcaption>
+      </figure>
+    </section>
+
+    <section id="home">
+      <h2>Home and Heads up</h2>
+      <p>Home gathers today in one place: how many of today's tasks are done, the tasks due today, what's on the calendar in the next four hours, your timers, and today's balance from the budget.</p>
+      <p><strong>Heads up</strong> cards appear only when something needs you, and each has a button that goes straight to where you fix it. Focus works these out from your own shifts, deadlines, cash and timers, on your device.</p>
+      <ul>
+        <li><strong>A shift lands on a deadline:</strong> a paid shift in the next week falls in the 24 hours before something on your <strong>Deadlines</strong> list is due. Deadlines count as due at the end of their day.</li>
+        <li><strong>Cash runs out before payday:</strong> your <a href="#budget">cash runway</a> says the money ends before your next paycheck arrives, and roughly how much more would carry you to payday.</li>
+        <li><strong>The budget is wrong, not you:</strong> a timer ran over its time three days running. Focus suggests a longer time: the old one plus the average overrun, rounded up to a quarter hour.</li>
+      </ul>
+      <div class="phones">
+        <figure>
+          <img src="img/phone-home.webp" width="390" height="844" loading="lazy" alt="Home on a phone with three Heads up cards: A shift lands on a deadline, Cash runs out before payday, and Study: the budget is wrong, not you.">
+          <figcaption>Heads up on a phone.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="timers">
+      <h2>Timers</h2>
+      <p>Each timer is a time budget for something that matters today, like Study or Work.</p>
+      <ul>
+        <li>Press <strong>play</strong> to start and <strong>pause</strong> to stop. Tap the time to change it; the circular arrow resets that timer.</li>
+        <li>When a timer passes zero it keeps counting in red, for example <strong>+12:34 Over budget</strong>, so you see how far over you went.</li>
+        <li>Tick <strong>Woke up</strong> when you get up: Focus then shows how much timer time is left today and when you'd finish if you ran the timers back to back.</li>
+        <li>Which timers exist and how long each runs are set in <a href="#formats">Formats</a>.</li>
+      </ul>
+      <div class="phones">
+        <figure>
+          <img src="img/phone-timers.webp" width="390" height="844" loading="lazy" alt="The Timers page on a phone: Study is running and 12 minutes 34 seconds over budget in red; Work shows 4:00:00 and Sleep 8:00:00, paused.">
+          <figcaption>Study, running and over its time.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="lists">
+      <h2>Lists and Day by Day</h2>
+      <p><strong>Day by Day</strong> holds tasks with a date. Type the task, pick the date and press <strong>+ Add</strong>. Tasks are grouped by day (Today, Tomorrow, then each date) and show up on Home on their day. Tap a task's date to move it.</p>
+      <p><strong>Lists</strong> are your own collections, under the Lists heading lower on the same page (<strong>+ New list</strong>). The <strong>Tag</strong> menu on a dated task files it in one of your lists.</p>
+      <p>The Working student setup includes a <strong>Deadlines</strong> list. Put each assignment there with its due date: Home warns you when a shift falls in the 24 hours before it's due.</p>
+      <figure class="swap-phone">
+        <picture>
+          <source media="(max-width: 640px)" srcset="img/phone-lists.webp" width="390" height="844">
+          <img src="img/lists.webp" width="700" height="558" loading="lazy" alt="The Lists page: a New task box with a date and Add button, then tasks grouped under Today, Tomorrow and later dates; assignments carry a red Deadlines tag.">
+        </picture>
+        <figcaption>Day by Day, with assignments tagged Deadlines.</figcaption>
+      </figure>
+    </section>
+
+    <section id="daily">
+      <h2>Daily routines</h2>
+      <p>Daily lists are checklists that start fresh every day, like <strong>Before class or shift</strong> and <strong>Wind down</strong>. Add to one with <strong>+ Add task</strong>; <strong>Reset the day</strong> unchecks them all. Which Daily lists exist is set in <a href="#formats">Formats</a>.</p>
+      <div class="phones">
+        <figure>
+          <img src="img/phone-daily.webp" width="390" height="844" loading="lazy" alt="The Daily page on a phone with two checklists: Before class or shift, and Wind down.">
+          <figcaption>Two Daily routines.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="calendar">
+      <h2>Calendar and shifts</h2>
+      <p>On a computer the calendar shows the next seven days, starting today, and the <strong>Sun – Sat</strong> button in the sidebar switches to the calendar week. On a phone it shows one day at a time; the arrows move between days. It holds your weekly blocks (set in <a href="#formats">Formats</a>), events you add, and your Google Calendar events if you <a href="#google-calendar">connect it</a>. The colored dots at the top hide or show events of that color.</p>
+      <ol class="steps">
+        <li><strong>Add an event:</strong> click or tap an empty time on the day. To move an event, drag it.</li>
+        <li><strong>Make it a paid shift:</strong> in the event, press <strong>Paid shift</strong> and enter your hourly wage. Focus shows what that shift pays.</li>
+        <li><strong>See the week's pay</strong> at the top of the calendar, for example “Next 7 days: $225.00 from 4 shifts · 19 h”. A shift without a wage shows a <strong>shift</strong> tag and isn't counted until you add one.</li>
+      </ol>
+      <figure class="swap-phone">
+        <picture>
+          <source media="(max-width: 640px)" srcset="img/phone-calendar.webp" width="390" height="844">
+          <img src="img/calendar.webp" width="700" height="697" loading="lazy" alt="The calendar with shifts at Campus Café and a Library desk shift, study blocks and Lunch dividers. The line at the top reads Next 7 days: $225.00 from 4 shifts, 19 hours, 1 without a wage.">
+        </picture>
+        <figcaption>The week's pay sits under the date.</figcaption>
+      </figure>
+      <figure class="small">
+        <img src="img/shift-editor.webp" width="420" height="576" loading="lazy" alt="Editing the event Campus Café, 5:00 PM to 10:00 PM, with Paid shift selected at $15.50 an hour: 5 h × $15.50 = $77.50, counted in the week's pay.">
+        <figcaption>A shift with its wage.</figcaption>
+      </figure>
+      <p>A <strong>Divider</strong> (like Lunch) is a thin line across the day instead of a block. The <strong>Task</strong> menu links an event to one of your tasks, and the event takes the task's name.</p>
+    </section>
+
+    <section id="google-calendar">
+      <h2>Google Calendar and work schedules</h2>
+      <p>Connect Google Calendar to see your classes, plans and work schedule next to everything else in Focus.</p>
+      <ol class="steps">
+        <li>Open <strong>Settings → Google Calendar</strong> and press <strong>Connect Google Calendar</strong>.</li>
+        <li>Choose your Google account and allow access to your calendars. You come back to Focus and your events appear on the calendar.</li>
+        <li>Press <strong>Manage Google Calendars</strong> to choose which calendars show, or to disconnect.</li>
+      </ol>
+      <figure>
+        <picture>
+          <source media="(max-width: 640px)" srcset="img/gcal-connect-pane.webp" width="555" height="455">
+          <img src="img/gcal-connect.webp" width="780" height="455" loading="lazy" alt="Settings, Google Calendar section: Not connected, with a Connect Google Calendar button and a link to this help.">
+        </picture>
+        <figcaption>Settings → Google Calendar.</figcaption>
+      </figure>
+      <figure class="small">
+        <img src="img/gcal-calendars.webp" width="460" height="325" loading="lazy" alt="Google Calendars window with switches for Work schedule (tagged Shifts), Personal and Classes, and Disconnect and Sync now buttons.">
+        <figcaption>Choose the calendars that show in Focus.</figcaption>
+      </figure>
+
+      <h3>Bring in your work schedule</h3>
+      <p>Most scheduling apps can share your shifts as a calendar link, usually called calendar sync, a calendar feed or iCal. Add that link to Google Calendar once and your shifts show up in Focus by themselves:</p>
+      <ol class="steps">
+        <li>In your scheduling app's settings, find the calendar sync or iCal option and copy the link.</li>
+        <li>In Google Calendar on a computer, next to <strong>Other calendars</strong> press <strong>+</strong>, choose <strong>From URL</strong>, paste the link and add it. Google refreshes these calendars on its own schedule, so new shifts can take up to a day to appear.</li>
+        <li>In Focus, open one of those shifts on the calendar and turn on <strong>Events from “…” are paid shifts</strong>, then enter your hourly wage. Every event on that calendar now counts as a paid shift, and the calendar gets a <strong>Shifts</strong> tag.</li>
+      </ol>
+      <p>A calendar or event named after When I Work, Sling, 7shifts or Homebase counts as shifts without that step; you only add the wage.</p>
+      <figure class="small">
+        <img src="img/gcal-shift.webp" width="420" height="419" loading="lazy" alt="A Google event named Barista from the Work schedule calendar, 4pm to 9pm, with the switch Events from Work schedule are paid shifts turned on, an hourly wage of $14.00, and the line This shift: 5 h × $14.00 = $70.00.">
+        <figcaption>Marking a Google calendar as paid shifts.</figcaption>
+      </figure>
+      <h3>Good to know</h3>
+      <ul>
+        <li>While Google Calendar is connected, events you add in Focus are also added to your first visible Google calendar, and changing or deleting them in Focus changes them there. Press <strong>Send to Google Calendar</strong> on an older event to add it.</li>
+        <li>On a Google event, <strong>Delete from Google Calendar</strong> deletes it from Google, and <strong>Sync to app</strong> copies it into Focus.</li>
+        <li>The connection belongs to the device where you made it; connect on each device you use.</li>
+      </ul>
+    </section>
+
+    <section id="budget">
+      <h2>Budget and cash runway</h2>
+      <p>The budget answers two questions: what can I spend today, and does my cash last until payday?</p>
+      <ul>
+        <li><strong>Initial balance</strong> is your cash this morning. Add each paycheck to it.</li>
+        <li><strong>Daily budget</strong> is what you let yourself spend a day. <strong>Today's balance</strong> is what's left of today's amount.</li>
+        <li><strong>Purchases today</strong>: add what you buy and it comes off today's balance and your total.</li>
+      </ul>
+      <h3>Cash runway</h3>
+      <p>Enter your <strong>next payday</strong>, how often you're paid, and your <strong>monthly bills</strong> with the day each is due. Focus walks forward day by day: each day costs your daily budget, each bill comes out on its day, and pay for the shifts you work before payday arrives on payday. It tells you how many days of cash you have and, if the money runs out first, on which day and why.</p>
+      <div class="phones">
+        <figure>
+          <img src="img/phone-budget.webp" width="390" height="844" loading="lazy" alt="Budget on a phone: total balance $625.50, today's balance $7.50, daily budget $22.00, initial balance $640.00, and the top of the Cash runway card.">
+          <figcaption>Balance and daily budget.</figcaption>
+        </figure>
+        <figure>
+          <img src="img/phone-runway.webp" width="390" height="844" loading="lazy" alt="The Cash runway card: 4 days of cash, payday Saturday October 3 in 9 days, runs out Monday September 28 when Rent is due; next payday, repeats every 2 weeks, and monthly bills Rent $550 and Phone $45.">
+          <figcaption>Payday, bills and the runway.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="cloud">
+      <h2>Cloud sync</h2>
+      <p>Without cloud sync, everything stays on the device you're using. With it, your phone and computer show the same data: sign in with the same Google account on each one.</p>
+      <ol class="steps">
+        <li>Open <strong>Settings → Cloud sync</strong> and press <strong>Sign in with Google</strong>.</li>
+        <li>Choose your Google account. Focus asks Google only for your basic profile: name, email address and picture. You come back to Focus, see <strong>Cloud sync connected</strong>, and the line reads “Syncing as <em>you@…</em> · last sync <em>time</em>”.</li>
+        <li>Sign in the same way on your other devices. If a device already has different data, Focus asks which copy to keep:
+          <ul>
+            <li><strong>Import from cloud</strong> replaces this device's data with the cloud copy. Choose it on a new device to get the data you already have.</li>
+            <li><strong>Export to cloud</strong> replaces the cloud copy with this device's data.</li>
+          </ul>
+        </li>
+      </ol>
+      <figure>
+        <picture>
+          <source media="(max-width: 640px)" srcset="img/cloud-signin-pane.webp" width="555" height="455">
+          <img src="img/cloud-signin.webp" width="780" height="455" loading="lazy" alt="Settings, Cloud sync section: Not signed in, with a Sign in with Google button.">
+        </picture>
+        <figcaption>Settings → Cloud sync.</figcaption>
+      </figure>
+      <figure class="small">
+        <img src="img/cloud-choice.webp" width="420" height="264" loading="lazy" alt="The Cloud sync question: This device's data differs from your cloud copy. Which one should Focus keep? Import from cloud, or Export to cloud.">
+        <figcaption>The one question on a second device.</figcaption>
+      </figure>
+      <ul>
+        <li><strong>What syncs:</strong> timers and their history, lists and tasks, Daily routines, the calendar and its weekly blocks, shifts and wages, the budget, payday and bills, your theme and which sections show, and the email digest.</li>
+        <li><strong>What stays on each device:</strong> the Google Calendar connection, bank connections, and the GitHub token for the digest.</li>
+        <li>While <a href="#formats">Formats</a> is open, sync waits until you press Done.</li>
+        <li><strong>Sign out</strong> in the same place. Your data stays on the device and in the cloud.</li>
+      </ul>
+      <div class="note admin">
+        <span class="note-title">For whoever runs this copy of Focus</span>
+        <p>Cloud sync uses Firebase. If the Cloud sync line says <em>Not configured</em>, create a Firebase project with a Realtime Database and Google sign-in, paste its web config into <code>FIREBASE_CONFIG</code> in <code>js/config.js</code>, and use database rules that let each person read and write only their own record, <code>users/&lt;their uid&gt;</code>. Sign-in uses the Google OAuth client in <code>GCAL_CLIENT_ID</code>; if that client belongs to a different Google Cloud project, add its client ID to the Google provider's safelist in Firebase Authentication.</p>
+      </div>
+    </section>
+
+    <section id="bank">
+      <h2>Bank accounts</h2>
+      <p>Connect a bank to see your accounts, balances and recent transactions in <strong>Settings → Bank accounts</strong>. The connection is read-only: Focus can't move money.</p>
+      <p>Banks connect through <strong>Plaid</strong>, a service many budgeting and payment apps use. You log in to your bank in Plaid's window, so Focus never sees your bank password. A small relay server holds this copy of Focus's Plaid keys and passes requests along; it stores nothing.</p>
+      <ol class="steps">
+        <li>Open <strong>Settings → Bank accounts</strong> and press <strong>Connect a bank</strong>.</li>
+        <li>Plaid's window opens. Find your bank, log in, and choose the accounts to share. Some banks, such as Chase, Bank of America and Wells Fargo, open their own site for you to approve, then send you back to Focus.</li>
+        <li>Your accounts, balances and newest transactions appear. Press <strong>Refresh</strong> any time for new ones.</li>
+      </ol>
+      <figure>
+        <picture>
+          <source media="(max-width: 640px)" srcset="img/bank-ready-pane.webp" width="555" height="455">
+          <img src="img/bank-ready.webp" width="780" height="455" loading="lazy" alt="Settings, Bank accounts section: No banks connected, a Connect a bank button, a note that you log in to your bank in Plaid's window, and the relay line Relay: localhost:8787, Plaid sandbox.">
+        </picture>
+        <figcaption>Ready to connect. This copy uses Plaid's sandbox, so it names the test bank and login.</figcaption>
+      </figure>
+      <figure>
+        <picture>
+          <source media="(max-width: 640px)" srcset="img/bank-connected-pane.webp" width="555" height="560">
+          <img src="img/bank-connected.webp" width="780" height="560" loading="lazy" alt="A connected bank, First Platypus Bank: Plaid Checking $110.00, Plaid Saving $210.00, Plaid Credit Card $410.00 owed, and recent transactions such as Starbucks (pending), Uber, SparkFun and Campus Café payroll +$232.50, with Refresh and Disconnect buttons.">
+        </picture>
+        <figcaption>A connected bank. These are Plaid's sandbox test accounts.</figcaption>
+      </figure>
+      <ul>
+        <li><strong>Disconnect</strong> ends the connection at Plaid and deletes it from this device. You can also see and end connections at <a href="https://my.plaid.com" target="_blank" rel="noopener">my.plaid.com</a>.</li>
+        <li>Balances and transactions stay on this device: they aren't synced to the cloud or included in Export. Connect on each device where you want to see them.</li>
+        <li>If Focus says your bank <strong>needs you to log in again</strong>, the bank ended the connection. Disconnect it and connect again.</li>
+        <li><strong>Testing with the sandbox:</strong> pick <strong>First Platypus Bank</strong> and log in with <code>user_good</code> / <code>pass_good</code>. If it asks for a code, use <code>1234</code>. No real money is involved.</li>
+      </ul>
+
+      <h3 id="bank-setup">Set up bank connections (for whoever runs this copy)</h3>
+      <p>If Settings says <strong>Not set up on this copy of Focus</strong>, there is no relay yet. The relay and its full guide are in <a href="https://github.com/homiejhan/worky/blob/main/backend/bank/README.md" target="_blank" rel="noopener"><code>backend/bank/README.md</code></a>. On your computer, in the Focus folder (Node 20 or newer):</p>
+      <ol class="steps">
+        <li>Sign up at <a href="https://dashboard.plaid.com/signup" target="_blank" rel="noopener">dashboard.plaid.com</a> (free) and copy your <code>client_id</code> and <strong>Sandbox</strong> secret from Developers → Keys.</li>
+        <li>Copy the settings file and fill it in: <code>PLAID_CLIENT_ID</code>, <code>PLAID_SECRET</code>, and a <code>RELAY_KEY</code> from the second command.
+<pre><code>cp backend/bank/.env.example backend/bank/.env
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"</code></pre></li>
+        <li>Prove the connection works without a browser. It should end with <code>End to end: OK</code>.
+<pre><code>npm run bank:check</code></pre></li>
+        <li>Run the app and the relay together, open <a href="http://localhost:8787" target="_blank" rel="noopener">http://localhost:8787</a>, go to <strong>Settings → Bank accounts</strong>, enter the relay address <code>http://localhost:8787/api/bank</code>, press <strong>Save</strong>, then <strong>Connect a bank</strong>.
+<pre><code>npm run bank</code></pre></li>
+      </ol>
+      <figure>
+        <picture>
+          <source media="(max-width: 640px)" srcset="img/bank-setup-pane.webp" width="555" height="455">
+          <img src="img/bank-setup.webp" width="780" height="455" loading="lazy" alt="Settings, Bank accounts section: Not set up on this copy of Focus, an explanation, a link to set up bank connections, and a Relay address field containing http://localhost:8787/api/bank with a Save button.">
+        </picture>
+        <figcaption>Pointing this device at a relay, for testing.</figcaption>
+      </figure>
+      <p>To turn bank connections on for everyone, put the relay online (it runs on Cloudflare Workers' free plan: <code>npx wrangler deploy</code> in <code>backend/bank</code>) and set <code>BANK_RELAY_URL</code> in <code>js/config.js</code> to its address. Real banks need Plaid's Trial plan (up to 10 bank logins) or Production access. Read the README's list of what to do before other people's bank data goes through it.</p>
+    </section>
+
+    <section id="digest">
+      <h2>Email digest</h2>
+      <p>The digest is optional and off until it's set up. Every morning around 6:30 (Central time), a GitHub Actions workflow in the <code>worky</code> repository reads the last day of Gmail, writes a short summary with a language model it runs itself, and delivers it to Home through <a href="#cloud">cloud sync</a>. Nothing on your device reads mail.</p>
+      <ul>
+        <li><strong>Suggested tasks</strong> sit at the top of the card: <strong>Add</strong> makes one a Day by Day task with its date, <strong>×</strong> dismisses it, <strong>Add all</strong> takes them all.</li>
+        <li><strong>Settings → Email Digest</strong> turns the card on or off, and <strong>Load sample</strong> shows what a digest looks like.</li>
+        <li>To start a digest now instead of waiting for the morning, add a GitHub token under <strong>Run it from this device</strong> and press <strong>Run now</strong>. The token stays on that device.</li>
+      </ul>
+      <figure class="small">
+        <img src="img/digest.webp" width="438" height="760" loading="lazy" alt="The Email digest card with sample data: 23 emails, four suggested tasks with Add buttons, and a summary starting with Top of the inbox.">
+        <figcaption>The digest card, with sample data.</figcaption>
+      </figure>
+      <p>Setting it up for a copy of Focus is described in <a href="https://github.com/homiejhan/worky/blob/main/EMAIL_DIGEST.md" target="_blank" rel="noopener"><code>EMAIL_DIGEST.md</code></a>.</p>
+    </section>
+
+    <section id="formats">
+      <h2>Formats and templates</h2>
+      <p><strong>Formats</strong> edits your defaults: which timers exist and how long each runs, which Daily routines there are, and the weekly blocks on your calendar. Press <strong>Formats</strong>; the page shows <em>Editing defaults</em>. Make your changes and press <strong>Done</strong> to save them. <strong>Reset the day</strong> goes back to these defaults.</p>
+      <p><strong>Templates</strong> (the button next to Done) are ready-made setups: Working student, Classic, Deep Work, Fitness, Creative, and Faith &amp; Family. A template replaces your timers, Daily routines and weekly blocks, and can switch to its matching theme. Your own lists, Day by Day and budget are kept. Edit anything before pressing Done.</p>
+      <figure>
+        <img src="img/templates.webp" width="720" height="704" loading="lazy" alt="The Templates window with six choices: Working student (Default), Classic, Deep Work, Fitness, Creative, and Faith and Family, each listing its routines and how many timers, daily lists and calendar blocks it has.">
+        <figcaption>Pick a starting point, then make it yours.</figcaption>
+      </figure>
+    </section>
+
+    <section id="data">
+      <h2>Your data</h2>
+      <ul>
+        <li>Focus saves as you go, in this browser on this device. Turn on <a href="#cloud">cloud sync</a> to keep your devices in step.</li>
+        <li><strong>Export</strong> copies all your data to the clipboard or downloads it as a <code>.json</code> file. <strong>Import</strong> loads it back on any device, from pasted text or the file.</li>
+        <li><strong>Reset the day</strong> puts timers back to their defaults and unchecks Daily tasks. Your lists stay as they are.</li>
+        <li><strong>Settings → Data → Clear storage</strong> wipes everything Focus saved on this device and starts fresh. Disconnect any bank first, because once storage is cleared Focus can't end that connection at Plaid. A cloud copy, if you have one, is not touched.</li>
+        <li><strong>Settings → Sections</strong> hides the parts of Focus you don't use, and <strong>Settings → Appearance</strong> picks a theme or builds your own.</li>
+      </ul>
+    </section>
+
+    <section id="privacy">
+      <h2>Privacy policy</h2>
+      <p class="updated">Last updated: September 24, 2026</p>
+      <p>This policy explains what data Focus (also called Worky) touches and what happens to it. The short version: your data stays yours, on your device and, if you turn on sync, in your own cloud account. It is used only to show you your own information. Nothing is sold, and there are no ads or analytics.</p>
+
+      <h3>Data stored in the app</h3>
+      <p>Your tasks, lists, timers and their history, calendar entries, shifts and wages, budget, payday and bills, theme and settings are stored in your browser's local storage on each device you use. Focus has no contacts or address book and doesn't ask for anyone else's information: it stores dates, amounts and the text you type.</p>
+
+      <h3>Cloud sync and Google sign-in</h3>
+      <p>If you sign in with Google to turn on sync, the same data is also stored in a Firebase Realtime Database (operated by Google) under your account, so your other devices can read it. The database rules allow access only to the signed-in account that owns it. Sign-in uses Firebase Authentication with your Google account: Focus receives your Google account identifier, email address and basic profile (name and picture) to connect your synced data to you. It never receives your password.</p>
+
+      <h3>Google Calendar</h3>
+      <p>Connecting Google Calendar is optional. If you connect it, Focus asks for access to your Google calendars (the <code>calendar</code> permission, which covers reading and editing events). Focus uses it only to:</p>
+      <ul>
+        <li>show events from the calendars you choose, next to your own;</li>
+        <li>add, change or delete events in Google Calendar when you add, change or delete them in Focus, and delete a Google event when you press Delete from Google Calendar.</li>
+      </ul>
+      <p>The access key stays in the browser on the device where you connected; it is not synced. Google events are loaded while you use Focus and are not saved in your Focus data, except an event you copy in with Sync to app. Which calendars count as shifts, and their wages, are saved with your data.</p>
+
+      <h3>Gmail access for the email digest</h3>
+      <p>The email digest is optional and off by default. If you connect Gmail, Focus requests the <code>gmail.readonly</code> permission, which lets it read your mail but never send, modify or delete anything. It is used only to:</p>
+      <ul>
+        <li>read the emails from the last 24 hours (excluding spam and trash),</li>
+        <li>produce a short daily summary and a list of suggested tasks,</li>
+        <li>store that summary, not the emails themselves, with your synced data so you can read it on any device.</li>
+      </ul>
+      <p>Summaries are generated by an open-source language model that we run ourselves, either on your own computer or on a temporary cloud worker that is discarded after each run. Your email content is not sent to any third-party AI service. Email bodies are processed in memory and are not kept after the summary is produced.</p>
+
+      <h3>Google API data</h3>
+      <p>Focus's use of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy#additional_requirements_for_specific_api_scopes" target="_blank" rel="noopener">Google API Services User Data Policy</a>, including the Limited Use requirements. Calendar and Gmail data are used only to provide the features you turned on. They are never used for advertising, never sold, and never read by a person except with your explicit permission for support or as required by law.</p>
+
+      <h3>Bank accounts</h3>
+      <p>Connecting a bank is optional. Bank connections go through Plaid Inc. You log in to your bank in Plaid's window; Focus never receives your bank username or password. With your permission, Focus asks Plaid for read-only transaction data:</p>
+      <ul>
+        <li>account names and types, the last four digits of account numbers, and balances;</li>
+        <li>transactions: date, description or merchant, amount, category, and whether it's pending. The last 30 days come in when you connect, then new ones.</li>
+      </ul>
+      <p>This data travels from Plaid through Focus's relay server to your device. The relay has no database and keeps none of it; it holds Focus's Plaid keys. The key to your connection is encrypted so that only the relay can use it, and it is kept on your device. On your device, Focus keeps the accounts, balances and newest 50 transactions for each bank. Bank data is never synced to the cloud or included in Export.</p>
+      <p>Plaid handles your data under the <a href="https://plaid.com/legal/#end-user-privacy-policy" target="_blank" rel="noopener">Plaid End User Privacy Policy</a>. Disconnect in Settings → Bank accounts ends the connection at Plaid and deletes the bank data from your device. You can also see and end connections at <a href="https://my.plaid.com" target="_blank" rel="noopener">my.plaid.com</a>.</p>
+
+      <h3>What is not collected</h3>
+      <ul>
+        <li>No analytics, tracking pixels or advertising identifiers.</li>
+        <li>No contacts, location, or bank passwords.</li>
+        <li>No data is sold, rented, or shared with third parties beyond the services below.</li>
+        <li>No data is used to train machine-learning models unless you explicitly opt in to a future feature that says so.</li>
+      </ul>
+
+      <h3>Third-party services</h3>
+      <p>These providers process data for Focus under their own privacy policies:</p>
+      <ul>
+        <li>GitHub hosts the app on GitHub Pages and runs the email digest on GitHub Actions (<a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener">privacy statement</a>).</li>
+        <li>Google provides sign-in and sync through Firebase (<a href="https://firebase.google.com/support/privacy" target="_blank" rel="noopener">Firebase privacy</a>), the Google Calendar and Gmail APIs if you connect them, and the app's fonts through Google Fonts, which your browser loads from Google (<a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google privacy policy</a>).</li>
+        <li>Plaid connects bank accounts, if you connect one (<a href="https://plaid.com/legal/#end-user-privacy-policy" target="_blank" rel="noopener">Plaid End User Privacy Policy</a>).</li>
+        <li>The bank relay runs on a hosting service, such as Cloudflare Workers, when bank connections are turned on for this copy of Focus (<a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Cloudflare privacy policy</a>).</li>
+      </ul>
+
+      <h3>Retention and deletion</h3>
+      <p>Your data is kept for as long as you use the app. You can delete it at any time:</p>
+      <ul>
+        <li>Data on a device: clear the site's data in your browser's settings, or use Settings → Data → Clear storage.</li>
+        <li>Synced data: email the address below to have your cloud record deleted. Signing out stops syncing but leaves the cloud copy in place.</li>
+        <li>Google access (sign-in, Calendar and Gmail): revoke it at <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>. Focus loses access immediately and no further digests are generated.</li>
+        <li>Bank connections: Disconnect in Settings → Bank accounts, or end them at <a href="https://my.plaid.com" target="_blank" rel="noopener">my.plaid.com</a>.</li>
+      </ul>
+
+      <h3>Changes</h3>
+      <p>If this policy changes, the date at the top will be updated. Material changes to how Gmail, Google Calendar or bank data is handled will be announced inside the app before they take effect.</p>
+
+      <h3>Contact</h3>
+      <p>Questions or deletion requests: <a href="mailto:justhan47@gmail.com">justhan47@gmail.com</a>.</p>
+      <a class="top" href="#start">↑ Back to the top</a>
+    </section>
+  </main>
+
+  <footer>
+    <a href="../">← Back to Focus</a>
+  </footer>
+</div>
+</body>
+</html>

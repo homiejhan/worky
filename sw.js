@@ -12,7 +12,7 @@
      passed straight through to the network — never cached.
    ════════════════════════════════════════════════════════════ */
 
-const CACHE_VERSION = 'worky-v14';
+const CACHE_VERSION = 'worky-v15';
 const SHELL_CACHE   = `${CACHE_VERSION}-shell`;
 const FONT_CACHE    = `${CACHE_VERSION}-fonts`;
 
@@ -52,6 +52,7 @@ const SHELL_FILES = [
   './js/util.js',
   './js/views.js',
   './style.css',
+  './help/',
   './manifest.json',
   './icon-180.png',
   './icon-512.png',
