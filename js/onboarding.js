@@ -157,7 +157,7 @@ const TOUR_STEPS = [
     body: 'Tap an empty slot to add an event, drag to move one. Mark an event as a paid shift with your wage and the header adds up the week\'s pay. Connect Google Calendar in Settings to see and send events — a When I Work, Sling, 7shifts or Homebase feed counts as shifts.',
     target: { d: '#calDesktopPanel', m: '#mobileCalPanel' } },
   { key: 'budget', view: 'budget', title: 'Budget',
-    body: 'A daily envelope. Set a daily amount and a starting balance, log purchases as you go, and whatever is left rolls over at midnight. Home shows today\'s balance at a glance.',
+    body: 'A daily envelope. Set a daily amount and a starting balance, log purchases as you go, and whatever is left rolls over at midnight. Add your payday and bills, and Cash runway tells you whether your money lasts until the next paycheck.',
     target: { d: '#budgetContainer-d .budget-wrap', m: '#budgetContainer-m .budget-wrap' } },
   { key: 'formats', title: 'Formats',
     body: 'Formats is where you edit your defaults: which timers exist and how long they run, which Daily lists there are, and the weekly calendar templates. Not sure where to start? Templates has ready-made setups to build on; you started from Working student. Press Done to save. Reset returns the day to whatever you set here.',

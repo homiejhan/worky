@@ -2349,6 +2349,94 @@ body.format-mode .list-sched-row { display: flex; }
 .budget-purchase-del:hover { color: var(--danger); background: var(--danger-dim); }
 .budget-empty { text-align: center; padding: 18px 12px; color: var(--ink-3); font-size: 12.5px; }
 
+/* cash runway: days of cash against the next payday, plus the monthly bills */
+.runway {
+  display: flex; flex-direction: column; gap: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  box-shadow: var(--shadow-card);
+}
+.runway.short {
+  background: linear-gradient(135deg, rgba(var(--danger-rgb),0.12), transparent 70%), var(--bg-elevated);
+  border-color: rgba(var(--danger-rgb),0.45);
+}
+.runway-label { font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.runway-value {
+  font-family: var(--font-display);
+  font-size: 30px; font-weight: 500;
+  letter-spacing: -0.02em;
+  font-variation-settings: "SOFT" 100, "opsz" 72;
+  line-height: 1.15;
+  color: var(--ink);
+}
+.runway.short .runway-value, .runway.short .runway-status { color: var(--danger); }
+.runway-sub { font-size: 12.5px; color: var(--ink-2); line-height: 1.45; }
+.runway-status { font-size: 13px; font-weight: 600; color: var(--ink); }
+.runway-parts { font-size: 11.5px; color: var(--ink-3); line-height: 1.5; font-variant-numeric: tabular-nums; }
+.runway-setup { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+.runway-field {
+  flex: 1; min-width: 140px;
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 11px; font-weight: 600; color: var(--ink-2);
+}
+.runway-input {
+  padding: 8px 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-mid);
+  border-radius: var(--radius-md);
+  font-family: inherit; font-size: 13px;
+  color: var(--ink);
+  color-scheme: var(--scheme);
+}
+.runway-bills-head { padding-top: 8px; }
+.runway-bill-list { display: flex; flex-direction: column; }
+.runway-bill {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 2px;
+  border-bottom: 1px solid var(--border);
+}
+.runway-bill:last-child { border-bottom: none; }
+.runway-bill-name, .runway-bill-amount {
+  background: none; border: none; outline: none;
+  border-bottom: 1px solid transparent;
+  font-size: 13.5px;
+  transition: border-color 0.15s;
+}
+.runway-bill-name { flex: 1; min-width: 0; }
+.runway-bill-name:focus { border-bottom-color: var(--border-strong); }
+.runway-bill-amount { width: 72px; font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; }
+.runway-bill-amount:focus { border-bottom-color: var(--hue-budget); }
+.runway-bill-day {
+  flex-shrink: 0;
+  padding: 5px 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-mid);
+  border-radius: 999px;
+  font-family: inherit; font-size: 12px;
+  color: var(--ink-2);
+  color-scheme: var(--scheme);
+}
+.runway-add-row { background: var(--bg-surface); box-shadow: none; }
+.runway-new-name, .runway-new-amount {
+  min-width: 0;
+  padding: 8px 10px;
+  background: transparent;
+  border: none; outline: none;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+}
+.runway-new-name { flex: 1; }
+.runway-new-amount {
+  width: 78px;
+  padding: 7px 12px;
+  background: var(--bg-hover);
+  border-radius: 999px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ═══════════════════════════════════════════════════════
    SETTINGS
    ═══════════════════════════════════════════════════════ */

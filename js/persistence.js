@@ -19,8 +19,8 @@ import {
   setCalEvents, setCalTemplates,
 } from './calendar.js';
 import {
-  budget, budgetRollover, normalizeBudget, purchaseIdCounter, renderBudget, setBudget,
-  setPurchaseIdCounter,
+  budget, budgetRollover, normalizeBudget, normalizeRunway, purchaseIdCounter, renderBudget,
+  runway, setBudget, setPurchaseIdCounter, setRunway,
 } from './budget.js';
 import { syncOnLocalSave } from './sync.js';
 import {
@@ -46,6 +46,7 @@ import { normalizeShiftCals, setShiftCals, shiftCals } from './gcal.js';
  *     linkTaskId→tk linkDbdId→dk   (task ↔ event link, see tasklinks.js)
  *     shift→sh wage→wg             (paid shift and its hourly wage, see shifts.js)
  *   shiftCals→sc  { calId: { shift, wage } } per Google calendar (see gcal.js)
+ *   runway→rw {p: payday, r: repeat, b: bills [{i: id, n: name, a: amount, d: day}]} (see budget.js)
  *   digest: enabled→en last→l {at, md, n, m, s} clearedAt→ca   (see digest.js)
  */
 export function compressState(st) {
@@ -104,6 +105,9 @@ export function compressState(st) {
     th: compressTheme(st.theme),
     dg: compressDigest(st.digest),
     ...(st.shiftCals && Object.keys(st.shiftCals).length ? { sc: st.shiftCals } : {}),
+    ...(st.runway && (st.runway.payday || st.runway.bills.length)
+      ? { rw: { p: st.runway.payday, r: st.runway.repeat, b: st.runway.bills.map(b => ({ i: b.id, n: b.name, a: b.amount, d: b.day })) } }
+      : {}),
     cal: { ce: cEvents, ct: (st.calendar.calTemplates||[]).map(cCalEv), cec: st.calendar.calEventIdCtr },
   };
 }
@@ -153,6 +157,7 @@ function decompressState(c) {
     theme: decompressTheme(c.th),
     digest: decompressDigest(c.dg),
     shiftCals: normalizeShiftCals(c.sc),
+    runway: normalizeRunway(c.rw ? { payday: c.rw.p, repeat: c.rw.r, bills: (c.rw.b || []).map(b => ({ id: b.i, name: b.n, amount: b.a, day: b.d })) } : null),
     calendar: { calEvents: dEvents, calTemplates: (c.cal.ct||[]).map(dCalEv), calEventIdCtr: c.cal.cec || 1 },
   };
 }
@@ -177,12 +182,12 @@ function liveTimerRecord(t) {
 
 /* Build number of the state schema. Bumped whenever gatherState() learns a
  * new top-level key (digest was build 2, digest tasks build 3, shiftCals
- * build 4). Lets a newer device recognise a cloud copy written by an older
- * build, which cannot have carried the newer fields. */
-export const STATE_BUILD = 4;
+ * build 4, runway build 5). Lets a newer device recognise a cloud copy
+ * written by an older build, which cannot have carried the newer fields. */
+export const STATE_BUILD = 5;
 const STATE_KNOWN_KEYS = new Set(['version', 'build', 'wokenUp', 'timerDefaults', 'timers', 'todoIdCounter',
   'taskIdCounter', 'todoLists', 'dbdTasks', 'dbdIdCounter', 'budget', 'purchaseIdCounter', 'views', 'theme',
-  'digest', 'shiftCals', 'calendar']);
+  'digest', 'shiftCals', 'runway', 'calendar']);
 /* Top-level keys this build does not understand, carried through untouched so
  * an older device never strips what a newer one wrote (see syncApplyRemote). */
 let stateExtra = {};
@@ -222,6 +227,7 @@ export function gatherState() {
     theme: { ...themeGet() },
     digest: digestRecord(),
     shiftCals: normalizeShiftCals(shiftCals),
+    runway: normalizeRunway(runway),
     calendar: { calEvents, calTemplates, calEventIdCtr },
   };
 }
@@ -253,6 +259,7 @@ function hydrateState(st) {
   setTheme(normalizeTheme(st.theme));
   setDigest(normalizeDigest(st.digest));
   setShiftCals(normalizeShiftCals(st.shiftCals));
+  setRunway(normalizeRunway(st.runway));
   if (st.calendar) {
     setCalEvents(st.calendar.calEvents     || {});
     setCalTemplates(st.calendar.calTemplates  || []);
