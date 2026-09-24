@@ -3,7 +3,7 @@
 import { CAL_COLORS, CAL_DOW, CAL_HOUR_PX, CAL_LS_KEY, CAL_TOTAL_PX } from './config.js';
 import {
   $, calDateKey, calFmtFull, calFmtShort, calFmtTime, calKeyToDate, calMinsToPx, calMinsToStr,
-  calPxToMins, calTimeToMins, calToday, isMobileLayout, showToast,
+  calPxToMins, calTimeToMins, calToday, isMobileLayout, keepScroll, showToast,
 } from './util.js';
 import { saveToLocal } from './persistence.js';
 import { renderTodos } from './lists.js';
@@ -394,6 +394,19 @@ function calScrollToMorning(el) {
   setTimeout(() => { if (el) el.scrollTop = 7 * CAL_HOUR_PX - 14; }, 50);
 }
 
+/* Where a grid is scrolled survives a redraw. A grid only goes back to 7am
+ * when it starts showing something else — first draw, another day or week,
+ * the template week — or when it is opened fresh (desktop panel, mobile tab).
+ * Saving, deleting or dragging an event, a colour filter, and the background
+ * Google Calendar sync all redraw the same days, so the grid stays put. */
+let calDeskShows = null;   // what the desktop grid last drew
+let calMobShows  = null;   // what the mobile grid last drew
+function calPlaceScroll(el, sameView, prevTop) {
+  if (!el) return;
+  if (sameView) el.scrollTop = prevTop;
+  else calScrollToMorning(el);
+}
+
 /* ── desktop render: the 7-day week, or the template week while Formats is open ── */
 export function calRenderDesktop() {
   const titleEl  = $('calDesktopTitle');
@@ -412,6 +425,12 @@ export function calRenderDesktop() {
   const gridEl = $('calDesktopGrid');
   const timeEl = $('calTimeCol');
   if (!daysEl || !gridEl || !timeEl) return;
+
+  const scrollEl = $('calScrollArea');
+  const prevTop  = scrollEl ? scrollEl.scrollTop : 0;
+  const shows    = formatMode ? 'fmt' : `${calWeekMode}|${calDateKey(calDisplayDays()[0])}`;
+  const sameView = shows === calDeskShows;
+  calDeskShows = shows;
 
   daysEl.style.gridTemplateColumns = 'repeat(7,1fr)';
   daysEl.innerHTML = '';
@@ -454,16 +473,17 @@ export function calRenderDesktop() {
   }
 
   gridEl.style.height = CAL_TOTAL_PX + 'px';
-  calScrollToMorning($('calScrollArea'));
+  calPlaceScroll(scrollEl, sameView, prevTop);
 }
 
-/* ── mobile render: one day, or one template day while Formats is open ── */
-export function calRenderMobile() {
+/* ── mobile render: one day, or one template day while Formats is open ──
+ * { fresh: true } when the Calendar tab is being opened, so it starts at 7am. */
+export function calRenderMobile(opts) {
   const titleEl  = $('calDayTitle');
   const filterEl = $('calColorFilter-m');
   const gridEl   = $('calMobileGrid');
   calRenderEarnings();
-  let dayCol;
+  let dayCol, shows;
   if (formatMode) {
     const dow = calFmtMobileDay;
     if (titleEl) titleEl.textContent = `Template: ${CAL_DOW[dow]}`;
@@ -471,6 +491,7 @@ export function calRenderMobile() {
     if (!gridEl) return;
     dayCol = calDayColEl('cal-mobile-day-col cal-fmt-col', { dow });
     calRenderFmtCol(dayCol, dow);
+    shows = `fmt|${dow}`;
   } else {
     calPruneDays();
     const days = calDisplayDays();
@@ -481,8 +502,12 @@ export function calRenderMobile() {
     if (!gridEl) return;
     dayCol = calDayColEl('cal-mobile-day-col', { dateKey: key });
     calRenderDayCol(dayCol, key);
+    shows = key;
   }
 
+  const prevTop  = gridEl.scrollTop;
+  const sameView = shows === calMobShows && !(opts && opts.fresh === true);
+  calMobShows = shows;
   gridEl.innerHTML = '';
   const body = document.createElement('div');
   body.className = 'cal-mobile-body';
@@ -493,7 +518,7 @@ export function calRenderMobile() {
   body.appendChild(timeCol);
   body.appendChild(dayCol);
   gridEl.appendChild(body);
-  calScrollToMorning(gridEl);
+  calPlaceScroll(gridEl, sameView, prevTop);
 }
 
 export function calNavDay(dir) {
@@ -514,7 +539,7 @@ export function calToggleDesktop() {
   if (tab)     tab.classList.toggle('active', calDesktopOpen);
   if (rp)      rp.style.display = calDesktopOpen ? 'none' : '';
   if (weekBtn) weekBtn.classList.toggle('shown', calDesktopOpen);
-  if (calDesktopOpen) calRenderDesktop();
+  if (calDesktopOpen) { calDeskShows = null; calRenderDesktop(); }   // opens at 7am
   desktopNavSync();
 }
 
@@ -875,11 +900,13 @@ export async function deleteCalEvent() {
     calEvents[calEditDate] = (calEvents[calEditDate] || []).filter(e => e.id !== calEditId);
   }
   closeCalModal();
-  calRefresh();
-  calSave();
-  saveToLocal();
-  renderTodos();   // linked tasks lose their chip
-  renderDbd();
+  keepScroll(() => {
+    calRefresh();
+    calSave();
+    saveToLocal();
+    renderTodos();   // linked tasks lose their chip
+    renderDbd();
+  });
 
   if (removedEv?.gcalId && removedEv?.gcalCalId && gcalIsConnected()) {
     await gcalDeleteEvent(removedEv.gcalId, removedEv.gcalCalId);

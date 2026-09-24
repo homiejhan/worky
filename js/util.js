@@ -99,3 +99,38 @@ export function calEventDurMins(ev) {
 export function calMinsToPx(n)  { return (n/60)*CAL_HOUR_PX; }
 export function calPxToMins(px) { return Math.round((px/CAL_HOUR_PX)*60/15)*15; }
 export function closeModal(id) { $(id).classList.remove('show'); }
+
+/* ── Hold the page still across a delete ──
+ * Deleting a task, list or event rebuilds whole sections (renderTodos,
+ * renderDbd, renderHome). Chrome keeps the page where it was through that,
+ * but Safari — on the Mac and on iPhone — can snap a panel back to the top,
+ * sometimes a moment later as the tap and the keyboard settle. So note how far
+ * each page panel is scrolled, run the change, and put them back: right away,
+ * then a few more times over the next ~400ms — unless the user starts
+ * scrolling or tapping in the meantime, in which case they are left alone. */
+const PAGE_SCROLLERS = '.right-panel, .swipe-panel, .home-desktop-panel, .left-panel';
+const USER_MOVES = ['wheel', 'touchstart', 'pointerdown', 'keydown'];
+export function keepScroll(fn) {
+  const saved = [];
+  document.querySelectorAll(PAGE_SCROLLERS).forEach(el => {
+    if (el.scrollTop > 0) saved.push([el, el.scrollTop]);
+  });
+  if (!saved.length) return fn();
+  let userMoved = false;
+  const onMove = () => { userMoved = true; };
+  const restore = () => {
+    if (userMoved) return;
+    saved.forEach(([el, top]) => {
+      if (el.isConnected && Math.abs(el.scrollTop - top) > 1) el.scrollTop = top;
+    });
+  };
+  try {
+    return fn();
+  } finally {
+    restore();
+    USER_MOVES.forEach(t => window.addEventListener(t, onMove, { capture: true, passive: true }));
+    requestAnimationFrame(restore);
+    [80, 200, 400].forEach(ms => setTimeout(restore, ms));
+    setTimeout(() => USER_MOVES.forEach(t => window.removeEventListener(t, onMove, { capture: true })), 450);
+  }
+}

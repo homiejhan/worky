@@ -138,7 +138,7 @@ export function goTab(key, animate) {
   document.querySelectorAll('.tab-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.view === key);
   });
-  if (key === 'calendar') calRenderMobile();
+  if (key === 'calendar') calRenderMobile({ fresh: true });   // opening the tab starts at 7am
   if (key === 'home')     renderHome();
   if (key === 'budget')   renderBudget();
 }

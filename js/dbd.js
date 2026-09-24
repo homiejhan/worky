@@ -1,6 +1,6 @@
 /* dbd.js — Day by Day: dated one-off tasks, list tags and the midnight rollover. */
 import {
-  $, calDateKey, calKeyToDate, calTimeToMins, calToday, CHECK_SVG, escAttr,
+  $, calDateKey, calKeyToDate, calTimeToMins, calToday, CHECK_SVG, escAttr, keepScroll,
 } from './util.js';
 import { saveToLocal } from './persistence.js';
 import {
@@ -66,8 +66,10 @@ export function toggleDbdTask(id) {
 
 export function removeDbdTask(id) {
   dbdTasks = dbdTasks.filter(t => t.id !== id);
-  if (taskLinkClearAll(taskLinkRef('dbd', id))) { calSave(); calRefresh(); }
-  renderDbd();
+  keepScroll(() => {
+    if (taskLinkClearAll(taskLinkRef('dbd', id))) { calSave(); calRefresh(); }
+    renderDbd();
+  });
   saveToLocal();
 }
 

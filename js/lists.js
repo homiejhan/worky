@@ -3,7 +3,7 @@
 import { CAL_DOW } from './config.js';
 import {
   $, calKeyToDate, calToday, CHECK_SVG, CHILD_SVG, closeModal, DOTS_SVG, escAttr, GRIP_SVG,
-  showToast, STAR_SVG, SYNC_SVG,
+  keepScroll, showToast, STAR_SVG, SYNC_SVG,
 } from './util.js';
 import { saveToLocal } from './persistence.js';
 import { bindAllDrags } from './drag.js';
@@ -332,8 +332,10 @@ export function addTodoList() {
 
 export function removeTodoList(id) {
   todoLists = todoLists.filter(l => l.id !== id);
-  renderTodos();
-  renderDbd();   // any dated tasks the list held leave Day by Day too
+  keepScroll(() => {
+    renderTodos();
+    renderDbd();   // any dated tasks the list held leave Day by Day too
+  });
   saveToLocal();
 }
 
@@ -374,9 +376,11 @@ export function removeTask(listId, taskId) {
   if (!list) return;
   if (list.isDefault && !formatMode) return;
   list.tasks = list.tasks.filter(t => t.id !== taskId);
-  if (taskLinkClearAll(taskLinkRef('list', taskId))) { calSave(); calRefresh(); }
-  renderTodos();
-  renderDbd();
+  keepScroll(() => {
+    if (taskLinkClearAll(taskLinkRef('list', taskId))) { calSave(); calRefresh(); }
+    renderTodos();
+    renderDbd();
+  });
   saveToLocal();
 }
 
