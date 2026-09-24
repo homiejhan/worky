@@ -13,7 +13,6 @@ const BANK_USER_LS_KEY = 'focus-bank-user';   // random id Plaid knows this devi
 const BANK_LINK_SS_KEY = 'focus-bank-link';   // link token, while an OAuth bank sends the user back
 const BANK_TX_KEEP = 50;                        // newest transactions kept per bank
 const BANK_TX_SHOW = 6;
-const BANK_README = 'https://github.com/homiejhan/worky/blob/main/backend/bank/README.md';
 
 /* { relay: address set on this device ('' = BANK_RELAY_URL),
  *   items: [{ id, token, institution: { id, name }, accounts, transactions, cursor,
@@ -344,7 +343,7 @@ export function bankRenderSettings() {
   if (!relay) {
     panel.innerHTML = bankRelayFormHtml(`
       <div class="bank-intro">See balances and recent transactions from your bank accounts. Banks connect through Plaid and a small relay server that holds this copy of Focus's Plaid keys, and that relay hasn't been set up yet.</div>
-      <a class="bank-link" href="${BANK_README}" target="_blank" rel="noopener">How to set up bank connections</a>`);
+      <a class="bank-link" href="help/#bank-setup" target="_blank" rel="noopener">How to set up bank connections</a>`);
     return;
   }
   const connecting = bankBusy === 'connect';
@@ -352,6 +351,7 @@ export function bankRenderSettings() {
     ${bank.items.map(bankItemHtml).join('')}
     <button class="gcal-connect-btn bank-connect-btn" data-bank="connect"${bankBusy ? ' disabled' : ''}>${connecting ? 'Connecting…' : bank.items.length ? 'Connect another bank' : 'Connect a bank'}</button>
     <div class="bank-fine">You log in to your bank in Plaid's window; Focus never sees your password. The connection is read-only, and balances and transactions stay on this device.</div>
+    <a class="settings-help-link" href="help/#bank" target="_blank" rel="noopener">How bank connections work</a>
     ${bankRelayForm ? bankRelayFormHtml('') : bankRelayLine()}`;
   if (!bankHealth || bankHealth.url !== relay) bankCheckRelay();
 }
