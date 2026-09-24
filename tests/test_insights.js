@@ -64,8 +64,10 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     const { w, d } = await loadApp({ storage: { 'focus-tour-done': '1' } });
     const id = w.eval('timers[1].id');   // Work, 4h
     w.eval(`const t = timers[1]; t.running = true; t.startedAt = Date.now() - 64000; t.secondsAtStart = 5; renderTimers();`);
-    await sleep(1100);                   // tickAll only acts when the clock second changes
     const card = () => d.querySelector(`#timerStack-d .tcard-${id}`);
+    // tickAll updates the display once the clock second changes; on a busy machine
+    // its animation frames can run late, so wait for the update instead of a fixed time
+    for (let i = 0; i < 60 && card().querySelector('.timer-display').textContent === '+00:59'; i++) await sleep(50);
     ok(card().classList.contains('over') && card().classList.contains('running'), 'a timer past zero keeps running, marked over');
     ok(/^\+01:0[01]$/.test(card().querySelector('.timer-display').textContent), `it shows the time over: ${card().querySelector('.timer-display').textContent}`);
     eq(card().querySelector('.timer-sub').textContent, 'Over budget · still running', 'and says so');
