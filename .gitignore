@@ -1,1 +1,6 @@
 node_modules/
+
+# Bank relay secrets (see backend/bank/.env.example)
+backend/bank/.env
+backend/bank/.dev.vars
+backend/bank/.wrangler/

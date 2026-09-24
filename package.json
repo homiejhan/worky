@@ -1,6 +1,8 @@
 {
   "scripts": {
-    "test": "node tests/run.js"
+    "test": "node tests/run.js",
+    "bank": "node backend/bank/dev-server.mjs",
+    "bank:check": "node backend/bank/check.mjs"
   },
   "devDependencies": {
     "jsdom": "^30.1.0"

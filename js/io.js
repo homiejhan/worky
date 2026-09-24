@@ -8,6 +8,7 @@ import {
 import { renderTodos, todoLists } from './lists.js';
 import { renderHome } from './home.js';
 import { budgetResetDay, renderBudget } from './budget.js';
+import { bankConnectedCount } from './bank.js';
 
 /* ───────────────────────── EXPORT / IMPORT / RESET ───────────────────────── */
 export function openExportModal() {
@@ -83,7 +84,11 @@ export function resetAll() {
 }
 
 export function confirmClearStorage() {
-  if (confirm('Clear all saved data and reset to defaults? This cannot be undone.')) {
+  const banks = bankConnectedCount();
+  const warnBanks = banks
+    ? `\n\nYou have ${banks === 1 ? 'a bank' : `${banks} banks`} connected. Disconnect ${banks === 1 ? 'it' : 'them'} first in Settings → Bank accounts: once storage is cleared, Focus can't end ${banks === 1 ? 'that connection' : 'those connections'} at Plaid.`
+    : '';
+  if (confirm('Clear all saved data and reset to defaults? This cannot be undone.' + warnBanks)) {
     localStorage.clear();
     showToast('Storage cleared — reloading…');
     setTimeout(() => location.reload(), 600);

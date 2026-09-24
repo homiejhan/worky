@@ -28,6 +28,7 @@ import {
   gcalUpdateBtn,
 } from './gcal.js';
 import { budgetRollover, budgetTickDay, renderBudget } from './budget.js';
+import { bankInit } from './bank.js';
 import {
   setSyncBooting, setSyncLastSeenFp, syncFingerprint, syncHandleRedirect, syncInit,
 } from './sync.js';
@@ -120,6 +121,9 @@ Object.assign(window, {
   gcalUpdateBtn();
   if (gcalIsConnected()) gcalSyncAll();
   setInterval(() => { if (gcalIsConnected()) gcalSyncAll(); }, 5 * 60 * 1000);
+
+  /* bank accounts: saved connections, and a connection an OAuth bank sent back mid-way */
+  bankInit();
 
   /* onboarding: welcome + guided tour on a fresh device */
   if (firstRun) tourOffer();

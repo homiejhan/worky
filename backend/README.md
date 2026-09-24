@@ -13,6 +13,7 @@ backend/
 ├── gmail_auth.py     one-time: prints the Gmail refresh token
 ├── prompts.json      the original prompts and sections (the app's editor reads it too)
 ├── requirements.txt  requests + google-auth
+├── bank/             the Plaid relay for bank connections (see bank/README.md)
 └── README.md
 .github/workflows/digest.yml   the daily cron
 ```

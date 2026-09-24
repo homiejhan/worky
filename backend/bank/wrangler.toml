@@ -1,0 +1,17 @@
+# Cloudflare Workers settings for the bank relay (backend/bank/relay.mjs).
+# Deploy from this folder:  npx wrangler deploy
+# Secrets are never written here. Set them once with:
+#   npx wrangler secret put PLAID_CLIENT_ID
+#   npx wrangler secret put PLAID_SECRET
+#   npx wrangler secret put RELAY_KEY
+name = "focus-bank-relay"
+main = "relay.mjs"
+compatibility_date = "2026-09-01"
+
+[vars]
+PLAID_ENV = "sandbox"
+# The web address the app runs at (scheme + host, no path). Add more with commas.
+ALLOWED_ORIGINS = "https://homiejhan.github.io"
+# Only for OAuth banks (Chase, Bank of America, Wells Fargo…). It must also be
+# listed under Allowed redirect URIs in the Plaid dashboard.
+# PLAID_REDIRECT_URI = "https://homiejhan.github.io/worky/"
