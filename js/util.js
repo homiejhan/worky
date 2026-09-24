@@ -54,6 +54,29 @@ export function cloneTask(t) {
   return o;
 }
 
+/* Deleting a task re-draws the lists, which can also remove a copy of it higher
+ * up the page (a dated list task shows in its list and in Day by Day). Keep the
+ * page still: note where the nearest card or row above the deleted one sits,
+ * re-draw, then scroll so that card or row is back in the same place.
+ * `fromEl` is the × that was pressed (or anything in its row). */
+const rowKey = el => el.classList.contains('todo-card') ? `card ${el.dataset.listId}`
+  : el.dataset.dbdId ? `dbd ${el.dataset.dbdId}` : `task ${el.dataset.listId} ${el.dataset.taskId}`;
+export function keepRowsAbove(fromEl, render) {
+  const scroller = fromEl?.closest?.('.right-panel, .swipe-panel');
+  const row = fromEl?.closest?.('.task-row');
+  const shown = () => [...scroller.querySelectorAll('.todo-card, .task-row')].filter(el => el.getClientRects().length);
+  const before = scroller && row ? shown() : [];
+  const at = before.indexOf(row);
+  const anchor = at > 0 ? before.slice(0, at).reverse().find(el => rowKey(el) !== rowKey(row)) : null;
+  if (!anchor) { render(); return; }
+  const key = rowKey(anchor);
+  const nth = before.filter(el => rowKey(el) === key).indexOf(anchor);
+  const top = anchor.getBoundingClientRect().top;
+  render();
+  const again = shown().filter(el => rowKey(el) === key)[nth];
+  if (again) scroller.scrollTop += again.getBoundingClientRect().top - top;
+}
+
 export function escAttr(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }

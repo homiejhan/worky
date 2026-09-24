@@ -1,6 +1,6 @@
 /* dbd.js — Day by Day: dated one-off tasks, list tags and the midnight rollover. */
 import {
-  $, calDateKey, calKeyToDate, calTimeToMins, calToday, CHECK_SVG, escAttr,
+  $, calDateKey, calKeyToDate, calTimeToMins, calToday, CHECK_SVG, escAttr, keepRowsAbove,
 } from './util.js';
 import { saveToLocal } from './persistence.js';
 import {
@@ -64,10 +64,11 @@ export function toggleDbdTask(id) {
   taskLinkRepaint(taskLinkRef('dbd', id));
 }
 
-export function removeDbdTask(id) {
+/* `fromEl`: the × that was pressed, so the page stays where it was. */
+export function removeDbdTask(id, fromEl) {
   dbdTasks = dbdTasks.filter(t => t.id !== id);
   if (taskLinkClearAll(taskLinkRef('dbd', id))) { calSave(); calRefresh(); }
-  renderDbd();
+  keepRowsAbove(fromEl, renderDbd);
   saveToLocal();
 }
 
@@ -215,7 +216,7 @@ function dbdRowHtml(entry, overdue, showDate) {
       ${tagSel}
       ${dbdDateBtnHtml(t.due, `setListTaskDue(${list.id},${t.id},this.value)`, showDate)}
       ${taskLinkChipHtml('list', t.id)}
-      <button class="task-del" onclick="removeTask(${list.id},${t.id})">×</button>
+      <button class="task-del" onclick="removeTask(${list.id},${t.id},this)">×</button>
     </div>`;
   }
   return `
@@ -229,7 +230,7 @@ function dbdRowHtml(entry, overdue, showDate) {
       ${tagSel}
       ${dbdDateBtnHtml(t.due || dbdTodayKey(), `setDbdDue(${t.id}, this.value)`, showDate)}
       ${taskLinkChipHtml('dbd', t.id)}
-      <button class="task-del" onclick="removeDbdTask(${t.id})">×</button>
+      <button class="task-del" onclick="removeDbdTask(${t.id},this)">×</button>
     </div>`;
 }
 

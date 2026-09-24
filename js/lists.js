@@ -3,7 +3,7 @@
 import { CAL_DOW } from './config.js';
 import {
   $, calKeyToDate, calToday, CHECK_SVG, CHILD_SVG, closeModal, DOTS_SVG, escAttr, GRIP_SVG,
-  showToast, STAR_SVG, SYNC_SVG,
+  keepRowsAbove, showToast, STAR_SVG, SYNC_SVG,
 } from './util.js';
 import { saveToLocal } from './persistence.js';
 import { bindAllDrags } from './drag.js';
@@ -101,7 +101,7 @@ function buildCard(list, pfx) {
         ${calCtl}
         ${syncBadge}
         ${parentBadge}
-        <button class="task-del" onclick="removeTask(${list.id},${task.id})">×</button>
+        <button class="task-del" onclick="removeTask(${list.id},${task.id},this)">×</button>
       </div>`;
   }).join('');
 
@@ -369,14 +369,14 @@ export function addTask(listId) {
   }, 10);
 }
 
-export function removeTask(listId, taskId) {
+/* `fromEl`: the × that was pressed, so the page stays where it was. */
+export function removeTask(listId, taskId, fromEl) {
   const list = listById(listId);
   if (!list) return;
   if (list.isDefault && !formatMode) return;
   list.tasks = list.tasks.filter(t => t.id !== taskId);
   if (taskLinkClearAll(taskLinkRef('list', taskId))) { calSave(); calRefresh(); }
-  renderTodos();
-  renderDbd();
+  keepRowsAbove(fromEl, () => { renderTodos(); renderDbd(); });
   saveToLocal();
 }
 
