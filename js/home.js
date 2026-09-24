@@ -1,20 +1,24 @@
-/* home.js — The Home page: greeting, balance, progress, today's tasks, starred lists,
- * timers, next 4 hours. */
+/* home.js — The Home page: greeting, balance, progress, insight cards, today's tasks,
+ * starred lists, timers, next 4 hours. */
 import {
-  $, calDateKey, calFmtTime, calMinsToStr, calTimeToMins, calToday, CHECK_SVG, escAttr, fmt,
-  getRemaining, STAR_SVG,
+  $, calDateKey, calFmtTime, calMinsToStr, calTimeToMins, calToday, CHECK_SVG, escAttr,
+  isMobileLayout, STAR_SVG,
 } from './util.js';
-import { timers } from './timers.js';
+import { timerDisplayText, timerIsOver, timerLog, timers } from './timers.js';
 import { todoLists } from './lists.js';
 import { dbdAllEntries, dbdCompare, dbdLabelFor, dbdTasks, dbdTodayKey } from './dbd.js';
 import { taskLinkEventTitle, taskLinkHomeChipHtml } from './tasklinks.js';
-import { desktopNavSync, viewEnabled } from './views.js';
-import { calDesktopOpen, calEvents, calToggleDesktop } from './calendar.js';
+import { desktopNavSync, goTab, openBudgetTab, viewEnabled } from './views.js';
+import { calDesktopOpen, calEvents, calShiftSources, calToggleDesktop } from './calendar.js';
 import { gcalEvents, gcalIsConnected } from './gcal.js';
 import {
-  budgetDesktopOpen, budgetToggleDesktop, money, todayBalance, totalBalance,
+  budgetDesktopOpen, budgetToggleDesktop, money, runwayResult, todayBalance, totalBalance,
 } from './budget.js';
 import { homeDigestHtml } from './digest.js';
+import { shiftsOnDays } from './shifts.js';
+import { addDays } from './runway.js';
+import { deadlineClashes, runwayWarning, timerOverruns } from './insights.js';
+import { formatMode, toggleFormatMode } from './formats.js';
 
 /* ───────────────────────── HOME PAGE ─────────────────────────
  * Read-mostly dashboard assembled from existing state. All interactions
@@ -43,6 +47,7 @@ export function renderHome() {
   if (!dc && !mc) return;
   const html =
     homeHeroHtml() +
+    homeInsightsHtml() +
     homeDigestHtml() +
     homeDbdHtml() +
     homeStarredListsHtml(true) +   // starred Daily lists
@@ -143,6 +148,95 @@ function homeHeroHtml() {
     </div>`;
 }
 
+/* ── insights: the three cards that read across shifts, deadlines, cash and
+ * timers (the rules are in insights.js). A card shows only while its rule
+ * fires, so on a normal day this section isn't there at all. ── */
+const HI_ICONS = {
+  clash: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 6.5h12M5 1.5v3M11 1.5v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M6 9.2l4 3M10 9.2l-4 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  cash:  '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="4" width="13" height="9.5" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M1.5 7h13" stroke="currentColor" stroke-width="1.5"/><path d="M11 10.4h.01" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
+  timer: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8.5" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M8 5.5v3l2 1.4M6.2 1.8h3.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+};
+/* Deadlines: unfinished, dated tasks in the Deadlines list, the list the
+ * Working student template brings (a Day by Day task tagged Deadlines lands
+ * there too). Other dated tasks are plans for a day, not due dates, so a shift
+ * on the same day is no clash. */
+function homeDeadlines(today) {
+  const list = todoLists.find(l => !l.isDefault && (l.title || '').trim().toLowerCase() === 'deadlines');
+  return list ? list.tasks.filter(t => !t.done && t.due && t.due >= today).map(t => ({ id: t.id, text: t.text, due: t.due })) : [];
+}
+function homeDayWord(key) {
+  const w = dbdLabelFor(key);
+  return w === 'Today' || w === 'Tomorrow' ? w.toLowerCase() : w;
+}
+function homeDuration(sec) {
+  const m = Math.round(sec / 60), h = Math.floor(m / 60), r = m % 60;
+  return h && r ? `${h} h ${r} min` : h ? `${h} h` : `${r} min`;
+}
+function homeInsightCard(kind, title, text, go, goLabel) {
+  return `
+    <div class="home-insight hi-${kind}">
+      <div class="hi-mark" aria-hidden="true">${HI_ICONS[kind]}</div>
+      <div class="hi-main">
+        <div class="hi-title">${title}</div>
+        <div class="hi-text">${text}</div>
+      </div>
+      <button class="hi-go" onclick="homeInsightGo('${go}')">${goLabel}</button>
+    </div>`;
+}
+function homeInsightsHtml() {
+  const today = dbdTodayKey();
+  const now = new Date();
+  const cards = [];
+
+  const days = Array.from({ length: 7 }, (_, i) => addDays(today, i));
+  const clashes = deadlineClashes(shiftsOnDays(days, calShiftSources()), homeDeadlines(today),
+    { date: today, minutes: now.getHours() * 60 + now.getMinutes() });
+  if (clashes.length) {
+    const { shift: sh, deadline: dl } = clashes[0];
+    const startM = calTimeToMins(sh.start);
+    const when = `${homeDayWord(sh.date)} ${calFmtTime(sh.start)}–${calFmtTime(calMinsToStr((startM + sh.minutes) % 1440))}`;
+    const more = clashes.length - 1;
+    cards.push(homeInsightCard('clash', 'A shift lands on a deadline',
+      `${escAttr(sh.title || 'Your shift')} ${when} is in the 24 hours before “${escAttr(dl.text)}” is due. ` +
+      `Finish it earlier or swap the shift.${more ? ` ${more} more clash${more === 1 ? '' : 'es'} this week.` : ''}`,
+      'calendar', 'Calendar'));
+  }
+
+  const warn = runwayWarning(runwayResult());
+  if (warn) {
+    const why = warn.runsOutWith.length ? ` when ${escAttr(warn.runsOutWith.join(' and '))} ${warn.runsOutWith.length === 1 ? 'is' : 'are'} due` : '';
+    cards.push(homeInsightCard('cash', 'Cash runs out before payday',
+      `Your money runs out ${homeDayWord(warn.runsOutOn)}${why}, ${warn.shortBy} day${warn.shortBy === 1 ? '' : 's'} before payday. ` +
+      `About ${money(warn.shortfall)} more would carry you to ${homeDayWord(warn.payday)}.`,
+      'budget', 'Budget'));
+  }
+
+  timerOverruns(timerLog, today).slice(0, 1).forEach(o => {
+    const fix = o.suggested ? ` Try ${homeDuration(o.suggested)}${o.budget ? ` instead of ${homeDuration(o.budget)}` : ''}.` : '';
+    cards.push(homeInsightCard('timer', `${escAttr(o.label)}: the budget is wrong, not you`,
+      `It ran over ${o.days} days running, by ${homeDuration(o.avgOver)} on average.${fix}`,
+      'formats', 'Formats'));
+  });
+
+  if (!cards.length) return '';
+  return `
+    <section class="home-section home-sec-insights">
+      <div class="home-section-title">Heads up</div>
+      <div class="home-insights">${cards.join('')}</div>
+    </section>`;
+}
+/* The button on an insight card: to the calendar, the budget, or Formats. */
+export function homeInsightGo(where) {
+  if (where === 'budget') { openBudgetTab(); return; }
+  if (where === 'formats') {
+    if (!formatMode) toggleFormatMode();
+    if (isMobileLayout()) goTab('timers', true);
+    return;
+  }
+  if (isMobileLayout()) goTab('calendar', true);
+  else if (!calDesktopOpen) calToggleDesktop();
+}
+
 /* ── day-by-day: overdue (red) + today (white) + next 3 upcoming (grey) ── */
 function homeDbdRow(entry, tone) {
   const t = entry.task;
@@ -227,10 +321,10 @@ function homeTimersHtml() {
   if (!viewEnabled('timers')) return '';   // the one Home section that follows its toggle
   if (!timers.length) return '';
   const chips = timers.map(t => `
-    <div class="home-timer-chip">
+    <div class="home-timer-chip hchip-${t.id}${timerIsOver(t) ? ' over' : ''}">
       <span class="home-timer-dot" style="background:${t.color}"></span>
       <span class="home-timer-label">${escAttr(t.label)}</span>
-      <span class="home-timer-time tdisp-${t.id}">${fmt(getRemaining(t))}</span>
+      <span class="home-timer-time tdisp-${t.id}">${timerDisplayText(t)}</span>
     </div>`).join('');
   return `
     <section class="home-section home-sec-timers">

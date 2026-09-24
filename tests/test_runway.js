@@ -45,10 +45,10 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   console.log('\n── 4. The runway ──');
   const T = '2026-09-23';
   let r = R.cashRunway({ today: T, payday: '2026-10-03', balance: 100, todaySpend: 10, dailySpend: 20 });
-  eq(`${r.daysToPayday} ${r.daysOfCash} ${r.runsOutOn} ${r.short} ${r.shortBy} [${r.runsOutWith}]`, '10 5 2026-09-28 true 5 []',
-    '$100 at $20/day (+$10 left today) lasts 5 days; payday in 10 → short by 5');
+  eq(`${r.daysToPayday} ${r.daysOfCash} ${r.runsOutOn} ${r.short} ${r.shortBy} [${r.runsOutWith}] ${r.shortfall}`, '10 5 2026-09-28 true 5 [] 90',
+    '$100 at $20/day (+$10 left today) lasts 5 days; payday in 10 → short by 5 days, $90');
   r = R.cashRunway({ today: T, payday: '2026-10-03', balance: 300, todaySpend: 10, dailySpend: 20 });
-  eq(`${r.daysOfCash} ${r.short}`, '15 false', '$300 lasts 15 days: covered');
+  eq(`${r.daysOfCash} ${r.short} ${r.shortfall}`, '15 false 0', '$300 lasts 15 days: covered, no shortfall');
   r = R.cashRunway({ today: T, payday: '2026-10-03', balance: 250, dailySpend: 20,
     shifts: [{ date: '2026-09-25', pay: 120 }, { date: '2026-10-04', pay: 500 }, { date: '2026-09-26', pay: null }] });
   eq(`${r.paycheck} ${r.unpricedShifts} ${r.daysOfCash}`, '120 1 19', 'shifts before payday ($120) land on payday and stretch 13 days to 19; a later shift waits for the next payday');
@@ -75,7 +75,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     const today = w.eval('dbdTodayKey()');
     w.eval(`runway.payday = addDays('${today}', 20); runway.repeat = 'weekly'; runway.bills = [{ id: 3, name: 'Rent', amount: 650, day: 1 }]`);
     const st = w.gatherState();
-    eq(st.build, 5, 'state build 5 (runway is new)');
+    ok(st.build >= 5, `state build ${st.build} (runway arrived in build 5)`);
     const c = w.compressState(st);
     eq(JSON.stringify(c.rw), JSON.stringify({ p: st.runway.payday, r: 'weekly', b: [{ i: 3, n: 'Rent', a: 650, d: 1 }] }), 'Export writes rw');
     eq(JSON.stringify(w.decompressState(JSON.parse(JSON.stringify(c))).runway), JSON.stringify(st.runway), 'Import reads it back');

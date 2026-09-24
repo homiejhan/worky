@@ -15,7 +15,7 @@ import {
   retagListTask, setDbdDayKey, setDbdDue, setDbdText, setListTaskDue, tagDbdTask, toggleDbdTask,
 } from './dbd.js';
 import { openTaskLinkModal, taskLinkFlushRename, taskLinkOpenEvent } from './tasklinks.js';
-import { homeToggleDesktop, renderHome } from './home.js';
+import { homeInsightGo, homeToggleDesktop, renderHome } from './home.js';
 import {
   applyViewVisibility, initSwipe, initViewportGuard, openBudgetTab, setSwipePanelWidths,
 } from './views.js';
@@ -46,11 +46,12 @@ import { applyStarterProfile, tourOffer } from './onboarding.js';
 Object.assign(window, {
   addDbdTask, addTask, changeTimerColor, changeTodoColor, commitEditTimer, digestAddAllTasks,
   digestAddTask, digestDismissTask, digestLoadSample, digestRunDismiss, digestRunNow,
-  digestToggleCollapsed, gcalToggleCal, openBudgetTab, openScheduleModal, openSettings,
-  openTaskLinkModal, refreshSyncBadges, removeDbdTask, removeFormatDaily, removeFormatTimer,
-  removeTask, removeTodoList, resetTimer, retagListTask, setDbdDue, setDbdText, setListTaskDue,
-  setListTitle, setTaskText, setTimerLabel, startEditTimer, tagDbdTask, taskLinkFlushRename,
-  taskLinkOpenEvent, toggleDbdTask, toggleStarList, toggleTask, toggleTimer,
+  digestToggleCollapsed, gcalToggleCal, homeInsightGo, openBudgetTab, openScheduleModal,
+  openSettings, openTaskLinkModal, refreshSyncBadges, removeDbdTask, removeFormatDaily,
+  removeFormatTimer, removeTask, removeTodoList, resetTimer, retagListTask, setDbdDue,
+  setDbdText, setListTaskDue, setListTitle, setTaskText, setTimerLabel, startEditTimer,
+  tagDbdTask, taskLinkFlushRename, taskLinkOpenEvent, toggleDbdTask, toggleStarList, toggleTask,
+  toggleTimer,
 });
 
 /* ───────────────────────── INIT ───────────────────────── */

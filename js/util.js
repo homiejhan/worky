@@ -27,6 +27,13 @@ export function getRemaining(t) {
   if (t.running) return Math.max(0, t.secondsAtStart - (Date.now() - t.startedAt) / 1000);
   return t.seconds;
 }
+/* Seconds a timer has run past zero: what it carried when last paused (t.over)
+ * plus how far the current run is past zero. */
+export function getOvertime(t) {
+  const base = t.over || 0;
+  if (!t.running) return base;
+  return base + Math.max(0, (Date.now() - t.startedAt) / 1000 - t.secondsAtStart);
+}
 export function playIcon()  { return '<svg width="10" height="12" viewBox="0 0 10 12" fill="none"><path d="M1 1.2L9 6L1 10.8V1.2Z" fill="currentColor"/></svg>'; }
 export function pauseIcon() { return '<svg width="10" height="12" viewBox="0 0 10 12" fill="none"><rect x="1" y="1" width="3" height="10" rx="1" fill="currentColor"/><rect x="6" y="1" width="3" height="10" rx="1" fill="currentColor"/></svg>'; }
 export function resetIcon() { return '<svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M1.5 5.5A4 4 0 1 0 2.9 2.7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M1.5 2V5.5H5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }

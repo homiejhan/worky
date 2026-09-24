@@ -3,8 +3,8 @@
 import { LS_KEY } from './config.js';
 import { cloneTask, getRemaining, showToast } from './util.js';
 import {
-  renderTimers, setTimerDefaults, setTimers, setWokenUp, syncWakeupUI, TIMER_DEFAULTS, timers,
-  updateTimerSummary, wokenUp,
+  normalizeTimerLog, renderTimers, setTimerDefaults, setTimerLog, setTimers, setWokenUp,
+  syncWakeupUI, TIMER_DEFAULTS, timerLog, timers, updateTimerSummary, wokenUp,
 } from './timers.js';
 import {
   renderTodos, setTaskIdCounter, setTodoIdCounter, setTodoLists, taskIdCounter, todoIdCounter,
@@ -38,6 +38,7 @@ import { normalizeShiftCals, setShiftCals, shiftCals } from './gcal.js';
  *   todoIdCounter→tic taskIdCounter→tac todoLists→tl theme→th
  *   calendar→cal calEvents→ce calTemplates→ct calEventIdCtr→cec
  *   timer: id→i label→lb color→c seconds→s running→r startedAt→sa secondsAtStart→ss
+ *     over→ov   (seconds past zero, see timers.js)
  *   list:  id→i title→ti color→c isDefault→d starred→sr tasks→tk
  *   task:  id→i text→tx done→dn due→du doneOn→dw
  *   dbdTask: id→i text→tx due→du done→dn doneOn→dw
@@ -47,12 +48,14 @@ import { normalizeShiftCals, setShiftCals, shiftCals } from './gcal.js';
  *     shift→sh wage→wg             (paid shift and its hourly wage, see shifts.js)
  *   shiftCals→sc  { calId: { shift, wage } } per Google calendar (see gcal.js)
  *   runway→rw {p: payday, r: repeat, b: bills [{i: id, n: name, a: amount, d: day}]} (see budget.js)
+ *   timerLog→tg { day: { key: [label, over, budget] } } (see timers.js)
  *   digest: enabled→en last→l {at, md, n, m, s} clearedAt→ca   (see digest.js)
  */
 export function compressState(st) {
   const cTimer = t => {
     const o = { i:t.id, lb:t.label, c:t.color, s:t.seconds };
     if (t.running) { o.r=1; o.sa=t.startedAt; o.ss=t.secondsAtStart; }
+    if (t.over) o.ov = t.over;
     return o;
   };
   const cDef  = t => ({ lb:t.label, c:t.color, s:t.seconds });
@@ -108,6 +111,10 @@ export function compressState(st) {
     ...(st.runway && (st.runway.payday || st.runway.bills.length)
       ? { rw: { p: st.runway.payday, r: st.runway.repeat, b: st.runway.bills.map(b => ({ i: b.id, n: b.name, a: b.amount, d: b.day })) } }
       : {}),
+    ...(st.timerLog && Object.keys(st.timerLog).length
+      ? { tg: Object.fromEntries(Object.entries(st.timerLog).map(([day, e]) =>
+          [day, Object.fromEntries(Object.entries(e).map(([k, r]) => [k, [r.label, r.over, r.budget]]))])) }
+      : {}),
     cal: { ce: cEvents, ct: (st.calendar.calTemplates||[]).map(cCalEv), cec: st.calendar.calEventIdCtr },
   };
 }
@@ -116,7 +123,7 @@ function decompressState(c) {
   if (c.version === 1) return c;          // v1 passthrough
   if (c.v !== 2) return null;
   const dTimer = t => ({ id:t.i, label:t.lb, color:t.c, seconds:t.s,
-    running:!!t.r, startedAt:t.sa ?? null, secondsAtStart:t.ss ?? null });
+    running:!!t.r, startedAt:t.sa ?? null, secondsAtStart:t.ss ?? null, ...(t.ov ? { over: t.ov } : {}) });
   const dDef  = t => ({ label:t.lb, color:t.c, seconds:t.s });
   const dTask = t => { const o = { id:t.i, text:t.tx, done:!!t.dn }; if (t.du) o.due = t.du; if (t.dw) o.doneOn = t.dw; return o; };
   const dList = l => ({ id:l.i, title:l.ti, color:l.c, isDefault:!!l.d, starred:!!l.sr, activeDays: Array.isArray(l.ad) ? l.ad : null, tasks:(l.tk||[]).map(dTask) });
@@ -157,6 +164,8 @@ function decompressState(c) {
     theme: decompressTheme(c.th),
     digest: decompressDigest(c.dg),
     shiftCals: normalizeShiftCals(c.sc),
+    timerLog: normalizeTimerLog(c.tg ? Object.fromEntries(Object.entries(c.tg).map(([day, e]) =>
+      [day, Object.fromEntries(Object.entries(e).map(([k, r]) => [k, { label: r[0], over: r[1], budget: r[2] }]))])) : null),
     runway: normalizeRunway(c.rw ? { payday: c.rw.p, repeat: c.rw.r, bills: (c.rw.b || []).map(b => ({ id: b.i, name: b.n, amount: b.a, day: b.d })) } : null),
     calendar: { calEvents: dEvents, calTemplates: (c.cal.ct||[]).map(dCalEv), calEventIdCtr: c.cal.cec || 1 },
   };
@@ -177,17 +186,19 @@ function liveTimerRecord(t) {
     running: !!src.running,
     startedAt: src.running ? src.startedAt : null,
     secondsAtStart: src.running ? src.secondsAtStart : null,
+    ...(src.over > 0 ? { over: Math.round(src.over) } : {}),   // past zero before this run
   };
 }
 
 /* Build number of the state schema. Bumped whenever gatherState() learns a
  * new top-level key (digest was build 2, digest tasks build 3, shiftCals
- * build 4, runway build 5). Lets a newer device recognise a cloud copy
- * written by an older build, which cannot have carried the newer fields. */
-export const STATE_BUILD = 5;
+ * build 4, runway build 5, timerLog build 6). Lets a newer device recognise
+ * a cloud copy written by an older build, which cannot have carried the
+ * newer fields. */
+export const STATE_BUILD = 6;
 const STATE_KNOWN_KEYS = new Set(['version', 'build', 'wokenUp', 'timerDefaults', 'timers', 'todoIdCounter',
   'taskIdCounter', 'todoLists', 'dbdTasks', 'dbdIdCounter', 'budget', 'purchaseIdCounter', 'views', 'theme',
-  'digest', 'shiftCals', 'runway', 'calendar']);
+  'digest', 'shiftCals', 'runway', 'timerLog', 'calendar']);
 /* Top-level keys this build does not understand, carried through untouched so
  * an older device never strips what a newer one wrote (see syncApplyRemote). */
 let stateExtra = {};
@@ -228,6 +239,7 @@ export function gatherState() {
     digest: digestRecord(),
     shiftCals: normalizeShiftCals(shiftCals),
     runway: normalizeRunway(runway),
+    timerLog: normalizeTimerLog(timerLog),
     calendar: { calEvents, calTemplates, calEventIdCtr },
   };
 }
@@ -242,6 +254,7 @@ function hydrateState(st) {
     id: t.id, label: t.label, color: t.color,
     seconds: t.seconds, running: t.running,
     startedAt: t.startedAt, secondsAtStart: t.secondsAtStart,
+    ...(t.over > 0 ? { over: t.over } : {}),
   })));
   setTodoIdCounter(st.todoIdCounter ?? todoIdCounter);
   setTaskIdCounter(st.taskIdCounter ?? taskIdCounter);
@@ -260,6 +273,7 @@ function hydrateState(st) {
   setDigest(normalizeDigest(st.digest));
   setShiftCals(normalizeShiftCals(st.shiftCals));
   setRunway(normalizeRunway(st.runway));
+  setTimerLog(normalizeTimerLog(st.timerLog));
   if (st.calendar) {
     setCalEvents(st.calendar.calEvents     || {});
     setCalTemplates(st.calendar.calTemplates  || []);
