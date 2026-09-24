@@ -6,6 +6,7 @@ import { gcalIsConnected, gcalUpdateBtn } from './gcal.js';
 import { syncUpdateUI } from './sync.js';
 import { renderThemePresets } from './theme.js';
 import { digestRenderSettings } from './digest.js';
+import { bankRenderSettings } from './bank.js';
 
 /* ── Settings ──
  * Master–detail. SETTINGS_SECTIONS drives the section list (#settingsNav);
@@ -21,6 +22,8 @@ const SETTINGS_SECTIONS = [
     icon: '<circle cx="8" cy="8" r="5.6" stroke="currentColor" stroke-width="1.5"/><path d="M8 2.4a5.6 5.6 0 0 1 0 11.2z" fill="currentColor"/>' },
   { key: 'gcal',       label: 'Google Calendar', desc: 'See and send events',
     icon: '<rect x="2" y="3" width="12" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 6.5h12" stroke="currentColor" stroke-width="1.5"/><path d="M5 1.5v3M11 1.5v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
+  { key: 'bank',       label: 'Bank accounts',   desc: 'Balances and transactions',
+    icon: '<path d="M2 6.2L8 2.6l6 3.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.6 7.4v4.6M6.5 7.4v4.6M9.5 7.4v4.6M12.4 7.4v4.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M2 13.6h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
   { key: 'sync',       label: 'Cloud sync',      desc: 'Keep your devices in step',
     icon: '<path d="M4.7 12.6h6.7a2.6 2.6 0 0 0 .5-5.15 3.9 3.9 0 0 0-7.55.85 2.2 2.2 0 0 0 .35 4.3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>' },
   { key: 'digest',     label: 'Email Digest',    desc: 'Morning summary on Home',
@@ -95,6 +98,7 @@ export function renderSettings() {
       : 'Not connected.';
   }
   gcalUpdateBtn();
+  bankRenderSettings();
   digestRenderSettings();
 }
 

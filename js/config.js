@@ -43,3 +43,12 @@ export const DIGEST_GITHUB_LS_KEY      = 'focus-digest-github';    // device-loc
 export const DIGEST_RUN_LS_KEY         = 'focus-digest-run';       // device-local: the GitHub run being watched
 export const DIGEST_GITHUB_REPO        = 'homiejhan/worky';
 export const DIGEST_GITHUB_WORKFLOW    = 'digest.yml';
+
+/* ── Bank accounts (Settings → Bank accounts) ──
+ * Banks connect through Plaid, via the relay in backend/bank (it holds the Plaid
+ * keys). Set BANK_RELAY_URL to where that relay runs, e.g.
+ * https://focus-bank-relay.<you>.workers.dev. Empty = not set up here; a relay
+ * address can still be set on one device, for testing. */
+export const BANK_RELAY_URL  = '';
+export const BANK_LS_KEY     = 'focus-bank';   // device-local: connections, balances, transactions
+export const PLAID_LINK_JS   = 'https://cdn.plaid.com/link/v2/stable/link-initialize.js';

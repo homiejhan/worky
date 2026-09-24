@@ -1,16 +1,22 @@
 /* Bank connections: the relay in backend/bank against a fake Plaid, in-process and
- * over HTTP, and check.mjs from start to finish.
+ * over HTTP, check.mjs from start to finish, and Settings → Bank accounts in the app.
  * Plaid itself is never called: tests/fake-plaid.js answers in its shapes.
  * Run: npm test -- bank (or node --experimental-vm-modules tests/test_bank.js) */
 const path = require('path');
 const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
-const { ROOT } = require('./load-app');
+const { loadApp, ROOT } = require('./load-app');
 const { createFakePlaid } = require('./fake-plaid');
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; console.log('  ✓', msg); } else { fail++; console.log('  ✗', msg); } }
 function eq(a, b, msg) { ok(a === b, `${msg} (got ${JSON.stringify(a)})`); }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function until(fn, ms = 1000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { if (fn()) return true; await sleep(10); }
+  return fn();
+}
 
 const KEY = Buffer.alloc(32, 7).toString('base64');
 const OTHER_KEY = Buffer.alloc(32, 9).toString('base64');
@@ -189,6 +195,132 @@ const ENV = { PLAID_CLIENT_ID: 'test-client', PLAID_SECRET: 'test-secret', PLAID
     ok(production.code === 1 && /only runs in the sandbox/.test(production.text), 'and refuses to run against production');
   }
 
+
+  /* The app, with its fetch wired to the real relay code in front of a fake Plaid,
+   * and a stand-in for Plaid's window that "logs in" right away. */
+  const RELAY = 'http://localhost:8787/api/bank';
+  function bankWorld() {
+    const plaid = createFakePlaid();
+    const links = [];
+    const relayFetch = async (url, opts = {}) => {
+      const u = String(url);
+      if (!u.startsWith(RELAY + '/')) throw new TypeError('Failed to fetch');
+      return handle(new Request(u, { method: opts.method || 'GET', headers: opts.headers, body: opts.body }), ENV, plaid.fetchImpl);
+    };
+    const Link = {
+      create(cfg) {
+        links.push(cfg);
+        return { open() { setTimeout(() => cfg.onSuccess(`public-sandbox-link${links.length}`, { institution: { name: 'First Platypus Bank', institution_id: 'ins_109508' } }), 0); } };
+      },
+    };
+    return { plaid, links, relayFetch, Link };
+  }
+  const saved = w => JSON.parse(w.localStorage.getItem('focus-bank') || 'null');
+  const toast = d => d.getElementById('toast').textContent;
+
+  console.log('\n── 7. Settings → Bank accounts, before anything is set up ──');
+  {
+    const { w, d } = await loadApp({ storage: { 'focus-tour-done': '1' } });
+    w.openSettings('bank');
+    const nav = [...d.querySelectorAll('[data-settings-nav]')].map(b => b.dataset.settingsNav);
+    ok(nav.indexOf('bank') === nav.indexOf('gcal') + 1, 'Bank accounts sits right after Google Calendar in Settings');
+    ok(d.querySelector('[data-settings-section="bank"]').classList.contains('active'), 'and opens');
+    eq(d.getElementById('bankStatusLine').textContent, 'Not set up on this copy of Focus.', 'says it is not set up');
+    ok(d.getElementById('bankRelayInput') && !d.querySelector('[data-bank="connect"]'), 'offers a relay address, no Connect button yet');
+    ok(/How to set up bank connections/.test(d.getElementById('bankPanel').textContent), 'and links to the setup guide');
+  }
+
+  console.log('\n── 8. Connect a bank: relay address, Plaid\'s window, accounts, transactions ──');
+  const world = bankWorld();
+  const { w, d } = await loadApp({ storage: { 'focus-tour-done': '1' }, before: w => { w.fetch = world.relayFetch; } });
+  {
+    w.openSettings('bank');
+    const save = v => { d.getElementById('bankRelayInput').value = v; d.querySelector('[data-bank="relay-save"]').click(); };
+    save('ftp://localhost/api');
+    ok(saved(w) === null && /https:\/\//.test(toast(d)), 'refuses an address that is not https (or local http)');
+    save('http://example.com/api/bank');
+    ok(saved(w) === null, 'plain http is only allowed for this computer');
+    save('https://user:pw@relay.example');
+    ok(saved(w) === null, 'and never with a password in it');
+    save(RELAY + '/');
+    eq(saved(w).relay, RELAY, 'a local relay is saved on this device');
+    ok(!(w.localStorage.getItem('focus-app-state') || '').includes('localhost:8787'), 'not in the synced state');
+    ok(await until(() => /Plaid sandbox/.test(d.getElementById('bankPanel').textContent)), 'the relay is checked: "Plaid sandbox"');
+    ok(/user_good/.test(d.getElementById('bankPanel').textContent), 'with the sandbox login to use');
+    eq(d.getElementById('bankStatusLine').textContent, 'No banks connected.', 'no banks yet');
+
+    w.Plaid = world.Link;
+    d.querySelector('[data-bank="connect"]').click();
+    ok(await until(() => d.querySelectorAll('#bankPanel .bank-item').length === 1 && d.querySelectorAll('#bankPanel .bank-tx').length > 0),
+      'Connect → Plaid\'s window → back in Focus with the bank');
+    ok(/^link-sandbox-/.test(world.links[0].token), 'Plaid\'s window got a link token from the relay');
+    eq(world.plaid.state.calls.find(c => c.path === '/link/token/create').body.user.client_user_id, w.localStorage.getItem('focus-bank-user'),
+      'Plaid knows this device only by a random id');
+    eq(d.querySelector('.bank-inst').textContent, 'First Platypus Bank', 'shows the bank');
+    const accts = [...d.querySelectorAll('.bank-acct')].map(a => a.textContent.replace(/\s+/g, ' ').trim());
+    eq(accts.length, 3, 'its three accounts');
+    ok(/Plaid Checking ••0000 checking \$110\.00 \$100\.00 available/.test(accts[0]), `checking with balance and available: "${accts[0]}"`);
+    ok(/Plaid Credit Card ••3333 credit card \$410\.00 owed/.test(accts[2]), 'a credit card shows what is owed');
+    const txs = [...d.querySelectorAll('.bank-tx')].map(t => t.textContent.replace(/\s+/g, ' ').trim());
+    eq(txs.length, 6, 'the six newest transactions');
+    ok(/Starbucks pending -\$4\.33$/.test(txs[0]), `newest first, pending marked: "${txs[0]}"`);
+    const pay = [...d.querySelectorAll('.bank-tx')].find(t => /payroll/.test(t.textContent));
+    ok(pay && /\+\$232\.50/.test(pay.textContent) && pay.querySelector('.bank-tx-amt.in'), 'money in shows as +, in the accent colour');
+    eq(d.getElementById('bankStatusLine').textContent, '3 accounts at 1 bank, kept on this device only.', 'status line counts them');
+    ok(/Connected to First Platypus Bank/.test(toast(d)), 'toast confirms');
+    const item = saved(w).items[0];
+    ok(/^v1\./.test(item.token) && item.transactions.length === 7 && item.cursor === 'cursor-7', 'saved on this device: sealed token, transactions, cursor');
+    const synced = w.eval('JSON.stringify(gatherState())') + w.eval('JSON.stringify(compressState(gatherState()))');
+    ok(!synced.includes('First Platypus') && !synced.includes(item.token) && !synced.includes('Starbucks'), 'nothing about the bank is in the synced state or Export');
+  }
+
+  console.log('\n── 9. Refresh, a bank that needs a new login, disconnect ──');
+  {
+    const access = [...world.plaid.state.items.keys()].pop();
+    world.plaid.addTransactions(access, [{ transaction_id: 'tx-new', account_id: 'acc-checking', date: new Date().toISOString().slice(0, 10),
+      name: 'Bookstore', merchant_name: 'Campus Bookstore', amount: 42.1, iso_currency_code: 'USD', pending: false, personal_finance_category: { primary: 'GENERAL_MERCHANDISE' } }]);
+    d.querySelector('[data-bank="refresh"]').click();
+    ok(await until(() => /Campus Bookstore/.test(d.getElementById('bankPanel').textContent)), 'Refresh brings in the new transaction');
+    eq(world.plaid.state.calls.filter(c => c.path === '/transactions/sync').pop().body.cursor, 'cursor-7', 'asking only for what changed since the saved cursor');
+    eq(saved(w).items[0].transactions.length, 8, 'and keeps it');
+
+    world.plaid.state.failNext = { path: '/accounts/get', error_code: 'ITEM_LOGIN_REQUIRED' };
+    d.querySelector('[data-bank="refresh"]').click();
+    ok(await until(() => d.querySelector('.bank-error')), 'a bank that needs a new login shows it');
+    ok(/needs you to log in again/.test(d.querySelector('.bank-error').textContent), 'in plain words');
+
+    let asked = '';
+    w.confirm = m => { asked = m; return true; };
+    d.querySelector('[data-bank="disconnect"]').click();
+    ok(/^Disconnect First Platypus Bank\?/.test(asked), 'Disconnect asks first');
+    ok(await until(() => !d.querySelector('.bank-item')), 'then the bank is gone from Focus');
+    ok(world.plaid.state.calls.some(c => c.path === '/item/remove' && c.body.access_token === access), 'and the connection is ended at Plaid');
+    eq(saved(w).items.length, 0, 'nothing of it left on the device');
+    eq(d.getElementById('bankStatusLine').textContent, 'No banks connected.', 'back to no banks');
+  }
+
+  console.log('\n── 10. Plaid\'s window closed early, relay down, an OAuth bank sending the user back ──');
+  {
+    w.Plaid = { create: cfg => ({ open() { setTimeout(() => cfg.onExit({ error_code: 'USER_CANCELLED', display_message: null, error_message: 'user closed Link' }), 0); } }) };
+    d.querySelector('[data-bank="connect"]').click();
+    ok(await until(() => /user closed Link/.test(toast(d))), 'closing Plaid\'s window with an error says so');
+    ok(!d.querySelector('.bank-item') && !d.querySelector('[data-bank="connect"]').disabled, 'no bank added, and Connect works again');
+
+    w.fetch = async () => { throw new TypeError('Failed to fetch'); };
+    d.querySelector('[data-bank="connect"]').click();
+    ok(await until(() => /Could not reach the bank relay/.test(toast(d))), 'relay unreachable → clear message');
+    w.fetch = world.relayFetch;
+
+    const back = bankWorld();
+    const url = 'https://localhost/worky/?oauth_state_id=a1b2c3';
+    const app2 = await loadApp({ url, storage: { 'focus-tour-done': '1', 'focus-bank': JSON.stringify({ relay: RELAY, items: [] }) },
+      before: w2 => { w2.fetch = back.relayFetch; w2.Plaid = back.Link; w2.sessionStorage.setItem('focus-bank-link', 'link-sandbox-77'); } });
+    ok(await until(() => back.links.length === 1), 'returning from an OAuth bank reopens Plaid\'s window');
+    ok(back.links[0].token === 'link-sandbox-77' && back.links[0].receivedRedirectUri === url, 'with the same link token and the address the bank sent back');
+    eq(app2.w.location.search, '', 'and the address is cleaned up');
+    app2.w.openSettings('bank');
+    ok(await until(() => app2.d.querySelectorAll('#bankPanel .bank-item').length === 1), 'then the connection finishes as usual');
+  }
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

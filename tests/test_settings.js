@@ -9,7 +9,7 @@ function eq(a, b, msg) { ok(a === b, `${msg} (got ${JSON.stringify(a)})`); }
 function boot() { return loadApp(); }
 const activeSections = d => [...d.querySelectorAll('.settings-section.active')].map(s => s.dataset.settingsSection);
 const activeNav = d => [...d.querySelectorAll('.settings-nav-item.active')].map(b => b.dataset.settingsNav);
-const KEYS = 'views,appearance,gcal,sync,digest,help,data';
+const KEYS = 'views,appearance,gcal,bank,sync,digest,help,data';
 
 (async () => {   // the app boots asynchronously now (ES modules), so the checks run in here
 console.log('\n── 1. Structure: every old control still exists, in exactly one section ──');
@@ -17,11 +17,11 @@ console.log('\n── 1. Structure: every old control still exists, in exactly o
   const { w, d } = await boot();
   d.getElementById('settingsBtn').click();
   ok(d.getElementById('settingsModal').classList.contains('show'), 'gear opens Settings');
-  eq([...d.querySelectorAll('[data-settings-nav]')].map(b => b.dataset.settingsNav).join(','), KEYS, 'nav lists all seven sections');
+  eq([...d.querySelectorAll('[data-settings-nav]')].map(b => b.dataset.settingsNav).join(','), KEYS, 'nav lists all eight sections');
   eq([...d.querySelectorAll('[data-settings-section]')].map(s => s.dataset.settingsSection).join(','), KEYS, 'a pane exists for each nav item');
   const home = {
     settingsViewList: 'views', 'themePresets-s': 'appearance', themeOpenBtn: 'appearance',
-    gcalStatusLine: 'gcal', gcalConnectBtn: 'gcal', syncStatusLine: 'sync', syncConnectBtn: 'sync',
+    gcalStatusLine: 'gcal', gcalConnectBtn: 'gcal', bankStatusLine: 'bank', bankPanel: 'bank', syncStatusLine: 'sync', syncConnectBtn: 'sync',
     digestEnabledToggle: 'digest', digestStatusLine: 'digest', digestGithubToken: 'digest', digestGithubSaveBtn: 'digest',
     digestRunSettingsBtn: 'digest', digestOpenRunBtn: 'digest', digestSampleBtn: 'digest', digestClearBtn: 'digest',
     tourReplayBtn: 'help', clearStorageBtn: 'data',
@@ -63,7 +63,7 @@ console.log('\n── 3. Back button + reopen behaviour ──');
   d.getElementById('settingsBtn').click();
   eq(d.getElementById('settingsBox').dataset.stage, 'list', 'reopening starts mobile on the list again');
   eq(activeSections(d).join(','), 'appearance', 'desktop reopens on the last section');
-  eq(d.querySelectorAll('[data-settings-nav]').length, 7, 'nav is not re-rendered/duplicated on reopen');
+  eq(d.querySelectorAll('[data-settings-nav]').length, 8, 'nav is not re-rendered/duplicated on reopen');
 }
 
 console.log('\n── 4. Deep links ──');
