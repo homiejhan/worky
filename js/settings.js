@@ -28,7 +28,7 @@ const SETTINGS_SECTIONS = [
     icon: '<path d="M4.7 12.6h6.7a2.6 2.6 0 0 0 .5-5.15 3.9 3.9 0 0 0-7.55.85 2.2 2.2 0 0 0 .35 4.3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>' },
   { key: 'digest',     label: 'Email Digest',    desc: 'Morning summary on Home',
     icon: '<rect x="1.8" y="3.4" width="12.4" height="9.2" rx="1.9" stroke="currentColor" stroke-width="1.5"/><path d="M2.4 4.7L8 8.9l5.6-4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' },
-  { key: 'help',       label: 'Help',            desc: 'Tour and privacy policy',
+  { key: 'help',       label: 'Help',            desc: 'How-tos, tour and privacy',
     icon: '<circle cx="8" cy="8" r="5.8" stroke="currentColor" stroke-width="1.5"/><path d="M6.4 6.4a1.7 1.7 0 1 1 2.5 1.5c-.6.35-.9.7-.9 1.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.3" r="0.85" fill="currentColor"/>' },
   { key: 'data',       label: 'Data',            desc: 'Clear storage on this device',
     icon: '<ellipse cx="8" cy="4" rx="5.5" ry="2.2" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 4v8c0 1.2 2.5 2.2 5.5 2.2s5.5-1 5.5-2.2V4" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 8c0 1.2 2.5 2.2 5.5 2.2s5.5-1 5.5-2.2" stroke="currentColor" stroke-width="1.5"/>' },

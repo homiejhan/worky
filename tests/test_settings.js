@@ -24,13 +24,13 @@ console.log('\n── 1. Structure: every old control still exists, in exactly o
     gcalStatusLine: 'gcal', gcalConnectBtn: 'gcal', bankStatusLine: 'bank', bankPanel: 'bank', syncStatusLine: 'sync', syncConnectBtn: 'sync',
     digestEnabledToggle: 'digest', digestStatusLine: 'digest', digestGithubToken: 'digest', digestGithubSaveBtn: 'digest',
     digestRunSettingsBtn: 'digest', digestOpenRunBtn: 'digest', digestSampleBtn: 'digest', digestClearBtn: 'digest',
-    tourReplayBtn: 'help', clearStorageBtn: 'data',
+    helpOpenLink: 'help', tourReplayBtn: 'help', clearStorageBtn: 'data',
   };
   Object.entries(home).forEach(([id, key]) => {
     const el = d.getElementById(id);
     ok(!!el && el.closest('[data-settings-section]')?.dataset.settingsSection === key, `#${id} lives in "${key}"`);
   });
-  ok(!!d.querySelector('[data-settings-section="help"] a[href="privacy.html"]'), 'privacy link kept under Help');
+  ok(!!d.querySelector('[data-settings-section="help"] a[href="help/#privacy"]'), 'privacy link kept under Help, pointing at the help page');
   eq(d.querySelectorAll('#settingsModal .settings-section-label').length, 0, 'old stacked labels are gone');
 }
 

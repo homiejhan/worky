@@ -163,7 +163,7 @@ const TOUR_STEPS = [
     body: 'Formats is where you edit your defaults: which timers exist and how long they run, which Daily lists there are, and the weekly calendar templates. Not sure where to start? Templates has ready-made setups to build on; you started from Working student. Press Done to save. Reset returns the day to whatever you set here.',
     target: { d: '#fmtBtn', m: '#fmtBtn' } },
   { key: 'settings', title: 'Settings',
-    body: 'Hide sections you don\'t use, pick a theme or build your own, connect Google Calendar, and sign in to sync across your devices. You can replay this tour from here too.',
+    body: 'Hide sections you don\'t use, pick a theme or build your own, connect Google Calendar or a bank, and sign in to sync across your devices. Help has how-tos with pictures, the privacy policy, and this tour again.',
     target: { d: '#settingsBtn', m: '#settingsBtn' } },
   { key: 'data', title: 'Your data',
     body: 'Everything lives on this device unless you turn on cloud sync. Export saves a copy you can import anywhere; Reset starts a fresh day without touching your lists.',
