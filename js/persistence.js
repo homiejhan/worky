@@ -29,6 +29,7 @@ import {
 import {
   compressDigest, decompressDigest, digestRecord, normalizeDigest, setDigest,
 } from './digest.js';
+import { normalizeShiftCals, setShiftCals, shiftCals } from './gcal.js';
 
 /* ───────────────────────── PERSISTENCE ───────────────────────── */
 /*
@@ -43,6 +44,8 @@ import {
  *   calEvent: id→i title→ti start→s end→e color→c type→tp
  *     fromTemplate→ft templateId→tid repeatDays→rd gcalId→gi gcalCalId→gc
  *     linkTaskId→tk linkDbdId→dk   (task ↔ event link, see tasklinks.js)
+ *     shift→sh wage→wg             (paid shift and its hourly wage, see shifts.js)
+ *   shiftCals→sc  { calId: { shift, wage } } per Google calendar (see gcal.js)
  *   digest: enabled→en last→l {at, md, n, m, s} clearedAt→ca   (see digest.js)
  */
 export function compressState(st) {
@@ -78,6 +81,8 @@ export function compressState(st) {
     if (e.gcalCalId) o.gc = e.gcalCalId;
     if (e.linkTaskId != null) o.tk = e.linkTaskId;
     if (e.linkDbdId  != null) o.dk = e.linkDbdId;
+    if (typeof e.shift === 'boolean') o.sh = e.shift ? 1 : 0;
+    if (e.wage != null) o.wg = e.wage;
     return o;
   };
   const cDbd = t => { const o = { i:t.id, tx:t.text, du:t.due }; if (t.done) o.dn=1; if (t.doneOn) o.dw=t.doneOn; return o; };
@@ -98,6 +103,7 @@ export function compressState(st) {
     vw: viewsOffList(st.views),
     th: compressTheme(st.theme),
     dg: compressDigest(st.digest),
+    ...(st.shiftCals && Object.keys(st.shiftCals).length ? { sc: st.shiftCals } : {}),
     cal: { ce: cEvents, ct: (st.calendar.calTemplates||[]).map(cCalEv), cec: st.calendar.calEventIdCtr },
   };
 }
@@ -117,6 +123,8 @@ function decompressState(c) {
     gcalId:e.gi ?? null, gcalCalId:e.gc ?? null,
     ...(e.tk != null ? { linkTaskId: e.tk } : {}),
     ...(e.dk != null ? { linkDbdId: e.dk } : {}),
+    ...(e.sh != null ? { shift: !!e.sh } : {}),
+    ...(e.wg != null ? { wage: e.wg } : {}),
   });
   const dDbd = t => ({ id:t.i, text:t.tx, due:t.du, done:!!t.dn, doneOn:t.dw });
   // Missing bg (data saved before the Budget feature) loads as a clean zero budget.
@@ -144,6 +152,7 @@ function decompressState(c) {
     views: normalizeViews(c.vw),
     theme: decompressTheme(c.th),
     digest: decompressDigest(c.dg),
+    shiftCals: normalizeShiftCals(c.sc),
     calendar: { calEvents: dEvents, calTemplates: (c.cal.ct||[]).map(dCalEv), calEventIdCtr: c.cal.cec || 1 },
   };
 }
@@ -167,13 +176,13 @@ function liveTimerRecord(t) {
 }
 
 /* Build number of the state schema. Bumped whenever gatherState() learns a
- * new top-level key (digest was build 2, digest tasks build 3). Lets a newer
- * device recognise a cloud copy written by an older build, which cannot have
- * carried the newer fields. */
-export const STATE_BUILD = 3;
+ * new top-level key (digest was build 2, digest tasks build 3, shiftCals
+ * build 4). Lets a newer device recognise a cloud copy written by an older
+ * build, which cannot have carried the newer fields. */
+export const STATE_BUILD = 4;
 const STATE_KNOWN_KEYS = new Set(['version', 'build', 'wokenUp', 'timerDefaults', 'timers', 'todoIdCounter',
   'taskIdCounter', 'todoLists', 'dbdTasks', 'dbdIdCounter', 'budget', 'purchaseIdCounter', 'views', 'theme',
-  'digest', 'calendar']);
+  'digest', 'shiftCals', 'calendar']);
 /* Top-level keys this build does not understand, carried through untouched so
  * an older device never strips what a newer one wrote (see syncApplyRemote). */
 let stateExtra = {};
@@ -212,6 +221,7 @@ export function gatherState() {
     views: { ...views },
     theme: { ...themeGet() },
     digest: digestRecord(),
+    shiftCals: normalizeShiftCals(shiftCals),
     calendar: { calEvents, calTemplates, calEventIdCtr },
   };
 }
@@ -242,6 +252,7 @@ function hydrateState(st) {
   setViews(normalizeViews(st.views));
   setTheme(normalizeTheme(st.theme));
   setDigest(normalizeDigest(st.digest));
+  setShiftCals(normalizeShiftCals(st.shiftCals));
   if (st.calendar) {
     setCalEvents(st.calendar.calEvents     || {});
     setCalTemplates(st.calendar.calTemplates  || []);
