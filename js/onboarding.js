@@ -17,6 +17,7 @@ import {
 } from './budget.js';
 import { syncPendingRemote } from './sync.js';
 import { normalizeTheme, setTheme, themeIsHex, themeLuma } from './theme.js';
+import { DEFAULT_TEMPLATE, formatTemplateById } from './templates.js';
 
 /* ───────────────────────── ONBOARDING ─────────────────────────
  * First run on a device (no saved state) → seed a starter profile that
@@ -35,26 +36,24 @@ function starterDateKey(offset) {
   const d = calToday(); d.setDate(d.getDate() + offset); return calDateKey(d);
 }
 
-/* Build the starter state in place. Dates are relative to today so the
- * profile always looks live: something due today, something upcoming,
- * an event in the next few hours. */
+/* Build the starter state in place: the default Formats template (Working
+ * student, see templates.js) plus a little sample content. Dates are relative
+ * to today so the profile always looks live: something due today, deadlines
+ * coming up, an event in the next few hours. */
 export function applyStarterProfile() {
   const today = dbdTodayKey();
+  const tp = formatTemplateById(DEFAULT_TEMPLATE);
 
   /* timers */
-  setTimerDefaults([
-    { label: 'Deep work', seconds: 4 * 3600, color: '#378ADD' },
-    { label: 'Learning',  seconds: 90 * 60,  color: '#8B5CF6' },
-    { label: 'Exercise',  seconds: 1 * 3600, color: '#22C55E' },
-    { label: 'Reading',   seconds: 30 * 60,  color: '#F97316' },
-  ]);
+  setTimerDefaults(tp.timers.map(t => ({ label: t.label, seconds: t.seconds, color: t.color })));
   setTimers(TIMER_DEFAULTS.map((t, i) => ({
     id: i, label: t.label, seconds: t.seconds, color: t.color,
     running: false, startedAt: null, secondsAtStart: null,
   })));
   setWokenUp(false);
 
-  /* lists — Daily (repeating) and custom Lists */
+  /* lists — the template's Daily lists and its Deadlines list, with sample
+   * deadlines (a list task with a date also shows in Day by Day and on Home) */
   setTodoIdCounter(0);
   setTaskIdCounter(0);
   const mk = (title, color, texts, extra) => ({
@@ -63,50 +62,36 @@ export function applyStarterProfile() {
     tasks: makeTasks(texts),
     ...extra,
   });
-  const projects = mk('Projects', '#8B5CF6',
-    ['Finish the reading list', 'Book a dentist appointment', 'Back up the laptop']);
-  projects.tasks[0].due = starterDateKey(3);   // dated list tasks surface in Day by Day
-
+  const daily = tp.daily.map(d => mk(d.title, d.color, d.tasks, {
+    isDefault: true, starred: !!d.starred,
+    activeDays: Array.isArray(d.activeDays) ? d.activeDays.slice() : null,   // Sunday planning: Sundays only
+  }));
+  const lists = tp.lists.map(l => mk(l.title, l.color, [], { starred: !!l.starred }));
+  const deadlines = lists.find(l => l.title === 'Deadlines');
+  deadlines.tasks = makeTasks(['Problem set 3', 'Lab report draft', 'Read chapter 5']);
+  deadlines.tasks[0].due = starterDateKey(2);
+  deadlines.tasks[1].due = starterDateKey(5);
   setTodoLists([
-    /* "Morning routine" is also a task inside Health: a task named after a
-     * Daily list checks itself off when that list is complete. */
-    mk('Morning routine', '#22C55E',
-      ['Make the bed', 'Stretch for 10 minutes', 'Drink a glass of water', 'Plan the day'],
-      { isDefault: true, starred: true }),
-    mk('Health', '#378ADD',
-      ['Morning routine', 'Walk or workout', 'Eight glasses of water', 'In bed by 11'],
-      { isDefault: true, starred: true }),
-    mk('Weekend reset', '#F97316',
-      ['Tidy up', 'Meal prep', 'Plan next week'],
-      { isDefault: true, activeDays: [0, 6] }),   // only shows Sat + Sun
-    mk('Groceries', '#EAB308',
-      ['Eggs', 'Oat milk', 'Spinach', 'Coffee beans'],
-      { starred: true }),
-    projects,
-    mk('Someday', '#505050', ['Learn to bake sourdough', 'Plan a weekend trip']),
+    ...daily,
+    ...lists,
+    mk('Someday', '#505050', ['Look up study-abroad deadlines', 'Plan a weekend trip']),
   ]);
 
   /* day by day */
   setDbdIdCounter(1);
   setDbdTasks([
-    { id: nextDbdId(), text: 'Take a look around Focus',            due: today,             done: false },
-    { id: nextDbdId(), text: 'Rename the timers to match your day', due: starterDateKey(1), done: false },
-    { id: nextDbdId(), text: 'Open Formats and save your setup',    due: starterDateKey(2), done: false },
+    { id: nextDbdId(), text: 'Take a look around Focus',                   due: today,             done: false },
+    { id: nextDbdId(), text: 'Connect Google Calendar to bring in shifts', due: starterDateKey(1), done: false },
+    { id: nextDbdId(), text: 'Mark a shift as paid and add your wage',     due: starterDateKey(2), done: false },
   ]);
 
-  /* calendar — weekly templates plus one event in the next few hours */
+  /* calendar — the template's weekly blocks plus one event in the next few hours */
   setCalEvents({});
   setCalEventIdCtr(1);
-  const tmpl = (title, start, end, color, repeatDays, type) => ({
-    id: nextCalEventId(), title, start, end, color,
-    type: type || 'event', isTemplate: true, repeatDays,
-  });
-  setCalTemplates([
-    tmpl('Deep work',     '09:00', '11:00', '#378ADD', [1, 2, 3, 4, 5]),
-    tmpl('Lunch',         '12:30', '12:30', '#505050', [1, 2, 3, 4, 5], 'divider'),
-    tmpl('Workout',       '17:30', '18:30', '#22C55E', [1, 3, 5]),
-    tmpl('Weekly review', '18:00', '18:45', '#8B5CF6', [0]),
-  ]);
+  setCalTemplates(tp.cal.map(c => ({
+    id: nextCalEventId(), title: c.title, start: c.start, end: c.end, color: c.color,
+    type: c.type || 'event', isTemplate: true, repeatDays: c.repeatDays.slice(),
+  })));
   calEnsureDay(today);
   const startMins = Math.min((new Date().getHours() + 1) * 60, 22 * 60);
   calEvents[today].push({
@@ -115,14 +100,16 @@ export function applyStarterProfile() {
     color: '#5DCAA5', type: 'event',
   });
 
-  /* budget */
+  /* budget — the envelope is on, with a small balance to play with */
   setPurchaseIdCounter(1);
   setBudget(normalizeBudget({
     initial: 60, daily: 20, todayAllowance: null, lastDate: today,
     purchases: [{ id: nextPurchaseId(), title: 'Coffee', amount: 4.5 }],
   }));
 
-  setViews(normalizeViews(null));
+  const views = normalizeViews(null);
+  tp.views.forEach(v => { views[v] = true; });
+  setViews(views);
   setTheme(normalizeTheme(null));
   calSave();
 }
@@ -158,22 +145,22 @@ const TOUR_STEPS = [
     body: 'Time budgets for what you want to spend the day on. Press play to start one, tap the time to edit it, and the bar shows how much is left. Mark "Woke up" to see when you\'ll finish everything.',
     target: { d: '#timersSection-d', m: ['#wakeupRow-m', '#timerStack-m'] } },
   { key: 'daily', view: 'daily', title: 'Daily',
-    body: 'Routines that reset every day. Star a list to pin it on Home. In Formats you can give a list a schedule — "Weekend reset" only shows up on Saturdays and Sundays. A task named after a Daily list ("Morning routine" inside Health) checks itself off when that list is done.',
+    body: 'Routines that reset every day. Star a list to pin it on Home. In Formats you can give a list a schedule — "Sunday planning" only shows up on Sundays. A task named after another Daily list checks itself off when that list is done.',
     target: { d: '#dailySection-d', m: '#dailySection-m' } },
   { key: 'dbd', view: 'lists', title: 'Day by Day',
     body: 'One-off tasks with a date. Overdue ones turn red and wait until you clear them. Use the tag menu to file a task under one of your lists — it keeps its date and still shows up here.',
     target: { d: ['#dbdAddRow-d', '#dbdContainer-d'], m: ['#dbdAddRow-m', '#dbdContainer-m'] } },
   { key: 'lists', view: 'lists', title: 'Lists',
-    body: 'Lists for anything: groceries, projects, someday. Give a task a date and it appears in Day by Day too. Star a list to see it on Home, and drag lists or tasks to reorder them.',
+    body: 'Lists for anything. Deadlines is where due dates go: give a task a date and it shows up in Day by Day and on Home too. Star a list to see it on Home, and drag lists or tasks to reorder them.',
     target: { d: '#todoContainer-d', m: '#todoContainer-m' } },
   { key: 'calendar', view: 'calendar', title: 'Calendar',
-    body: 'Tap an empty slot to add an event, drag to move one. Dividers mark a moment with no duration. The colour dots filter what you see. Connect Google Calendar in Settings to see and send events.',
+    body: 'Tap an empty slot to add an event, drag to move one. Mark an event as a paid shift with your wage and the header adds up the week\'s pay. Connect Google Calendar in Settings to see and send events — a When I Work, Sling, 7shifts or Homebase feed counts as shifts.',
     target: { d: '#calDesktopPanel', m: '#mobileCalPanel' } },
   { key: 'budget', view: 'budget', title: 'Budget',
     body: 'A daily envelope. Set a daily amount and a starting balance, log purchases as you go, and whatever is left rolls over at midnight. Home shows today\'s balance at a glance.',
     target: { d: '#budgetContainer-d .budget-wrap', m: '#budgetContainer-m .budget-wrap' } },
   { key: 'formats', title: 'Formats',
-    body: 'Formats is where you edit your defaults: which timers exist and how long they run, which Daily lists there are, and the weekly calendar templates. Not sure where to start? Templates gives you eight ready-made setups to build on. Press Done to save. Reset returns the day to whatever you set here.',
+    body: 'Formats is where you edit your defaults: which timers exist and how long they run, which Daily lists there are, and the weekly calendar templates. Not sure where to start? Templates has ready-made setups to build on; you started from Working student. Press Done to save. Reset returns the day to whatever you set here.',
     target: { d: '#fmtBtn', m: '#fmtBtn' } },
   { key: 'settings', title: 'Settings',
     body: 'Hide sections you don\'t use, pick a theme or build your own, connect Google Calendar, and sign in to sync across your devices. You can replay this tour from here too.',
