@@ -389,9 +389,20 @@ function calDayColEl(className, data) {
   calBuildLines(col);
   return col;
 }
-/* Scroll a grid to just before 7am once it has laid out. */
-function calScrollToMorning(el) {
-  setTimeout(() => { if (el) el.scrollTop = 7 * CAL_HOUR_PX - 14; }, 50);
+/* Where each grid (d: desktop week, m: phone day) was last scrolled, so drawing
+ * it again (an edit, a delete, a Google sync, another day, reopening the
+ * calendar) leaves it where the user left it. null until the grid has been seen
+ * once: it first opens just before 7am. */
+const calScrollAt = { d: null, m: null };
+function calPlaceScroll(el, which) {
+  if (!el) return;
+  if (!el.dataset.scrollKept) {
+    el.dataset.scrollKept = '1';
+    el.addEventListener('scroll', () => { if (el.clientHeight) calScrollAt[which] = el.scrollTop; }, { passive: true });
+  }
+  const top = calScrollAt[which] ?? 7 * CAL_HOUR_PX - 14;
+  el.scrollTop = top;
+  if (el.scrollTop !== top) setTimeout(() => { el.scrollTop = top; }, 50);   // not laid out yet
 }
 
 /* ── desktop render: the 7-day week, or the template week while Formats is open ── */
@@ -454,7 +465,7 @@ export function calRenderDesktop() {
   }
 
   gridEl.style.height = CAL_TOTAL_PX + 'px';
-  calScrollToMorning($('calScrollArea'));
+  calPlaceScroll($('calScrollArea'), 'd');
 }
 
 /* ── mobile render: one day, or one template day while Formats is open ── */
@@ -493,7 +504,7 @@ export function calRenderMobile() {
   body.appendChild(timeCol);
   body.appendChild(dayCol);
   gridEl.appendChild(body);
-  calScrollToMorning(gridEl);
+  calPlaceScroll(gridEl, 'm');
 }
 
 export function calNavDay(dir) {
