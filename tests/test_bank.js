@@ -290,6 +290,10 @@ const ENV = { PLAID_CLIENT_ID: 'test-client', PLAID_SECRET: 'test-secret', PLAID
     ok(/needs you to log in again/.test(d.querySelector('.bank-error').textContent), 'in plain words');
 
     let asked = '';
+    w.confirm = m => { asked = m; return false; };
+    w.confirmClearStorage();
+    ok(/Disconnect it first in Settings → Bank accounts/.test(asked), 'Clear storage warns that connected banks would be orphaned at Plaid');
+
     w.confirm = m => { asked = m; return true; };
     d.querySelector('[data-bank="disconnect"]').click();
     ok(/^Disconnect First Platypus Bank\?/.test(asked), 'Disconnect asks first');
