@@ -1071,6 +1071,7 @@ body.format-mode .list-sched-row { display: flex; }
   flex: 1; min-width: 0;
   font-size: 13.5px;
   background: none; border: none; outline: none;
+  text-overflow: ellipsis;   /* a long task ends in … instead of stopping mid-word (the full text shows while editing) */
   transition: color 0.2s;
 }
 .task-text.done { text-decoration: line-through; color: var(--ink-3); }
@@ -1656,6 +1657,18 @@ body.format-mode .list-sched-row { display: flex; }
   font-size: 10px; opacity: 0.85;
   font-variant-numeric: tabular-nums;
 }
+/* Short blocks: under an hour the title keeps to one line so the time below it
+ * still shows; under 40 minutes the start time moves up beside the title and is
+ * the first thing to give way. */
+.cal-event.cal-ev-short > :first-child { white-space: nowrap; }
+.cal-event.cal-ev-xs {
+  display: flex; align-items: baseline; gap: 5px;
+  padding-top: 1px; padding-bottom: 1px;
+  line-height: 1.2;
+}
+.cal-event.cal-ev-xs > :first-child { flex: 0 1 auto; min-width: 0; }
+.cal-event.cal-ev-xs > .cal-event-time { flex: 0 1000 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
+.cal-event.cal-ev-xs .cal-event-time-end { display: none; }
 .cal-event.drag-src { opacity: 0.3; }
 
 .cal-divider {

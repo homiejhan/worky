@@ -148,11 +148,15 @@ function calBuildNowLine(col) {
 }
 
 /* ── event element ── */
-/* Position an event block on the day grid (never shorter than 15 minutes). */
+/* Position an event block on the day grid (never shorter than 15 minutes).
+ * Short blocks are marked so their text fits (see .cal-ev-short in style.css). */
 export function calPlaceEventEl(el, ev) {
   const startM = calTimeToMins(ev.start);
+  const mins = Math.max(15, calTimeToMins(ev.end) - startM);
   el.style.top    = calMinsToPx(startM) + 'px';
-  el.style.height = calMinsToPx(Math.max(15, calTimeToMins(ev.end) - startM)) + 'px';
+  el.style.height = calMinsToPx(mins) + 'px';
+  el.classList.toggle('cal-ev-short', mins < 60);
+  el.classList.toggle('cal-ev-xs', mins < 40);
 }
 
 function calMakeEventEl(ev, dateKeyOrDow, isFmtMode) {
@@ -184,7 +188,10 @@ function calMakeEventEl(ev, dateKeyOrDow, isFmtMode) {
     t.textContent = (linked ? taskLinkEventTitle(ev) : ev.title) || '(no title)';
     const time = document.createElement('div');
     time.className = 'cal-event-time';
-    time.textContent = `${calFmtTime(ev.start)}–${calFmtTime(ev.end)}`;
+    const end = document.createElement('span');
+    end.className = 'cal-event-time-end';            // hidden on the shortest blocks, where the start is enough
+    end.textContent = `–${calFmtTime(ev.end)}`;
+    time.append(calFmtTime(ev.start), end);
     el.appendChild(t);
     el.appendChild(time);
     const cal = calCalOf(ev);
