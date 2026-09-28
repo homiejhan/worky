@@ -24,6 +24,18 @@ function makeRef() {
         cloud.listeners.forEach(cb => setTimeout(() => cb({ val: () => cloud.val }), 0));
       }, 5));
     },
+    /* child(k).set(v): replaces one sibling (digestPrompts, digestGithub); null deletes it */
+    child(k) {
+      return { set(v) {
+        const next = { ...(cloud.val || {}) };
+        if (v === null) delete next[k]; else next[k] = JSON.parse(JSON.stringify(v));
+        cloud.val = next; cloud.writes++;
+        return new Promise(res => setTimeout(() => {
+          res();
+          cloud.listeners.forEach(cb => setTimeout(() => cb({ val: () => cloud.val }), 0));
+        }, 5));
+      } };
+    },
   };
 }
 async function boot(name, storage = {}) {
@@ -42,6 +54,7 @@ async function boot(name, storage = {}) {
   });
   w.document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
   w.__signIn = () => authCb({ uid: 'u1', email: 'me@example.com', getIdToken: async () => 't' });
+  w.__signOut = () => authCb(null);
   return { name, w, d: w.document };
 }
 const fpOf = w => w.eval('syncFingerprint(gatherState())');
@@ -269,6 +282,53 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
     N.w.syncChooseImport(); await sleep(300);
     ok(N.w.eval("dbdTasks.some(t => t.id === 77)"), 'imported the cloud copy');
     ok(N.w.digestGet().last && N.w.digestGet().last.at === at, 'and the delivered digest on top of it');
+  }
+
+  console.log('\n── 9. The Run now token is saved to the account: every device gets it, Remove takes it off all of them ──');
+  {
+    reset();
+    const meta = { 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }) };
+    const L = await boot('laptop', meta);
+    L.w.__signIn(); await sleep(80);
+    const P = await boot('phone', { 'focus-app-state': cloud.val.state, 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: hashOf(L.w) }) });
+    P.w.__signIn(); await sleep(120);
+    eq(P.w.digestGithubToken(), '', 'no token anywhere to start with');
+    L.w.openSettings('digest');
+    L.d.getElementById('digestGithubToken').value = 'github_pat_SHARED';
+    L.d.getElementById('digestGithubSaveBtn').click(); await sleep(150);
+    eq(cloud.val.digestGithub && cloud.val.digestGithub.token, 'github_pat_SHARED', 'saved on the laptop → users/<uid>/digestGithub');
+    ok(!cloud.val.state.includes('github_pat_SHARED'), 'not inside the synced state blob');
+    eq(P.w.digestGithubToken(), 'github_pat_SHARED', 'the phone has it without pasting anything');
+    ok(P.d.getElementById('digestGithubStatus').textContent.startsWith('Token saved to your account. Every device signed in as me@example.com'), "the phone's Settings says it comes from the account");
+    P.w.digestGet().enabled = true; P.w.saveToLocal(); await sleep(2200);
+    eq(cloud.val.digestGithub && cloud.val.digestGithub.token, 'github_pat_SHARED', 'state pushes leave it in place');
+
+    P.w.openSettings('digest');
+    P.d.getElementById('digestGithubSaveBtn').click(); await sleep(150);
+    eq(cloud.val.digestGithub && cloud.val.digestGithub.token, undefined, 'Remove on the phone takes it out of the account');
+    eq(L.w.digestGithubToken(), '', 'and off the laptop');
+
+    /* a device that still has a token from an older build */
+    const O = await boot('old-laptop', { ...meta, 'focus-app-state': cloud.val.state, 'focus-digest-github': JSON.stringify({ token: 'github_pat_OLD' }) });
+    cloud.val = { ...cloud.val, digestInbox: INBOX(Date.now(), 1) };
+    O.w.__signIn(); await sleep(150);
+    eq(cloud.val.digestGithub && cloud.val.digestGithub.token, undefined, 'removed stays removed: an older device does not bring its copy back');
+    eq(O.w.localStorage.getItem('focus-digest-github'), null, 'that device drops its copy instead');
+
+    reset();
+    const O2 = await boot('old-laptop-2', { ...meta, 'focus-digest-github': JSON.stringify({ token: 'github_pat_OLD' }) });
+    O2.w.__signIn(); await sleep(80);
+    cloud.val = { ...cloud.val, digestInbox: INBOX(Date.now(), 2) };
+    cloud.listeners.forEach(cb => cb({ val: () => cloud.val })); await sleep(150);
+    eq(cloud.val.digestGithub && cloud.val.digestGithub.token, 'github_pat_OLD', 'never saved to the account: the older copy moves in once');
+    eq(O2.w.localStorage.getItem('focus-digest-github'), null, 'and leaves the device');
+    const P2 = await boot('phone-2', { 'focus-app-state': cloud.val.state, 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: hashOf(O2.w) }) });
+    P2.w.__signIn(); await sleep(150);
+    eq(P2.w.digestGithubToken(), 'github_pat_OLD', 'so the phone can use Run now too');
+
+    P2.w.__signOut(); await sleep(20);
+    eq(P2.w.digestGithubToken(), '', 'signing out takes it off the phone');
+    eq(cloud.val.digestGithub && cloud.val.digestGithub.token, 'github_pat_OLD', 'while the account keeps it');
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

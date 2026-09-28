@@ -7,7 +7,9 @@ import {
   gatherState, loadFromLocal, renderLoadedState, saveToLocal, STATE_BUILD,
 } from './persistence.js';
 import { formatMode } from './formats.js';
-import { digestInboxSeen, digestRenderSettings, setDigestInboxPending } from './digest.js';
+import {
+  digestGithubForget, digestGithubSeen, digestInboxSeen, digestRenderSettings, setDigestInboxPending,
+} from './digest.js';
 import {
   digestPromptsSeen, setDigestPromptDirty, setDigestPromptsSaved,
 } from './digest-prompts.js';
@@ -296,6 +298,7 @@ function syncOnRemoteValue(snap) {
   syncReconcileRemote(v);
   digestInboxSeen(digestInboxLatest);         // backend-delivered digest, if any
   digestPromptsSeen(v ? v.digestPrompts : null);   // prompt edits (Settings → Email Digest)
+  digestGithubSeen(v ? v.digestGithub : null);     // the Run now token (Settings → Email Digest)
 }
 function syncReconcileRemote(v) {
   const localFp = syncFingerprint(gatherState());
@@ -394,6 +397,7 @@ function syncStop() {
   setDigestInboxPending(null);
   setDigestPromptsSaved(undefined);             // they belong to the account that just left
   setDigestPromptDirty(false);
+  digestGithubForget();                         // and so does the Run now token
   $('syncChoiceModal')?.classList.remove('show');
 }
 

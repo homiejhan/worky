@@ -139,7 +139,7 @@ console.log('\n── 6. Reload persistence + a synced copy shows up on another 
   const raw = a.w.localStorage.getItem('focus-app-state');
   const b = await boot({ storage: { 'focus-app-state': raw } });
   ok(b.d.querySelector('#homeContainer-d .dg-md'), 'second device renders the digest from state alone');
-  eq(b.w.digestGithubGet().token, '', 'GitHub token is device-local (not carried by state)');
+  eq(b.w.digestGithubToken(), '', 'the GitHub token is not carried by state');
   ok(b.d.querySelector('.dg-btn[onclick="digestRunNow()"]'), 'Run now still offered');
 }
 
@@ -351,6 +351,90 @@ console.log('\n── 8e. Redundancy: tagging an added task into a list keeps it
   w.eval(`todoLists[todoLists.length - 1].tasks = []`);
   w.renderHome();
   ok(d.querySelector(`#homeContainer-d .dg-todo[data-dgt="${first.id}"] .dg-todo-add`), 'deleting the moved task re-offers it, as before');
+}
+
+/* ── 9a. The Run now token an older build saved on the device ── */
+async function legacyTokenTests() {
+  console.log('\n── 9a. A token an older build saved on the device moves into the account the digest goes to, and nowhere else ──');
+  const INBOX = { at: 1, markdown: '## 🔝 Top of the inbox\nhi', count: 1, model: 'qwen3.5-4b', source: 'github', tasks: [] };
+  const DENIED = () => Promise.reject(new Error('PERMISSION_DENIED: Permission denied'));
+  /* a signed-in device over a fake account node; `fail` rejects writes the way blocking database rules do */
+  const signIn = async ({ legacy = 'github_pat_OLD', inbox = true, fail = false } = {}) => {
+    const b = await boot({ storage: legacy ? { 'focus-digest-github': JSON.stringify({ token: legacy }) } : {} });
+    const writes = [];
+    b.w.__fakeRef = { child: k => ({ set: v => { writes.push([k, JSON.parse(JSON.stringify(v))]); return fail ? DENIED() : Promise.resolve(); } }), update: () => Promise.resolve(), off() {} };
+    b.w.eval(`syncUser = { uid: 'u1', email: 'me@example.com' }; syncRef = window.__fakeRef;`);
+    if (inbox) b.w.eval(`digestInboxLatest = ${JSON.stringify(INBOX)}`);
+    return { ...b, writes, legacy: () => b.w.localStorage.getItem('focus-digest-github'), status: () => b.d.getElementById('digestGithubStatus').textContent };
+  };
+  {
+    const { w, writes, legacy, status } = await signIn();
+    eq(w.digestGithubToken(), 'github_pat_OLD', 'the old token keeps working while the account loads');
+    w.digestGithubSeen(null); await sleep(5);
+    eq(writes.length, 1, 'the account the digest goes to has no token yet: the old one is moved in');
+    eq(writes[0][0] + ' ' + writes[0][1].token, 'digestGithub github_pat_OLD', 'the same token, to users/<uid>/digestGithub');
+    eq(legacy(), null, 'and taken off the device once the account has it');
+    eq(w.digestGithubToken(), 'github_pat_OLD', 'Run now keeps working');
+    ok(status().startsWith('Token saved to your account'), 'Settings says where it is now');
+    w.digestGithubSeen(writes[0][1]); await sleep(5);
+    eq(writes.length, 1, 'the listener echoing it back moves nothing again');
+  }
+  {
+    const { w, writes, legacy, status } = await signIn({ inbox: false });
+    w.digestGithubSeen(null); await sleep(5);
+    eq(writes.length, 0, 'an account the digest is not delivered to (someone else signing in here): nothing moved in');
+    ok(legacy(), 'the old token stays on the device');
+    ok(status().startsWith('Token saved on this device only'), 'and Settings says so');
+  }
+  {
+    const { w, writes, legacy } = await signIn();
+    w.digestGithubSeen({ token: 'github_pat_NEW', updatedAt: 5 }); await sleep(5);
+    eq(writes.length, 0, 'the account already has a token from another device: nothing written');
+    eq(legacy(), null, 'the old copy here is dropped');
+    eq(w.digestGithubToken(), 'github_pat_NEW', 'and the account token is the one used');
+  }
+  {
+    const { w, writes, legacy } = await signIn();
+    w.digestGithubSeen({ updatedAt: 5 }); await sleep(5);
+    eq(writes.length, 0, 'the token was removed on another device: nothing written');
+    eq(legacy(), null, 'the old copy here is dropped too');
+    eq(w.digestGithubToken(), '', 'so a removed token does not come back from an older device');
+  }
+  {
+    const { w, d, writes, legacy } = await signIn({ fail: true });
+    w.digestGithubSeen(null); await sleep(5);
+    eq(writes.length, 1, 'moving it is tried');
+    ok(legacy(), 'when the account rejects it, the old token stays on the device');
+    eq(w.digestGithubToken(), 'github_pat_OLD', 'and keeps working here');
+    ok(!d.getElementById('toast').textContent.includes('Could not save'), 'quietly: a background move shows no error');
+    w.digestGithubSeen(null); await sleep(5);
+    eq(writes.length, 1, 'tried once per sign-in, not on every sync event');
+  }
+  {
+    /* a second click while the save is in flight must not read the new token and remove it */
+    const { w, d, writes } = await signIn({ legacy: '' });
+    let release;
+    w.__fakeRef.child = k => ({ set: v => { writes.push([k, JSON.parse(JSON.stringify(v))]); return new Promise(r => { release = r; }); } });
+    w.digestGithubSeen(null);
+    const btn = d.getElementById('digestGithubSaveBtn');
+    d.getElementById('digestGithubToken').value = 'github_pat_TWICE';
+    btn.click();
+    ok(btn.disabled, 'Save is disabled while the write is in flight');
+    btn.click();
+    release(); await sleep(5);
+    eq(writes.length, 1, 'a double click writes once');
+    eq(w.digestGithubToken(), 'github_pat_TWICE', 'and the token stays saved');
+    eq(btn.textContent + (btn.disabled ? ' (disabled)' : ''), 'Remove', 'Remove is ready once it settles');
+  }
+  {
+    const { w, d } = await signIn({ legacy: '', fail: true });
+    w.digestGithubSeen(null);
+    const inp = d.getElementById('digestGithubToken');
+    inp.value = 'github_pat_TYPED'; d.getElementById('digestGithubSaveBtn').click(); await sleep(5);
+    eq(w.digestGithubToken(), '', 'a save the database rules reject leaves no token');
+    eq(inp.value, 'github_pat_TYPED', 'hands the typed token back');
+    ok(d.getElementById('toast').textContent.includes('your database rules block users/<uid>/digestGithub'), 'and names the rule to fix');
+  }
 }
 
 /* ── 10. Prompt editor (Settings → Email Digest → Prompts) ── */
@@ -571,11 +655,37 @@ console.log('\n── 9. Run now: token gate, dispatch, watch the run, delivery 
   eq(calls.length, 0, 'no token → nothing dispatched');
   ok(d.getElementById('settingsModal').classList.contains('show'), 'no token → Settings opened');
   ok(d.getElementById('digestRunSettingsBtn').disabled, 'Run button disabled in Settings without a token');
-  const inp = d.getElementById('digestGithubToken');
-  inp.value = 'github_pat_TEST'; d.getElementById('digestGithubSaveBtn').click();
-  eq(JSON.parse(w.localStorage.getItem('focus-digest-github')).token, 'github_pat_TEST', 'token saved device-locally');
+  const inp = d.getElementById('digestGithubToken'), saveBtn = d.getElementById('digestGithubSaveBtn'), status = () => d.getElementById('digestGithubStatus').textContent;
+  ok(saveBtn.disabled && status().startsWith('Sign in to cloud sync to save a token'), 'signed out: nowhere to save a token, and it says so');
+
+  /* signed in: the token is saved to the account (users/<uid>/digestGithub) */
+  const writes = [];
+  w.__fakeRef = { child: k => ({ set: v => { writes.push([k, v === null ? null : JSON.parse(JSON.stringify(v))]); return Promise.resolve(); } }), update: () => Promise.resolve(), off() {} };
+  w.eval(`syncUser = { uid: 'u1', email: 'me@example.com' }; syncRef = window.__fakeRef;`);
+  w.digestRenderSettings();
+  ok(saveBtn.disabled && status().startsWith('Checking your account'), 'waits for the listener before saving');
+  w.closeModal('settingsModal');
+  w.digestRunNow();
+  eq(calls.length, 0, 'Run now while the account is loading dispatches nothing');
+  ok(!d.getElementById('settingsModal').classList.contains('show'), 'and does not send you to Settings');
+  w.digestGithubSeen(null);
+  ok(!saveBtn.disabled && status().startsWith('No token yet. Save one and every device signed in as me@example.com'), 'no token yet → offers to save one for every device');
+  inp.value = 'github_pat_TEST'; saveBtn.click(); await sleep(5);
+  eq(writes.length, 1, 'one write');
+  eq(writes[0][0], 'digestGithub', 'to users/<uid>/digestGithub');
+  eq(writes[0][1].token, 'github_pat_TEST', 'carrying the token');
+  ok(writes[0][1].updatedAt > 0, 'and when it was saved');
+  eq(w.localStorage.getItem('focus-digest-github'), null, 'nothing saved on the device itself');
+  w.saveToLocal();
+  ok(!w.localStorage.getItem('focus-app-state').includes('github_pat_TEST'), 'not in the saved state');
+  ok(!JSON.stringify(w.gatherState()).includes('github_pat_TEST'), 'so not in Export or the synced state blob either');
+  eq(w.digestGithubToken(), 'github_pat_TEST', 'Run now uses it right away');
+  ok(status().startsWith('Token saved to your account. Every device signed in as me@example.com'), 'status names the account');
   eq(inp.value, '••••••••••••', 'field shows a mask, not the token');
+  eq(saveBtn.textContent, 'Remove', 'and offers Remove');
   ok(!d.getElementById('digestRunSettingsBtn').disabled, 'Run button enabled with a token');
+  w.digestGithubSeen(writes[0][1]);
+  eq(w.digestGithubToken(), 'github_pat_TEST', 'the listener echoing the write changes nothing');
   w.closeModal('settingsModal');
   const t0 = Date.now();
   const run = w.digestRunNow();
@@ -616,10 +726,23 @@ console.log('\n── 9. Run now: token gate, dispatch, watch the run, delivery 
     ok(d.querySelector('#homeContainer-d .dg-run.err').textContent.includes('rejected the token'), '401 explains the token problem');
     w.digestRunDismiss();
 
-    /* remove token */
+    /* remove token: from the account, so from every device */
     d.getElementById('settingsBtn').click();
-    d.getElementById('digestGithubSaveBtn').click();
-    eq(w.localStorage.getItem('focus-digest-github'), null, 'Remove clears the token');
+    d.getElementById('digestGithubSaveBtn').click(); await sleep(5);
+    eq(writes.length, 2, 'Remove writes to the account');
+    eq(writes[1][1].token, undefined, 'without the token');
+    ok(writes[1][1].updatedAt > 0, 'leaving only when it was removed');
+    eq(w.digestGithubToken(), '', 'Remove clears the token');
+    eq(d.getElementById('digestGithubSaveBtn').textContent, 'Save', 'Save is offered again');
+
+    /* signing out takes the account's token off the device */
+    w.digestGithubSeen({ token: 'github_pat_TEST', updatedAt: 1 });
+    eq(w.digestGithubToken(), 'github_pat_TEST', 'saved again (from another device)');
+    w.eval('syncUser = null'); w.syncStop();
+    eq(w.digestGithubToken(), '', 'signed out: no token on this device');
+    ok(d.querySelector('#homeContainer-d .dg-btn[onclick="digestRunNow()"]').title.startsWith('Add a GitHub token'), 'and the Home card says so');
+
+    await legacyTokenTests();
 
     await promptTests();
 

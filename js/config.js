@@ -39,7 +39,7 @@ export const SYNC_META_LS_KEY = 'focus-sync-meta';
  * Built by backend/digest.py on GitHub Actions and delivered through
  * Firebase (users/<uid>/digestInbox). Only display state lives here. */
 export const DIGEST_UI_LS_KEY          = 'focus-digest-ui';        // device-local: card collapsed?
-export const DIGEST_GITHUB_LS_KEY      = 'focus-digest-github';    // device-local: { token } for "Run now"
+export const DIGEST_GITHUB_LS_KEY      = 'focus-digest-github';    // { token } an older build saved on this device; moved into the account
 export const DIGEST_RUN_LS_KEY         = 'focus-digest-run';       // device-local: the GitHub run being watched
 export const DIGEST_GITHUB_REPO        = 'homiejhan/worky';
 export const DIGEST_GITHUB_WORKFLOW    = 'digest.yml';

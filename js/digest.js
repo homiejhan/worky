@@ -14,7 +14,7 @@ import { homeToggleDesktop, renderHome } from './home.js';
 import { goTab } from './views.js';
 import { openSettings, renderSettings } from './settings.js';
 import {
-  digestInboxLatest, setSyncQuietSave, syncHeld, syncPendingRemote, syncReconciled, syncUser,
+  digestInboxLatest, setSyncQuietSave, syncHeld, syncPendingRemote, syncReconciled, syncRef, syncUser,
 } from './sync.js';
 import { bindDigestPrompts, digestPromptRender } from './digest-prompts.js';
 
@@ -26,7 +26,8 @@ import { bindDigestPrompts, digestPromptRender } from './digest-prompts.js';
    the result to Firebase at users/<uid>/digestInbox. This file only
    • merges a delivered digest into synced state (digestInboxSeen/Flush),
    • shows it as a Home card with the suggested-task pool (Add / Dismiss),
-   • and can ask GitHub to run the workflow right now from this device.
+   • and can ask GitHub to run the workflow right now, from any device
+     signed in to the account the token is saved to.
    Nothing here reads mail or talks to a model.
    ═══════════════════════════════════════════════════════ */
 
@@ -496,35 +497,97 @@ export function digestToggleCollapsed() {
   renderHome();
 }
 
-/* ── "Run now": ask GitHub to start the workflow from this device ──
+/* ── "Run now": ask GitHub to start the workflow from any signed-in device ──
  * Needs a fine-grained personal access token with Actions: Read and write
- * on the repo. The token is device-local (never synced), like the old Gmail
- * token was. After dispatching we watch the run until it completes; the
- * digest itself still arrives through Firebase like a scheduled one. */
-let digestGithub = null;   // { token }
+ * on the repo. The token is saved to the signed-in account, at
+ * users/<uid>/digestGithub = { token, updatedAt } — a sibling of state that
+ * sync pushes never touch (update(), not set()) and that Export never includes
+ * — so every device signed in to that account can use Run now, and Remove
+ * takes it off all of them. Signing out drops it from the device. After
+ * dispatching we watch the run until it completes; the digest itself still
+ * arrives through Firebase like a scheduled one. */
+let digestGithubSaved;           // undefined until the sync listener reports, then null (never saved) or { token, updatedAt }
+let digestGithubWriting = 0;     // own writes in flight: the listener may be echoing them before the server agrees
+let digestGithubAdoptTried = false;
 let digestRun = null;      // { requestedAt, status: 'queued'|'in_progress'|'completed', conclusion, url, error, startedAt }
 let digestRunTimer = null;
 let   DIGEST_RUN_POLL_MS   = 20000;   // let: tests shorten it
 const DIGEST_RUN_MAX_MS    = 100 * 60000;   // give up watching after this (the workflow's own cap is 120 min)
 
-function digestGithubGet() {
-  if (digestGithub) return digestGithub;
-  let saved = null;
-  try { saved = JSON.parse(localStorage.getItem(DIGEST_GITHUB_LS_KEY)); } catch(e) {}
-  digestGithub = { token: (saved && typeof saved.token === 'string') ? saved.token.trim() : '' };
-  return digestGithub;
-}
-function digestGithubSave(patch) {
-  const g = Object.assign(digestGithubGet(), patch || {});
+function digestGithubSignedIn() { return !!(syncUser && syncRef); }
+/* Older builds kept the token in this device's localStorage only. */
+function digestGithubLegacy() {
   try {
-    if (g.token) localStorage.setItem(DIGEST_GITHUB_LS_KEY, JSON.stringify({ token: g.token }));
-    else localStorage.removeItem(DIGEST_GITHUB_LS_KEY);
-  } catch(e) {}
-  return g;
+    const saved = JSON.parse(localStorage.getItem(DIGEST_GITHUB_LS_KEY));
+    return (saved && typeof saved.token === 'string') ? saved.token.trim() : '';
+  } catch(e) { return ''; }
+}
+function digestGithubLegacyDrop() { try { localStorage.removeItem(DIGEST_GITHUB_LS_KEY); } catch(e) {} }
+/* The token Run now uses here: the account's, else one an older build left on this device. */
+function digestGithubToken() {
+  const acct = digestGithubSignedIn() && digestGithubSaved ? digestGithubSaved.token : '';
+  return acct || digestGithubLegacy();
+}
+/* where that token comes from: 'account' | 'device' | 'loading' (the account hasn't reported yet) | '' */
+function digestGithubWhere() {
+  if (digestGithubSignedIn() && digestGithubSaved === undefined) return 'loading';
+  if (digestGithubSignedIn() && digestGithubSaved && digestGithubSaved.token) return 'account';
+  return digestGithubLegacy() ? 'device' : '';
+}
+/* called by the sync listener with users/<uid>/digestGithub (or null) */
+export function digestGithubSeen(node) {
+  const before = digestGithubToken() + '|' + digestGithubWhere();
+  digestGithubSaved = (node && typeof node === 'object')
+    ? { token: typeof node.token === 'string' ? node.token.trim() : '', updatedAt: Number(node.updatedAt) || 0 }
+    : null;
+  digestGithubAdopt();
+  if (digestGithubToken() + '|' + digestGithubWhere() !== before) { renderHome(); digestRenderSettings(); }
+}
+/* sync.js calls this when the account goes away: signed out, or another account signing in */
+export function digestGithubForget() {
+  const had = !!(digestGithubSaved && digestGithubSaved.token);   // syncUser is already cleared by now
+  digestGithubSaved = undefined;
+  digestGithubAdoptTried = false;
+  if (had) renderHome();
+}
+/* A token an older build saved on this device moves into the account once:
+ * only into the account the digest is delivered to (it has an inbox), since
+ * that account's workflow is what the token starts, and someone else signing
+ * in on this device must not receive it. Once that account manages its token
+ * (saved or removed), the local copy is redundant and goes — which also keeps
+ * a token removed on another device from coming back from this one. */
+function digestGithubAdopt() {
+  const legacy = digestGithubLegacy();
+  if (!legacy || digestGithubSaved === undefined || digestGithubWriting || !digestInboxLatest || !digestGithubSignedIn()) return;
+  if (digestGithubSaved) { digestGithubLegacyDrop(); return; }
+  if (digestGithubAdoptTried) return;
+  digestGithubAdoptTried = true;
+  digestGithubWrite(legacy, { quiet: true }).then(ok => { if (ok) digestGithubLegacyDrop(); });
+}
+/* Store `token` in the account ('' removes it, leaving { updatedAt } behind so
+ * an older device's local copy isn't moved back in). Resolves true when saved. */
+function digestGithubWrite(token, { quiet = false } = {}) {
+  if (!digestGithubSignedIn()) return Promise.resolve(false);
+  const ref = syncRef, prev = digestGithubSaved, at = Date.now();
+  const node = token ? { token, updatedAt: at } : { updatedAt: at };
+  digestGithubSaved = { token: token || '', updatedAt: at };   // optimistic; the listener confirms
+  digestGithubWriting++;
+  digestRenderSettings();                                      // Save/Remove stays disabled until the write settles
+  return ref.child('digestGithub').set(node)
+    .then(() => true)
+    .catch(err => {
+      if (syncRef === ref) digestGithubSaved = prev;
+      const perm = /permission/i.test(String((err && (err.message || err.code)) || ''));
+      if (!quiet) showToast(perm ? 'Could not save: your database rules block users/<uid>/digestGithub'
+                                 : 'Could not save. Try again when you are online.');
+      return false;
+    })
+    .finally(() => { digestGithubWriting--; renderHome(); digestRenderSettings(); });
 }
 function digestGithubHeaders() {
+  const token = digestGithubToken();
   return {
-    Authorization: `Bearer ${digestGithubGet().token}`,
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),   // without one, watching a run still works on a public repo
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
   };
@@ -548,7 +611,8 @@ export function digestRunActive() { return !!(digestRun && !digestRun.error && d
 function digestRunDelivering() { return !!(digestRun && !digestRun.error && digestRun.status === 'completed' && digestRun.conclusion === 'success'); }
 
 export async function digestRunNow() {
-  if (!digestGithubGet().token) {
+  if (!digestGithubToken()) {
+    if (digestGithubWhere() === 'loading') { showToast('Still loading your account — try again in a moment'); return; }
     showToast('Add a GitHub token in Settings → Email Digest to run it from here');
     openSettings('digest');
     return;
@@ -755,7 +819,7 @@ export function homeDigestHtml() {
   if (!d.enabled) return '';
   const last = d.last;
   const busy = digestRunActive();
-  const hasToken = !!digestGithubGet().token;
+  const hasToken = !!digestGithubToken();
   const runBtn = busy ? '' : `<button class="dg-btn" onclick="digestRunNow()" title="${hasToken ? 'Start the GitHub workflow now; the result arrives here in 15–40 minutes' : 'Add a GitHub token in Settings to run it from here'}">Run now</button>`;
   const chevron = last ? `<button class="dg-chev ${digestCollapsed ? 'closed' : ''}" onclick="digestToggleCollapsed()" title="${digestCollapsed ? 'Expand' : 'Collapse'}" aria-label="Toggle digest">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>` : '';
@@ -767,7 +831,7 @@ export function homeDigestHtml() {
       <div class="dg-empty">
         <div class="dg-empty-text">${hasToken
           ? 'Nothing delivered yet. GitHub builds the digest every morning and it lands here through sync — or press Run now to start one.'
-          : 'GitHub builds the digest every morning from the last day of Gmail and it lands here through sync. To start one from this device, add a GitHub token in Settings → Email Digest.'}</div>
+          : 'GitHub builds the digest every morning from the last day of Gmail and it lands here through sync. To start one yourself, add a GitHub token in Settings → Email Digest. It is saved to your account, so once covers all your devices.'}</div>
         <div class="dg-status-actions">
           ${hasToken ? '' : '<button class="dg-btn" onclick="openSettings(&quot;digest&quot;)">Open Settings</button>'}
           <button class="dg-btn ghost" onclick="digestLoadSample()">See a sample</button>
@@ -917,14 +981,24 @@ export function digestRenderSettings() {
       : 'This device is not signed in to cloud sync, so digests cannot reach it. Sign in under Settings → Cloud sync with the same Google account as your other devices.';
   }
   const tokIn = $('digestGithubToken');
-  const hasToken = !!digestGithubGet().token;
+  const hasToken = !!digestGithubToken();
+  const where = digestGithubWhere();
+  const who = (syncUser && syncUser.email) || 'your account';
   if (tokIn && document.activeElement !== tokIn) tokIn.value = hasToken ? '••••••••••••' : '';
   const tokBtn = $('digestGithubSaveBtn');
-  if (tokBtn) tokBtn.textContent = hasToken ? 'Remove' : 'Save';
+  if (tokBtn) {
+    tokBtn.textContent = hasToken ? 'Remove' : 'Save';
+    tokBtn.disabled = where === 'loading' || !!digestGithubWriting || (!hasToken && !digestGithubSignedIn());
+  }
   const gs = $('digestGithubStatus');
   if (gs) gs.textContent = digestRun ? digestRunLabel()
-    : hasToken ? 'Token saved on this device only. Run now starts the workflow and the digest arrives through sync.'
-    : 'No token — Run now is off on this device. Scheduled runs are unaffected.';
+    : where === 'loading' ? 'Checking your account for a saved token…'
+    : where === 'account' ? `Token saved to your account. Every device signed in as ${who} can use Run now; the digest arrives through sync.`
+    : where === 'device' ? (digestGithubSignedIn()
+        ? 'Token saved on this device only, by an older version of Focus. Remove it and save it again to use it on your other devices.'
+        : 'Token saved on this device only. Sign in to cloud sync to use Run now on your other devices too.')
+    : digestGithubSignedIn() ? `No token yet. Save one and every device signed in as ${who} can use Run now. Scheduled runs are unaffected.`
+    : 'Sign in to cloud sync to save a token. Scheduled runs are unaffected.';
   const runBtn = $('digestRunSettingsBtn');
   if (runBtn) runBtn.disabled = !hasToken || digestRunActive();
   const open = $('digestOpenRunBtn');
@@ -940,17 +1014,25 @@ export function bindDigest() {
     digestRenderSettings();
     renderHome();
   });
-  $('digestGithubSaveBtn')?.addEventListener('click', () => {
+  $('digestGithubSaveBtn')?.addEventListener('click', async () => {
     const inp = $('digestGithubToken');
-    if (digestGithubGet().token) { digestGithubSave({ token: '' }); showToast('GitHub token removed from this device'); }
-    else {
-      const v = (inp?.value || '').trim();
-      if (!v || /^•+$/.test(v)) { showToast('Paste a GitHub token first'); return; }
-      digestGithubSave({ token: v });
-      showToast('Token saved on this device');
+    if (digestGithubToken()) {                  // Remove: from the account (every device) and from this device
+      const inAccount = digestGithubWhere() === 'account';
+      digestGithubLegacyDrop();
+      if (inp) inp.value = '';
+      if (!inAccount) { showToast('GitHub token removed from this device'); digestRenderSettings(); renderHome(); return; }
+      if (await digestGithubWrite('')) showToast('GitHub token removed from your account, on every device');
+      return;
     }
+    const v = (inp?.value || '').trim();
+    if (!v || /^•+$/.test(v)) { showToast('Paste a GitHub token first'); return; }
+    if (!digestGithubSignedIn()) { showToast('Sign in to cloud sync first: the token is saved to your account'); return; }
+    if (/\s/.test(v)) { showToast("That doesn't look like a GitHub token"); return; }
     if (inp) inp.value = '';
-    digestRenderSettings(); renderHome();
+    if (await digestGithubWrite(v)) {
+      digestGithubLegacyDrop();
+      showToast('Token saved to your account: Run now works on all your devices');
+    } else if (inp) inp.value = v;              // not saved: hand it back
   });
   $('digestGithubToken')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('digestGithubSaveBtn')?.click(); } });
   $('digestRunSettingsBtn')?.addEventListener('click', () => { closeModal('settingsModal'); digestShowHome(); digestRunNow(); });
