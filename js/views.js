@@ -11,7 +11,7 @@ import { budgetDesktopOpen, budgetToggleDesktop, renderBudget } from './budget.j
 export const VIEW_DEFS = [
   { key: 'home',     label: 'Home' },
   { key: 'timers',   label: 'Timers' },
-  { key: 'lists',    label: 'My Lists' },
+  { key: 'lists',    label: 'Lists' },
   { key: 'daily',    label: 'Daily' },
   { key: 'calendar', label: 'Calendar' },
   { key: 'budget',   label: 'Budget' },

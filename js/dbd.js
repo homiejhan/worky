@@ -13,7 +13,7 @@ import {
 import { renderHome } from './home.js';
 import { calRefresh, calSave } from './calendar.js';
 
-/* day-by-day tasks (dated one-off tasks under My Lists) */
+/* day-by-day tasks (dated one-off tasks on the Lists page) */
 export let dbdTasks = [];        // { id, text, due:'YYYY-MM-DD', done }
 export function setDbdTasks(v) { dbdTasks = v; }
 export let dbdIdCounter = 1;
@@ -21,7 +21,7 @@ export function setDbdIdCounter(v) { dbdIdCounter = v; }
 export function nextDbdId() { return dbdIdCounter++; }
 
 /* ───────────────────────── DAY-BY-DAY TASKS ─────────────────────────
- * Flat, dated one-off tasks under the My Lists tab. Unchecked tasks with a
+ * Flat, dated one-off tasks on the Lists page. Unchecked tasks with a
  * past due date surface in an "Overdue" section; checked past tasks collapse
  * into a dimmed "Completed" group. Groups re-flow automatically at midnight. */
 export function dbdTodayKey() { return calDateKey(calToday()); }

@@ -141,7 +141,7 @@ function homeHeroHtml() {
         <div class="home-balance" onclick="openBudgetTab()" title="Open Budget">
           <div class="home-balance-label">Daily balance</div>
           <div class="home-balance-value ${todayBalance() < 0 ? 'neg' : ''}">${money(todayBalance())}</div>
-          <div class="home-balance-total">${money(totalBalance())}</div>
+          <div class="home-balance-total">${money(totalBalance())} total</div>
         </div>
       </div>
       ${homeProgressHtml()}

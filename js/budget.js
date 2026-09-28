@@ -188,8 +188,9 @@ function budgetHtml() {
 
   return `
     <div class="budget-wrap">
-      <div class="budget-header">
-        <div class="budget-title">Budget</div>
+      <div class="page-head">
+        <h1 class="page-title">Budget</h1>
+        <p class="page-sub">Today's spending money, and how long your cash lasts.</p>
       </div>
 
       <div class="budget-figure ${total < 0 ? 'over' : ''}">

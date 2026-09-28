@@ -149,13 +149,14 @@ input, textarea, select { font-family: var(--font-sans); color: var(--ink); }
   flex-shrink: 0;
 }
 .section-label-timers   { --sc: var(--hue-timers); }
-.section-label-daily    { --sc: var(--hue-daily); }
-.section-label-lists    { --sc: var(--hue-lists); }
 
 .panel-header {
   display: flex; align-items: center; justify-content: space-between;
   padding-bottom: 8px;
 }
+/* Daily's row only carries Formats' + Add list; the page title names the page */
+.panel-header-fmt { display: none; justify-content: flex-end; }
+body.format-mode .panel-header-fmt { display: flex; }
 .empty-state {
   text-align: center; padding: 40px 16px;
   color: var(--ink-3); font-size: 13px; line-height: 1.6;
@@ -236,7 +237,7 @@ input, textarea, select { font-family: var(--font-sans); color: var(--ink); }
 
 .lists-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));   /* auto-fit: two lists share the row instead of leaving a third empty */
   gap: 14px; align-content: start;
 }
 .lists-stack { display: flex; flex-direction: column; gap: 12px; }
@@ -492,11 +493,12 @@ body.format-mode .fmt-tpl-btn { display: inline-flex; animation: tplBtnIn 0.3s v
 .fmt-tpl-chip::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--chip); flex-shrink: 0; }
 .fmt-tpl-counts { font-size: 10.5px; color: var(--ink-3); margin-top: 2px; }
 
-/* Formats banner floats over the content on every layout */
+/* Formats banner takes the brand's place: at the top of the sidebar on a
+   computer (so it never covers a page title), in the app bar on a phone */
 .fmt-banner {
   display: none;
   position: fixed;
-  top: 16px; left: 50%;
+  top: 26px; left: calc(var(--sidebar-w) / 2);
   transform: translateX(-50%);
   z-index: 60;
   padding: 7px 16px;
@@ -510,6 +512,7 @@ body.format-mode .fmt-tpl-btn { display: inline-flex; animation: tplBtnIn 0.3s v
   white-space: nowrap;
 }
 body.format-mode .fmt-banner { display: block; animation: bannerIn 0.35s var(--spring); }
+body.format-mode .brand-desktop { visibility: hidden; }
 @keyframes bannerIn { from { opacity: 0; transform: translate(-50%, -8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
 @media (max-width: 640px) {
@@ -1366,7 +1369,7 @@ body.format-mode .list-sched-row { display: flex; }
 /* starred list cards */
 .home-lists-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   gap: 14px;
 }
 .home-list-card {
@@ -2297,18 +2300,7 @@ body.format-mode .list-sched-row { display: flex; }
    ═══════════════════════════════════════════════════════ */
 .budget-col { max-width: 760px; display: block; }
 .budget-wrap { display: flex; flex-direction: column; gap: 16px; }
-
-.budget-header {
-  display: flex; align-items: flex-start; justify-content: space-between;
-  gap: 12px;
-}
-.budget-title {
-  font-family: var(--font-display);
-  font-weight: 500;
-  font-size: 34px;
-  letter-spacing: -0.02em;
-  font-variation-settings: "SOFT" 100, "opsz" 72;
-}
+.budget-wrap > .page-head { margin-bottom: 0; }
 
 /* hero figure — total balance */
 .budget-figure {
