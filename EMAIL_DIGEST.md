@@ -13,7 +13,9 @@ Worky (every device) ◄────┘  digestInboxSeen → digestInboxFlush
   ├─ each device merges the inbox itself when it is newer than the digest it holds
   ├─ the inbox stays in the cloud until the next run overwrites it
   │    (state pushes use update(), so they never touch it)
-  └─ Home card: summary + Suggested tasks (Add / Dismiss / Add all)
+  ├─ Home card: summary + Suggested tasks (Add / Dismiss / Add all)
+  └─ "Run now": the GitHub token saved at users/<uid>/digestGithub
+       starts the workflow from any device signed in to the account
 ```
 
 ## Same digest on every device
@@ -22,7 +24,8 @@ A digest reaches a device through **cloud sync**, so the rule is simply: every
 device signed in to the same Worky cloud-sync account shows the same digest.
 Settings → Email Digest names the account this device receives through (or says
 it isn't signed in). The GitHub token plays no part in receiving a digest — it
-only powers *Run now* — so the phone doesn't need one.
+only powers *Run now* — and it is saved to the account as well, so a token saved
+once works on every device signed in to it.
 
 How it stays consistent:
 
@@ -48,11 +51,23 @@ workflow are documented in [`backend/README.md`](backend/README.md).
 **Settings → Email Digest**
 - *Show digest on Home* — the only switch. A delivery turns it on automatically.
 - Status line — when the last digest arrived, how many emails, which model.
-- *Run it from this device* — paste a GitHub fine-grained token (scope: this repo,
-  **Actions: Read and write**). It's stored in this device's localStorage only,
-  never synced. With it, **Run digest now** dispatches the workflow and the card
-  shows the run's progress (queued → running → finished → arriving) with a link
-  to the log. The result still arrives through Firebase like a scheduled one.
+- *Run it from any device* — paste a GitHub fine-grained token (scope: this repo,
+  **Actions: Read and write**, with an expiry). It's saved to the signed-in account
+  at `users/<uid>/digestGithub` = `{ token, updatedAt }`: a sibling of the state
+  blob like `digestInbox`, so it never enters Export and state pushes never touch
+  it. Every device signed in to that account can then use Run now. **Remove**
+  takes it out of the account, so off every device; signing out takes it off that
+  device. Saving needs cloud sync (the digest can only arrive through it anyway).
+  With a token, **Run digest now** dispatches the workflow and the card shows the
+  run's progress (queued → running → finished → arriving) with a link to the log.
+  The result still arrives through Firebase like a scheduled one.
+- A token saved by an older build lives in that device's localStorage. The first
+  time the device opens signed in to the account the digest is delivered to (the
+  one with a `digestInbox`), it moves into the account and leaves the device. Into
+  no other account: the token starts that account's workflow, and someone else
+  signing in on the device must not receive it. If the account already has a
+  token, or had one removed, the local copy is dropped instead of moved, so a
+  removed token doesn't come back from an older device.
 - *Load sample* / *Clear digest* — for demos and cleanup.
 
 **Home card**
@@ -68,8 +83,13 @@ Synced (`digest` in app state): `enabled`, `last {at, markdown, count, model, so
 `suggestions[]`, `sugIdCounter`, and `clearedAt` (only once a digest has been cleared). Older builds also stored `schedule`, `lastScheduled`
 and `request` for the laptop runner; those are dropped on load.
 
-Device-local (localStorage): `focus-digest-ui` (collapsed), `focus-digest-github`
-(token), `focus-digest-run` (the GitHub run being watched, so a reload keeps watching).
+Account, beside the state blob: `digestGithub {token, updatedAt}` (the Run now
+token; `{updatedAt}` alone once removed). The database rules must limit
+`users/<uid>` to its owner, as they already should for the rest of the data.
+
+Device-local (localStorage): `focus-digest-ui` (collapsed), `focus-digest-run` (the
+GitHub run being watched, so a reload keeps watching), and `focus-digest-github` (a
+token an older build saved, until it moves into the account).
 
 ## Tests
 
@@ -77,5 +97,5 @@ Device-local (localStorage): `focus-digest-ui` (collapsed), `focus-digest-github
 npm install                      # once (jsdom)
 npm test                         # every suite in tests/
 npm test -- digest               # just the digest: state, pool, rendering, delivery merge, Run now against a fake GitHub API
-npm test -- sync                 # just sync: two devices converging (deliveries, a phone opening late, Clear, Import)
+npm test -- sync                 # just sync: two devices converging (deliveries, a phone opening late, Clear, Import, the Run now token)
 ```

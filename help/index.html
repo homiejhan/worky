@@ -305,8 +305,8 @@
         <figcaption>The one question on a second device.</figcaption>
       </figure>
       <ul>
-        <li><strong>What syncs:</strong> timers and their history, lists and tasks, Daily routines, the calendar and its weekly blocks, shifts and wages, the budget, payday and bills, your theme and which sections show, and the email digest.</li>
-        <li><strong>What stays on each device:</strong> the Google Calendar connection, bank connections, and the GitHub token for the digest.</li>
+        <li><strong>What syncs:</strong> timers and their history, lists and tasks, Daily routines, the calendar and its weekly blocks, shifts and wages, the budget, payday and bills, your theme and which sections show, and the email digest with its GitHub token for Run now.</li>
+        <li><strong>What stays on each device:</strong> the Google Calendar connection and bank connections.</li>
         <li>While <a href="#formats">Formats</a> is open, sync waits until you press Done.</li>
         <li><strong>Sign out</strong> in the same place. Your data stays on the device and in the cloud.</li>
       </ul>
@@ -374,7 +374,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"</cod
       <ul>
         <li><strong>Suggested tasks</strong> sit at the top of the card: <strong>Add</strong> makes one a Day by Day task with its date, <strong>×</strong> dismisses it, <strong>Add all</strong> takes them all.</li>
         <li><strong>Settings → Email Digest</strong> turns the card on or off, and <strong>Load sample</strong> shows what a digest looks like.</li>
-        <li>To start a digest now instead of waiting for the morning, add a GitHub token under <strong>Run it from this device</strong> and press <strong>Run now</strong>. The token stays on that device.</li>
+        <li>To start a digest now instead of waiting for the morning, add a GitHub token under <strong>Run it from any device</strong> and press <strong>Run now</strong>. The token is saved to your cloud sync account, so you add it once and every device signed in to that account can use Run now. <strong>Remove</strong> takes it off all of them.</li>
       </ul>
       <figure class="small">
         <img src="img/digest.webp" width="438" height="760" loading="lazy" alt="The Email digest card with sample data: 23 emails, four suggested tasks with Add buttons, and a summary starting with Top of the inbox.">
@@ -406,7 +406,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"</cod
 
     <section id="privacy">
       <h2>Privacy policy</h2>
-      <p class="updated">Last updated: September 24, 2026</p>
+      <p class="updated">Last updated: September 28, 2026</p>
       <p>This policy explains what data Focus (also called Worky) touches and what happens to it. The short version: your data stays yours, on your device and, if you turn on sync, in your own cloud account. It is used only to show you your own information. Nothing is sold, and there are no ads or analytics.</p>
 
       <h3>Data stored in the app</h3>
@@ -414,6 +414,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"</cod
 
       <h3>Cloud sync and Google sign-in</h3>
       <p>If you sign in with Google to turn on sync, the same data is also stored in a Firebase Realtime Database (operated by Google) under your account, so your other devices can read it. The database rules allow access only to the signed-in account that owns it. Sign-in uses Firebase Authentication with your Google account: Focus receives your Google account identifier, email address and basic profile (name and picture) to connect your synced data to you. It never receives your password.</p>
+      <p>If you save a GitHub token for the email digest's Run now button, it is stored in the same place, under your account, so your other devices can use it. It sits next to your data rather than in it, so Export doesn't include it. Focus sends it only to GitHub, to start the digest workflow and follow its progress. Remove in Settings → Email Digest deletes it from the database; you can also revoke it on GitHub at any time.</p>
 
       <h3>Google Calendar</h3>
       <p>Connecting Google Calendar is optional. If you connect it, Focus asks for access to your Google calendars (the <code>calendar</code> permission, which covers reading and editing events). Focus uses it only to:</p>
