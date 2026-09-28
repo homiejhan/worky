@@ -1326,6 +1326,12 @@ body.format-mode .list-sched-row { display: flex; }
   transition: color 0.15s, border-color 0.15s;
 }
 .hi-go:hover { color: var(--hi); border-color: var(--hi); }
+/* phones: the button drops under the text, lined up with it, so the text gets the full width */
+@media (max-width: 640px) {
+  .home-insight { flex-wrap: wrap; row-gap: 10px; }
+  .hi-main { flex-basis: calc(100% - 40px); }
+  .hi-go { margin-left: 40px; align-self: flex-start; }
+}
 .home-section-title {
   display: flex; align-items: center; gap: 8px;
   font-size: 13.5px; font-weight: 600;
@@ -1861,7 +1867,8 @@ body.format-mode .list-sched-row { display: flex; }
   transition: all 0.15s;
   touch-action: manipulation;
 }
-.modal-file-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+.modal-file-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+.modal-file-btn:disabled { opacity: 0.5; cursor: default; }
 .choice-btn { display: flex; flex-direction: column; gap: 2px; text-align: left; border-style: solid; border-color: var(--border-mid); }
 .choice-btn strong { font-weight: 600; color: var(--ink); }
 .choice-btn span { font-size: 12px; color: var(--ink-3); }
@@ -1887,6 +1894,11 @@ body.format-mode .list-sched-row { display: flex; }
 }
 
 .cal-color-swatches { display: flex; gap: 8px; flex-wrap: wrap; flex: 1; }
+/* phones: the nine colours share one line instead of leaving one on a second */
+@media (max-width: 640px) {
+  .cal-color-swatches { flex-wrap: nowrap; gap: 4px; justify-content: space-between; }
+  .cal-color-swatches .cal-color-dot { flex-shrink: 0; }
+}
 .cal-color-dot {
   width: 24px; height: 24px; border-radius: 50%;
   cursor: pointer;
@@ -2595,9 +2607,17 @@ body.format-mode .list-sched-row { display: flex; }
 .settings-section { display: none; flex-direction: column; gap: 12px; }
 .settings-section.active { display: flex; }
 
-/* Mobile: one stage at a time — the list, or the open section behind a back button. */
+/* Mobile: one stage at a time — the list, or the open section behind a back button.
+   Each stage is as tall as it needs, up to nearly the whole screen, so a long
+   section isn't squeezed into a small scrolling box and a short one leaves no gap. */
 @media (max-width: 640px) {
-  .settings-box { flex-direction: column; height: min(540px, 88vh); }
+  .settings-box {
+    flex-direction: column;
+    height: auto;
+    max-height: calc(100vh - 32px - var(--safe-top) - var(--safe-bottom));
+    max-height: calc(100dvh - 32px - var(--safe-top) - var(--safe-bottom));
+  }
+  .settings-nav, .settings-pane { min-height: 0; }
   .settings-box[data-stage="list"]   .settings-pane { display: none; }
   .settings-box[data-stage="detail"] .settings-nav  { display: none; }
 
@@ -2681,7 +2701,7 @@ body.format-mode .list-sched-row { display: flex; }
 .gcal-toggle input:disabled + .gcal-toggle-track { opacity: 0.5; cursor: default; }
 
 .settings-danger-btn { color: var(--danger); border-color: rgba(var(--danger-rgb),0.35); }
-.settings-danger-btn:hover { color: var(--danger); border-color: var(--danger); background: var(--danger-dim); }
+.settings-danger-btn:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); background: var(--danger-dim); }
 
 /* how-to links from Settings to the help page (help/) */
 .settings-help-link { align-self: flex-start; font-size: 12.5px; font-weight: 600; color: var(--accent); text-decoration: none; }
@@ -2743,6 +2763,8 @@ body.format-mode .list-sched-row { display: flex; }
 
 /* preset chips */
 .theme-presets { display: flex; flex-wrap: wrap; gap: 10px 6px; }
+/* all nine presets on one line in the computer's Settings pane (5 + 4 on a phone) */
+.settings-section .theme-presets { column-gap: 2px; }
 .theme-chip {
   display: flex; flex-direction: column; align-items: center; gap: 5px;
   width: 54px;
@@ -3143,6 +3165,8 @@ body.format-mode .list-sched-row { display: flex; }
 .dg-sync-hint.warn { color: var(--danger); }
 .dg-fields .theme-bg-actions { flex-wrap: wrap; }
 .dg-fields .theme-bg-actions .modal-file-btn { flex: 1 1 30%; }
+/* phones: labels stay on one line; the buttons wrap to a second row instead */
+@media (max-width: 640px) { .dg-fields .theme-bg-actions .modal-file-btn { flex: 1 1 auto; white-space: nowrap; } }
 .dg-prompt-editor { display: flex; flex-direction: column; gap: 8px; }
 .dg-prompt-editor[hidden] { display: none; }
 .dg-prompt-text { height: 240px; resize: vertical; font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
