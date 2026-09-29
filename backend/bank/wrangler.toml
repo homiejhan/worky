@@ -14,4 +14,4 @@ PLAID_ENV = "production"
 ALLOWED_ORIGINS = "https://homiejhan.github.io"
 # Only for OAuth banks (Chase, Bank of America, Wells Fargo…). It must also be
 # listed under Allowed redirect URIs in the Plaid dashboard.
-# PLAID_REDIRECT_URI = "https://homiejhan.github.io/worky/"
+PLAID_REDIRECT_URI = "https://homiejhan.github.io/worky/"
