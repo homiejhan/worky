@@ -443,9 +443,9 @@ async function promptTests() {
   const defaults = JSON.parse(fs.readFileSync(path.join(DIR, 'backend', 'prompts.json'), 'utf8'));
   let fetches = [];
   const fakeFetch = async url => {
+    if (!/backend\/prompts\.json$/.test(url)) return jsonRes({}, 404);   // not the editor's (e.g. the bank relay's health check)
     fetches.push(String(url));
-    if (/backend\/prompts\.json$/.test(url)) return jsonRes(defaults);
-    return jsonRes({}, 404);
+    return jsonRes(defaults);
   };
   const { w, d } = await boot({ fetchImpl: fakeFetch });
   const $ = id => d.getElementById(id);
@@ -643,6 +643,7 @@ console.log('\n── 9. Run now: token gate, dispatch, watch the run, delivery 
   const calls = [];
   let runsResponse = { workflow_runs: [] };
   const fakeFetch = async (url, opts) => {
+    if (!/^https:\/\/api\.github\.com\//.test(url)) return { status: 404, ok: false, json: async () => ({}) };   // e.g. the bank relay's health check
     calls.push({ url: String(url), method: (opts && opts.method) || 'GET', auth: opts && opts.headers && opts.headers.Authorization });
     if (/dispatches$/.test(url)) return { status: 204, ok: true, json: async () => ({}) };
     if (/\/runs\?/.test(url)) return { status: 200, ok: true, json: async () => runsResponse };

@@ -217,10 +217,16 @@ const ENV = { PLAID_CLIENT_ID: 'test-client', PLAID_SECRET: 'test-secret', PLAID
   }
   const saved = w => JSON.parse(w.localStorage.getItem('focus-bank') || 'null');
   const toast = d => d.getElementById('toast').textContent;
+  /* The app as if its js/config.js named `relay` as BANK_RELAY_URL ('' = none), whatever
+   * this copy ships with: the flows below are about a device's own relay address. */
+  const withRelay = relay => (src, file) =>
+    (file === 'js/config.js' ? src.replace(/(export const BANK_RELAY_URL\s*=\s*)'[^']*'/, `$1'${relay}'`) : src);
+  const noRelay = withRelay('');
 
   console.log('\n── 7. Settings → Bank accounts, before anything is set up ──');
   {
-    const { w, d } = await loadApp({ storage: { 'focus-tour-done': '1' } });
+    const { w, d } = await loadApp({ storage: { 'focus-tour-done': '1' }, transform: noRelay });
+    eq(w.eval('BANK_RELAY_URL'), '', 'config without a relay');
     w.openSettings('bank');
     const nav = [...d.querySelectorAll('[data-settings-nav]')].map(b => b.dataset.settingsNav);
     ok(nav.indexOf('bank') === nav.indexOf('gcal') + 1, 'Bank accounts sits right after Google Calendar in Settings');
@@ -230,9 +236,22 @@ const ENV = { PLAID_CLIENT_ID: 'test-client', PLAID_SECRET: 'test-secret', PLAID
     ok(/How to set up bank connections/.test(d.getElementById('bankPanel').textContent), 'and links to the setup guide');
   }
 
+  console.log('\n── 7a. Settings → Bank accounts on a copy whose config names a relay ──');
+  {
+    const checked = [];
+    const relayUp = async url => { checked.push(String(url)); return { ok: true, status: 200, json: async () => ({ ok: true, env: 'sandbox', problems: [] }) }; };
+    const { w, d } = await loadApp({ storage: { 'focus-tour-done': '1' }, before: w => { w.fetch = relayUp; },
+      transform: withRelay('https://relay.example.workers.dev') });
+    w.openSettings('bank');
+    eq(d.getElementById('bankStatusLine').textContent, 'No banks connected.', 'ready: no banks yet');
+    ok(d.querySelector('[data-bank="connect"]') && !d.getElementById('bankRelayInput'), 'Connect a bank straight away, no address to type');
+    ok(await until(() => /Plaid sandbox/.test(d.getElementById('bankPanel').textContent)), 'the relay is checked');
+    eq(checked[0], 'https://relay.example.workers.dev/health', 'at its /health');
+  }
+
   console.log('\n── 8. Connect a bank: relay address, Plaid\'s window, accounts, transactions ──');
   const world = bankWorld();
-  const { w, d } = await loadApp({ storage: { 'focus-tour-done': '1' }, before: w => { w.fetch = world.relayFetch; } });
+  const { w, d } = await loadApp({ storage: { 'focus-tour-done': '1' }, before: w => { w.fetch = world.relayFetch; }, transform: noRelay });
   {
     w.openSettings('bank');
     const save = v => { d.getElementById('bankRelayInput').value = v; d.querySelector('[data-bank="relay-save"]').click(); };
@@ -318,7 +337,7 @@ const ENV = { PLAID_CLIENT_ID: 'test-client', PLAID_SECRET: 'test-secret', PLAID
     const back = bankWorld();
     const url = 'https://localhost/worky/?oauth_state_id=a1b2c3';
     const app2 = await loadApp({ url, storage: { 'focus-tour-done': '1', 'focus-bank': JSON.stringify({ relay: RELAY, items: [] }) },
-      before: w2 => { w2.fetch = back.relayFetch; w2.Plaid = back.Link; w2.sessionStorage.setItem('focus-bank-link', 'link-sandbox-77'); } });
+      before: w2 => { w2.fetch = back.relayFetch; w2.Plaid = back.Link; w2.sessionStorage.setItem('focus-bank-link', 'link-sandbox-77'); }, transform: noRelay });
     ok(await until(() => back.links.length === 1), 'returning from an OAuth bank reopens Plaid\'s window');
     ok(back.links[0].token === 'link-sandbox-77' && back.links[0].receivedRedirectUri === url, 'with the same link token and the address the bank sent back');
     eq(app2.w.location.search, '', 'and the address is cleaned up');
