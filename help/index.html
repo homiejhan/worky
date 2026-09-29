@@ -132,7 +132,7 @@
         <li><strong>The tour</strong> walks through every section one step at a time. Replay it from <strong>Settings → Help → Take the tour</strong>.</li>
       </ul>
       <figure>
-        <img src="img/home.webp" width="800" height="500" alt="Focus on a computer: the sidebar with Woke up, the pages and the timers; Home with Good morning, a daily balance of $7.50, three Heads up cards, today's tasks and the next four hours.">
+        <img src="img/home.webp" width="800" height="500" alt="Focus on a computer: the sidebar with Woke up, the pages and the timers; Home with Good morning, a daily balance of $7.50, two Heads up cards, today's tasks and the next four hours.">
         <figcaption>Home on a computer, with a sample week of shifts, deadlines and bills.</figcaption>
       </figure>
     </section>
@@ -140,15 +140,14 @@
     <section id="home">
       <h2>Home and Heads up</h2>
       <p>Home gathers today in one place: how many of today's tasks are done, the tasks due today, what's on the calendar in the next four hours, your timers, and today's balance from the budget.</p>
-      <p><strong>Heads up</strong> cards appear only when something needs you, and each has a button that goes straight to where you fix it. Focus works these out from your own shifts, deadlines, cash and timers, on your device.</p>
+      <p><strong>Heads up</strong> cards appear only when something needs you, and each has a button that goes straight to where you fix it. Focus works these out from your own shifts, deadlines and cash, on your device.</p>
       <ul>
         <li><strong>A shift lands on a deadline:</strong> a paid shift in the next week falls in the 24 hours before something on your <strong>Deadlines</strong> list is due. Deadlines count as due at the end of their day.</li>
         <li><strong>Cash runs out before payday:</strong> your <a href="#budget">cash runway</a> says the money ends before your next paycheck arrives, and roughly how much more would carry you to payday.</li>
-        <li><strong>The budget is wrong, not you:</strong> a timer ran over its time three days running. Focus suggests a longer time: the old one plus the average overrun, rounded up to a quarter hour.</li>
       </ul>
       <div class="phones">
         <figure>
-          <img src="img/phone-home.webp" width="390" height="844" loading="lazy" alt="Home on a phone with three Heads up cards: A shift lands on a deadline, Cash runs out before payday, and Study: the budget is wrong, not you.">
+          <img src="img/phone-home.webp" width="390" height="844" loading="lazy" alt="Home on a phone with two Heads up cards: A shift lands on a deadline, and Cash runs out before payday.">
           <figcaption>Heads up on a phone.</figcaption>
         </figure>
       </div>
@@ -159,14 +158,14 @@
       <p>Each timer is a time budget for something that matters today, like Study or Work.</p>
       <ul>
         <li>Press <strong>play</strong> to start and <strong>pause</strong> to stop. Tap the time to change it; the circular arrow resets that timer.</li>
-        <li>When a timer passes zero it keeps counting in red, for example <strong>+12:34 Over budget</strong>, so you see how far over you went.</li>
+        <li>A timer stops when it reaches zero. To run it again, reset it or tap the time and type a new one.</li>
         <li>Tick <strong>Woke up</strong> when you get up: Focus then shows how much timer time is left today and when you'd finish if you ran the timers back to back.</li>
         <li>Which timers exist and how long each runs are set in <a href="#formats">Formats</a>.</li>
       </ul>
       <div class="phones">
         <figure>
-          <img src="img/phone-timers.webp" width="390" height="844" loading="lazy" alt="The Timers page on a phone: Study is running and 12 minutes 34 seconds over budget in red; Work shows 4:00:00 and Sleep 8:00:00, paused.">
-          <figcaption>Study, running and over its time.</figcaption>
+          <img src="img/phone-timers.webp" width="390" height="844" loading="lazy" alt="The Timers page on a phone: Study is running with 1 hour 47 minutes left; Work shows 4:00:00 and Sleep 8:00:00, paused.">
+          <figcaption>Study, running.</figcaption>
         </figure>
       </div>
     </section>
@@ -305,7 +304,7 @@
         <figcaption>The one question on a second device.</figcaption>
       </figure>
       <ul>
-        <li><strong>What syncs:</strong> timers and their history, lists and tasks, Daily routines, the calendar and its weekly blocks, shifts and wages, the budget, payday and bills, your theme and which sections show, and the email digest with its GitHub token for Run now.</li>
+        <li><strong>What syncs:</strong> timers, lists and tasks, Daily routines, the calendar and its weekly blocks, shifts and wages, the budget, payday and bills, your theme and which sections show, and the email digest with its GitHub token for Run now.</li>
         <li><strong>What stays on each device:</strong> the Google Calendar connection and bank connections.</li>
         <li>While <a href="#formats">Formats</a> is open, sync waits until you press Done.</li>
         <li><strong>Sign out</strong> in the same place. Your data stays on the device and in the cloud.</li>
@@ -406,11 +405,11 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"</cod
 
     <section id="privacy">
       <h2>Privacy policy</h2>
-      <p class="updated">Last updated: September 28, 2026</p>
+      <p class="updated">Last updated: September 29, 2026</p>
       <p>This policy explains what data Focus (also called Worky) touches and what happens to it. The short version: your data stays yours, on your device and, if you turn on sync, in your own cloud account. It is used only to show you your own information. Nothing is sold, and there are no ads or analytics.</p>
 
       <h3>Data stored in the app</h3>
-      <p>Your tasks, lists, timers and their history, calendar entries, shifts and wages, budget, payday and bills, theme and settings are stored in your browser's local storage on each device you use. Focus has no contacts or address book and doesn't ask for anyone else's information: it stores dates, amounts and the text you type.</p>
+      <p>Your tasks, lists, timers, calendar entries, shifts and wages, budget, payday and bills, theme and settings are stored in your browser's local storage on each device you use. Focus has no contacts or address book and doesn't ask for anyone else's information: it stores dates, amounts and the text you type.</p>
 
       <h3>Cloud sync and Google sign-in</h3>
       <p>If you sign in with Google to turn on sync, the same data is also stored in a Firebase Realtime Database (operated by Google) under your account, so your other devices can read it. The database rules allow access only to the signed-in account that owns it. Sign-in uses Firebase Authentication with your Google account: Focus receives your Google account identifier, email address and basic profile (name and picture) to connect your synced data to you. It never receives your password.</p>

@@ -46,7 +46,7 @@ Every generic direction we tested (modes, a customizable insights feed, the emai
 | 12 | Optional: MCP `add_insight` write tool |
 | 15–16 | Pitch practice, public demo (Week 14 is Thanksgiving) |
 
-The three insight cards: a shift collides with a deadline; days of cash until the next paycheck; a timer you overrun three days running means the budget is wrong, not you. Each is computed from data only Focus holds, so each can be evaluated.
+The insight cards: a shift collides with a deadline; days of cash until the next paycheck. Each is computed from data only Focus holds, so each can be evaluated. (A third, "a timer you overrun three days running means the budget is wrong, not you", was dropped when timers went back to stopping at zero: with no overrun there is nothing to measure.)
 
 ## Before teammates touch the code
 
