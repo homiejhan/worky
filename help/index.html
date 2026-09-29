@@ -304,8 +304,8 @@
         <figcaption>The one question on a second device.</figcaption>
       </figure>
       <ul>
-        <li><strong>What syncs:</strong> timers, lists and tasks, Daily routines, the calendar and its weekly blocks, shifts and wages, the budget, payday and bills, your theme and which sections show, and the email digest with its GitHub token for Run now.</li>
-        <li><strong>What stays on each device:</strong> the Google Calendar connection and bank connections.</li>
+        <li><strong>What syncs:</strong> timers, lists and tasks, Daily routines, the calendar and its weekly blocks, shifts and wages, the budget, payday and bills, your theme and which sections show, the email digest with its GitHub token for Run now, and your <a href="#bank">bank connections</a>.</li>
+        <li><strong>What stays on each device:</strong> the Google Calendar connection.</li>
         <li>While <a href="#formats">Formats</a> is open, sync waits until you press Done.</li>
         <li><strong>Sign out</strong> in the same place. Your data stays on the device and in the cloud.</li>
       </ul>
@@ -319,7 +319,9 @@
       <h2>Bank accounts</h2>
       <p>Connect a bank to see your accounts, balances and recent transactions in <strong>Settings → Bank accounts</strong>. The connection is read-only: Focus can't move money.</p>
       <p>Banks connect through <strong>Plaid</strong>, a service many budgeting and payment apps use. You log in to your bank in Plaid's window, so Focus never sees your bank password. A small relay server holds this copy of Focus's Plaid keys and passes requests along; it stores nothing.</p>
+      <p>A bank connection belongs to your account, so it needs <a href="#cloud">cloud sync</a>: connect a bank once, and every device you sign in on shows it.</p>
       <ol class="steps">
+        <li>Sign in to cloud sync, if you haven't: <strong>Settings → Cloud sync</strong>, or <strong>Sign in to Cloud sync</strong> in Settings → Bank accounts.</li>
         <li>Open <strong>Settings → Bank accounts</strong> and press <strong>Connect a bank</strong>.</li>
         <li>Plaid's window opens. Find your bank, log in, and choose the accounts to share. Some banks, such as Chase, Bank of America and Wells Fargo, open their own site for you to approve, then send you back to Focus.</li>
         <li>Your accounts, balances and newest transactions appear. Press <strong>Refresh</strong> any time for new ones.</li>
@@ -327,20 +329,20 @@
       <figure>
         <picture>
           <source media="(max-width: 640px)" srcset="img/bank-ready-pane.webp" width="555" height="455">
-          <img src="img/bank-ready.webp" width="780" height="455" loading="lazy" alt="Settings, Bank accounts section: No banks connected, a Connect a bank button, a note that you log in to your bank in Plaid's window, and the relay line Relay: localhost:8787, Plaid sandbox.">
+          <img src="img/bank-ready.webp" width="780" height="455" loading="lazy" alt="Settings, Bank accounts section: No banks connected, a Connect a bank button, a note that you log in to your bank in Plaid's window and that the connection is saved to your account, so every device signed in as you@example.com shows it, and the relay line Relay: localhost:8787, Plaid sandbox.">
         </picture>
         <figcaption>Ready to connect. This copy uses Plaid's sandbox, so it names the test bank and login.</figcaption>
       </figure>
       <figure>
         <picture>
           <source media="(max-width: 640px)" srcset="img/bank-connected-pane.webp" width="555" height="560">
-          <img src="img/bank-connected.webp" width="780" height="560" loading="lazy" alt="A connected bank, First Platypus Bank: Plaid Checking $110.00, Plaid Saving $210.00, Plaid Credit Card $410.00 owed, and recent transactions such as Starbucks (pending), Uber, SparkFun and Campus Café payroll +$232.50, with Refresh and Disconnect buttons.">
+          <img src="img/bank-connected.webp" width="780" height="560" loading="lazy" alt="Bank accounts: 3 accounts at 1 bank, saved to your account. First Platypus Bank: Plaid Checking $110.00, Plaid Saving $210.00, Plaid Credit Card $410.00 owed, and recent transactions such as Starbucks (pending), Uber, SparkFun and Campus Café payroll +$232.50, with Refresh and Disconnect buttons.">
         </picture>
         <figcaption>A connected bank. These are Plaid's sandbox test accounts.</figcaption>
       </figure>
       <ul>
-        <li><strong>Disconnect</strong> ends the connection at Plaid and deletes it from this device. You can also see and end connections at <a href="https://my.plaid.com" target="_blank" rel="noopener">my.plaid.com</a>.</li>
-        <li>Balances and transactions stay on this device: they aren't synced to the cloud or included in Export. Connect on each device where you want to see them.</li>
+        <li><strong>Disconnect</strong> ends the connection at Plaid and deletes it from your account, on every device. You can also see and end connections at <a href="https://my.plaid.com" target="_blank" rel="noopener">my.plaid.com</a>.</li>
+        <li>Balances and transactions are saved to your account, next to your synced data rather than in it: every device signed in to the account shows them, and Export doesn't include them. Connect a bank on one device only; your other devices show it once you sign in there. Signing out takes the banks off that device, and signing back in brings them back.</li>
         <li>If Focus says your bank <strong>needs you to log in again</strong>, the bank ended the connection. Disconnect it and connect again.</li>
         <li><strong>Testing with the sandbox:</strong> pick <strong>First Platypus Bank</strong> and log in with <code>user_good</code> / <code>pass_good</code>. If it asks for a code, use <code>1234</code>. No real money is involved.</li>
       </ul>
@@ -349,12 +351,12 @@
       <p>If Settings says <strong>Not set up on this copy of Focus</strong>, there is no relay yet. The relay and its full guide are in <a href="https://github.com/homiejhan/worky/blob/main/backend/bank/README.md" target="_blank" rel="noopener"><code>backend/bank/README.md</code></a>. On your computer, in the Focus folder (Node 20 or newer):</p>
       <ol class="steps">
         <li>Sign up at <a href="https://dashboard.plaid.com/signup" target="_blank" rel="noopener">dashboard.plaid.com</a> (free) and copy your <code>client_id</code> and <strong>Sandbox</strong> secret from Developers → Keys.</li>
-        <li>Copy the settings file and fill it in: <code>PLAID_CLIENT_ID</code>, <code>PLAID_SECRET</code>, and a <code>RELAY_KEY</code> from the second command.
+        <li>Copy the settings file and fill it in: <code>PLAID_CLIENT_ID</code>, <code>PLAID_SECRET</code>, and a <code>RELAY_KEY</code> from the second command. <code>FIREBASE_PROJECT_ID</code>, the Firebase project whose sign-ins the relay accepts, is already filled in.
 <pre><code>cp backend/bank/.env.example backend/bank/.env
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"</code></pre></li>
-        <li>Prove the connection works without a browser. It should end with <code>End to end: OK</code>.
-<pre><code>npm run bank:check</code></pre></li>
-        <li>Run the app and the relay together, open <a href="http://localhost:8787" target="_blank" rel="noopener">http://localhost:8787</a>, go to <strong>Settings → Bank accounts</strong>, enter the relay address <code>http://localhost:8787/api/bank</code>, press <strong>Save</strong>, then <strong>Connect a bank</strong>.
+        <li>Prove the connection works without a browser. It should end with <code>End to end: OK</code>. The relay only answers a signed-in account, so the check makes a test sign-in of its own, with test keys it serves at <code>FIREBASE_JWKS_URL</code>.
+<pre><code>FIREBASE_JWKS_URL=http://127.0.0.1:0/jwks npm run bank:check</code></pre></li>
+        <li>Try it in the app. Signing in to cloud sync only works on the deployed app, so point that at the relay on your computer: add <code>https://homiejhan.github.io</code> to <code>ALLOWED_ORIGINS</code> in <code>backend/bank/.env</code> and start the relay. In the app, sign in to cloud sync, go to <strong>Settings → Bank accounts</strong>, press <strong>Change</strong> on the relay line, enter <code>http://localhost:8787/api/bank</code>, press <strong>Save</strong> (it's saved on this device only), then <strong>Connect a bank</strong>. The connection is saved to your account, and only this relay can open it: disconnect it before you switch back to the default relay.
 <pre><code>npm run bank</code></pre></li>
       </ol>
       <figure>
@@ -364,7 +366,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"</cod
         </picture>
         <figcaption>Pointing this device at a relay, for testing.</figcaption>
       </figure>
-      <p>To turn bank connections on for everyone, put the relay online (it runs on Cloudflare Workers' free plan: <code>npx wrangler deploy</code> in <code>backend/bank</code>) and set <code>BANK_RELAY_URL</code> in <code>js/config.js</code> to its address. Real banks need Plaid's Trial plan (up to 10 bank logins) or Production access. Read the README's list of what to do before other people's bank data goes through it.</p>
+      <p>To turn bank connections on for everyone, put the relay online (it runs on Cloudflare Workers' free plan: <code>npx wrangler deploy</code> in <code>backend/bank</code>; its <code>wrangler.toml</code> names the Firebase project in <code>FIREBASE_PROJECT_ID</code>) and set <code>BANK_RELAY_URL</code> in <code>js/config.js</code> to its address. Real banks need Plaid's Trial plan (up to 10 bank logins, and one still counts after Disconnect, so connect each bank once) or Production access. Read the README's list of what to do before other people's bank data goes through it.</p>
     </section>
 
     <section id="digest">
@@ -398,7 +400,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"</cod
         <li>Focus saves as you go, in this browser on this device. Turn on <a href="#cloud">cloud sync</a> to keep your devices in step.</li>
         <li><strong>Export</strong> copies all your data to the clipboard or downloads it as a <code>.json</code> file. <strong>Import</strong> loads it back on any device, from pasted text or the file.</li>
         <li><strong>Reset the day</strong> puts timers back to their defaults and unchecks Daily tasks. Your lists stay as they are.</li>
-        <li><strong>Settings → Data → Clear storage</strong> wipes everything Focus saved on this device and starts fresh. Disconnect any bank first, because once storage is cleared Focus can't end that connection at Plaid. A cloud copy, if you have one, is not touched.</li>
+        <li><strong>Settings → Data → Clear storage</strong> wipes everything Focus saved on this device and starts fresh. A cloud copy, if you have one, is not touched, and neither are your bank connections: they're saved to your account.</li>
         <li><strong>Settings → Sections</strong> hides the parts of Focus you don't use, and <strong>Settings → Appearance</strong> picks a theme or builds your own.</li>
       </ul>
     </section>
@@ -441,8 +443,8 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"</cod
         <li>account names and types, the last four digits of account numbers, and balances;</li>
         <li>transactions: date, description or merchant, amount, category, and whether it's pending. The last 30 days come in when you connect, then new ones.</li>
       </ul>
-      <p>This data travels from Plaid through Focus's relay server to your device. The relay has no database and keeps none of it; it holds Focus's Plaid keys. The key to your connection is encrypted so that only the relay can use it, and it is kept on your device. On your device, Focus keeps the accounts, balances and newest 50 transactions for each bank. Bank data is never synced to the cloud or included in Export.</p>
-      <p>Plaid handles your data under the <a href="https://plaid.com/legal/#end-user-privacy-policy" target="_blank" rel="noopener">Plaid End User Privacy Policy</a>. Disconnect in Settings → Bank accounts ends the connection at Plaid and deletes the bank data from your device. You can also see and end connections at <a href="https://my.plaid.com" target="_blank" rel="noopener">my.plaid.com</a>.</p>
+      <p>Bank accounts need cloud sync: a connection belongs to your signed-in account. This data travels from Plaid through Focus's relay server to the app. The relay has no database and keeps none of it; it holds Focus's Plaid keys, and it answers only requests that carry your cloud-sync sign-in, which it checks with Google. The key to your connection is encrypted so that only the relay can use it, and only for your account. Focus stores that key and the accounts, balances and newest 50 transactions for each bank in the Firebase Realtime Database under your account, next to your synced data rather than in it, so Export doesn't include them. The database rules allow access only to the signed-in account that owns it: every device signed in to your account can show your banks, and no one else can read them. Each device keeps a copy to show while it's offline, removed when you sign out there. Focus tells Plaid which account a connection belongs to by your account identifier, not your name or email address.</p>
+      <p>Plaid handles your data under the <a href="https://plaid.com/legal/#end-user-privacy-policy" target="_blank" rel="noopener">Plaid End User Privacy Policy</a>. Disconnect in Settings → Bank accounts ends the connection at Plaid and deletes the bank data from your account and your devices. You can also see and end connections at <a href="https://my.plaid.com" target="_blank" rel="noopener">my.plaid.com</a>.</p>
 
       <h3>What is not collected</h3>
       <ul>
@@ -467,7 +469,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"</cod
         <li>Data on a device: clear the site's data in your browser's settings, or use Settings → Data → Clear storage.</li>
         <li>Synced data: email the address below to have your cloud record deleted. Signing out stops syncing but leaves the cloud copy in place.</li>
         <li>Google access (sign-in, Calendar and Gmail): revoke it at <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>. Focus loses access immediately and no further digests are generated.</li>
-        <li>Bank connections: Disconnect in Settings → Bank accounts, or end them at <a href="https://my.plaid.com" target="_blank" rel="noopener">my.plaid.com</a>.</li>
+        <li>Bank connections: Disconnect in Settings → Bank accounts ends them at Plaid and deletes them from your account. You can also end them at <a href="https://my.plaid.com" target="_blank" rel="noopener">my.plaid.com</a>.</li>
       </ul>
 
       <h3>Changes</h3>

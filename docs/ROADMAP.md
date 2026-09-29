@@ -53,7 +53,7 @@ The insight cards: a shift collides with a deadline; days of cash until the next
 - `app.js` is 8,052 lines in one file and most commits are "Add files via upload." Split into modules and commit from the CLI, or the first merge conflict costs a week.
 - The privacy policy says GitHub Pages; you're on Amplify. Pick one name, Focus or Worky, everywhere.
 - Shift schedules from When I Work, Sling, 7shifts, and Homebase arrive as iCal feeds a student subscribes to in Google Calendar. Your sync already sees them. Add a wage field to calendar events and you have earning capacity with no new Google permission.
-- No bank linking in v1. Plaid pricing is gated and the compliance load is real; manual envelope plus projected pay is enough to test the thesis.
+- No bank linking in v1. Plaid pricing is gated and the compliance load is real; manual envelope plus projected pay is enough to test the thesis. *Since built for the pilot anyway, behind a relay (`backend/bank`). Done: each bank connection belongs to the student's signed-in account, not to a device, so a copied key is useless to anyone else. What's left before real students use it is listed in `backend/bank/README.md`.*
 
 ## Prove it
 
