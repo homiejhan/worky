@@ -40,7 +40,8 @@ export function relayEnv(extra = {}) {
   return env;
 }
 function pick(src) {
-  const keys = ['PLAID_CLIENT_ID', 'PLAID_SECRET', 'PLAID_ENV', 'RELAY_KEY', 'ALLOWED_ORIGINS', 'PLAID_REDIRECT_URI', 'PLAID_CLIENT_NAME', 'PLAID_API_BASE', 'PORT'];
+  const keys = ['PLAID_CLIENT_ID', 'PLAID_SECRET', 'PLAID_ENV', 'RELAY_KEY', 'ALLOWED_ORIGINS', 'PLAID_REDIRECT_URI', 'PLAID_CLIENT_NAME',
+    'PLAID_API_BASE', 'FIREBASE_PROJECT_ID', 'FIREBASE_JWKS_URL', 'PORT'];
   return Object.fromEntries(keys.filter(k => src[k]).map(k => [k, src[k]]));
 }
 
