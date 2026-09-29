@@ -1,10 +1,8 @@
-/* insights.js — The three insight cards on Home. Each rule is a pure function
- * of data only Focus holds (shifts, deadlines, cash, timer history). There is
- * no model and nothing leaves the device, so every card can be checked
- * against fixtures (tests/test_insights.js), and later against what students
- * say actually happened. home.js gathers the inputs and draws the cards. */
-
-import { addDays } from './runway.js';
+/* insights.js — The insight cards on Home. Each rule is a pure function of
+ * data only Focus holds (shifts, deadlines, cash). There is no model and
+ * nothing leaves the device, so every card can be checked against fixtures
+ * (tests/test_insights.js), and later against what students say actually
+ * happened. home.js gathers the inputs and draws the cards. */
 
 const DAY = 1440;
 const dayNumber = key => { const [y, m, d] = String(key).split('-').map(Number); return Math.round(Date.UTC(y, m - 1, d) / 86400000); };
@@ -45,31 +43,4 @@ export function runwayWarning(r) {
     runsOutOn: r.runsOutOn, runsOutWith: r.runsOutWith || [], shortBy: r.shortBy,
     daysToPayday: r.daysToPayday, payday: r.payday, shortfall: r.shortfall || 0,
   };
-}
-
-/* 3. A timer overrun three days running means the budget is wrong, not you.
- * `log` is the timer log ({ day: { key: { label, over, budget } } }). A streak
- * is consecutive days with an overrun, ending today, or yesterday while today
- * has not gone over yet. Streaks of `minDays` or more come back longest first,
- * with the average overrun and a suggested budget: the old one plus that
- * average, rounded up to a quarter hour. */
-export function timerOverruns(log, today, minDays = 3) {
-  const keys = new Set(Object.values(log || {}).flatMap(day => Object.keys(day || {})));
-  const out = [];
-  keys.forEach(key => {
-    let day = log[today] && log[today][key] ? today : addDays(today, -1);
-    let days = 0, total = 0, latest = null;
-    while (log[day] && log[day][key]) {
-      const e = log[day][key];
-      latest = latest || e;
-      days++; total += e.over || 0;
-      day = addDays(day, -1);
-    }
-    if (days < minDays) return;
-    const avgOver = Math.round(total / days);
-    const budget = latest.budget || null;
-    const suggested = budget ? Math.ceil((budget + avgOver) / 900) * 900 : null;
-    out.push({ key, label: latest.label, days, avgOver, budget, suggested });
-  });
-  return out.sort((a, b) => b.days - a.days || a.label.localeCompare(b.label));
 }

@@ -1,10 +1,10 @@
 /* home.js — The Home page: greeting, balance, progress, insight cards, today's tasks,
  * starred lists, timers, next 4 hours. */
 import {
-  $, calDateKey, calFmtTime, calMinsToStr, calTimeToMins, calToday, CHECK_SVG, escAttr,
-  isMobileLayout, STAR_SVG,
+  $, calDateKey, calFmtTime, calMinsToStr, calTimeToMins, calToday, CHECK_SVG, escAttr, fmt,
+  getRemaining, isMobileLayout, STAR_SVG,
 } from './util.js';
-import { timerDisplayText, timerIsOver, timerLog, timers } from './timers.js';
+import { timers } from './timers.js';
 import { todoLists } from './lists.js';
 import { dbdAllEntries, dbdCompare, dbdLabelFor, dbdTasks, dbdTodayKey } from './dbd.js';
 import { taskLinkEventTitle, taskLinkHomeChipHtml } from './tasklinks.js';
@@ -17,8 +17,7 @@ import {
 import { homeDigestHtml } from './digest.js';
 import { shiftsOnDays } from './shifts.js';
 import { addDays } from './runway.js';
-import { deadlineClashes, runwayWarning, timerOverruns } from './insights.js';
-import { formatMode, toggleFormatMode } from './formats.js';
+import { deadlineClashes, runwayWarning } from './insights.js';
 
 /* ───────────────────────── HOME PAGE ─────────────────────────
  * Read-mostly dashboard assembled from existing state. All interactions
@@ -148,13 +147,12 @@ function homeHeroHtml() {
     </div>`;
 }
 
-/* ── insights: the three cards that read across shifts, deadlines, cash and
- * timers (the rules are in insights.js). A card shows only while its rule
- * fires, so on a normal day this section isn't there at all. ── */
+/* ── insights: the cards that read across shifts, deadlines and cash (the
+ * rules are in insights.js). A card shows only while its rule fires, so on a
+ * normal day this section isn't there at all. ── */
 const HI_ICONS = {
   clash: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 6.5h12M5 1.5v3M11 1.5v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M6 9.2l4 3M10 9.2l-4 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   cash:  '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="4" width="13" height="9.5" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M1.5 7h13" stroke="currentColor" stroke-width="1.5"/><path d="M11 10.4h.01" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
-  timer: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8.5" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M8 5.5v3l2 1.4M6.2 1.8h3.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 /* Deadlines: unfinished, dated tasks in the Deadlines list, the list the
  * Working student template brings (a Day by Day task tagged Deadlines lands
@@ -167,10 +165,6 @@ function homeDeadlines(today) {
 function homeDayWord(key) {
   const w = dbdLabelFor(key);
   return w === 'Today' || w === 'Tomorrow' ? w.toLowerCase() : w;
-}
-function homeDuration(sec) {
-  const m = Math.round(sec / 60), h = Math.floor(m / 60), r = m % 60;
-  return h && r ? `${h} h ${r} min` : h ? `${h} h` : `${r} min`;
 }
 function homeInsightCard(kind, title, text, go, goLabel) {
   return `
@@ -211,13 +205,6 @@ function homeInsightsHtml() {
       'budget', 'Budget'));
   }
 
-  timerOverruns(timerLog, today).slice(0, 1).forEach(o => {
-    const fix = o.suggested ? ` Try ${homeDuration(o.suggested)}${o.budget ? ` instead of ${homeDuration(o.budget)}` : ''}.` : '';
-    cards.push(homeInsightCard('timer', `${escAttr(o.label)}: the budget is wrong, not you`,
-      `It ran over ${o.days} days running, by ${homeDuration(o.avgOver)} on average.${fix}`,
-      'formats', 'Formats'));
-  });
-
   if (!cards.length) return '';
   return `
     <section class="home-section home-sec-insights">
@@ -225,14 +212,9 @@ function homeInsightsHtml() {
       <div class="home-insights">${cards.join('')}</div>
     </section>`;
 }
-/* The button on an insight card: to the calendar, the budget, or Formats. */
+/* The button on an insight card: to the calendar or the budget. */
 export function homeInsightGo(where) {
   if (where === 'budget') { openBudgetTab(); return; }
-  if (where === 'formats') {
-    if (!formatMode) toggleFormatMode();
-    if (isMobileLayout()) goTab('timers', true);
-    return;
-  }
   if (isMobileLayout()) goTab('calendar', true);
   else if (!calDesktopOpen) calToggleDesktop();
 }
@@ -321,10 +303,10 @@ function homeTimersHtml() {
   if (!viewEnabled('timers')) return '';   // the one Home section that follows its toggle
   if (!timers.length) return '';
   const chips = timers.map(t => `
-    <div class="home-timer-chip hchip-${t.id}${timerIsOver(t) ? ' over' : ''}">
+    <div class="home-timer-chip hchip-${t.id}">
       <span class="home-timer-dot" style="background:${t.color}"></span>
       <span class="home-timer-label">${escAttr(t.label)}</span>
-      <span class="home-timer-time tdisp-${t.id}">${timerDisplayText(t)}</span>
+      <span class="home-timer-time tdisp-${t.id}">${fmt(getRemaining(t))}</span>
     </div>`).join('');
   return `
     <section class="home-section home-sec-timers">

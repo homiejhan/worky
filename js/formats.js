@@ -35,7 +35,6 @@ function enterFormatMode() {
     running: t.running,
     startedAt: t.startedAt,
     secondsAtStart: t.secondsAtStart,
-    over: t.over || 0,             // time past zero before the current run
   }));
 
   // pause everything
@@ -51,7 +50,6 @@ function enterFormatMode() {
   timers.forEach((t, i) => {
     const def = TIMER_DEFAULTS[i];
     if (def) t.seconds = def.seconds;
-    t.over = 0;
   });
 
   formatMode = true;
@@ -84,7 +82,6 @@ export function commitFormatMode() {
       t.running = pre.running;
       t.startedAt = pre.startedAt;
       t.secondsAtStart = pre.secondsAtStart;
-      t.over = pre.over || 0;
     }
   });
   preFormatTimerState = [];
