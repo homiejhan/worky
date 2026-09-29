@@ -9,7 +9,7 @@ main = "relay.mjs"
 compatibility_date = "2026-09-01"
 
 [vars]
-PLAID_ENV = "sandbox"
+PLAID_ENV = "production"
 # The web address the app runs at (scheme + host, no path). Add more with commas.
 ALLOWED_ORIGINS = "https://homiejhan.github.io"
 # Only for OAuth banks (Chase, Bank of America, Wells Fargo…). It must also be
