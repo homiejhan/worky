@@ -122,7 +122,7 @@ Object.assign(window, {
   if (gcalIsConnected()) gcalSyncAll();
   setInterval(() => { if (gcalIsConnected()) gcalSyncAll(); }, 5 * 60 * 1000);
 
-  /* bank accounts: saved connections, and a connection an OAuth bank sent back mid-way */
+  /* bank accounts: this device's copy of the account's banks, and a connection an OAuth bank sent back mid-way */
   bankInit();
 
   /* onboarding: welcome + guided tour on a fresh device */

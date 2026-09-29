@@ -14,6 +14,7 @@ import {
   digestPromptsSeen, setDigestPromptDirty, setDigestPromptsSaved,
 } from './digest-prompts.js';
 import { setTourReoffer, tourMarkSeen, tourOffer, tourReoffer } from './onboarding.js';
+import { bankCloudForget, bankCloudSeen } from './bank.js';
 
 /* ───────────────────────── CLOUD SYNC ─────────────────────────
  * Live cross-device sync of the full app state via Firebase.
@@ -76,7 +77,7 @@ const syncClientId  = 'c' + Math.random().toString(36).slice(2) + Date.now().toS
  * baseline (Import/Export modal open, Formats mode), it waits in memory. */
 export let digestInboxLatest  = null;   // the inbox node as last seen by the realtime listener
 
-function syncConfigured() {
+export function syncConfigured() {
   return !!(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.databaseURL && window.firebase);
 }
 
@@ -299,6 +300,7 @@ function syncOnRemoteValue(snap) {
   digestInboxSeen(digestInboxLatest);         // backend-delivered digest, if any
   digestPromptsSeen(v ? v.digestPrompts : null);   // prompt edits (Settings → Email Digest)
   digestGithubSeen(v ? v.digestGithub : null);     // the Run now token (Settings → Email Digest)
+  bankCloudSeen(v ? v.bank : null);                // bank connections (Settings → Bank accounts)
 }
 function syncReconcileRemote(v) {
   const localFp = syncFingerprint(gatherState());
@@ -398,6 +400,7 @@ function syncStop() {
   setDigestPromptsSaved(undefined);             // they belong to the account that just left
   setDigestPromptDirty(false);
   digestGithubForget();                         // and so does the Run now token
+  bankCloudForget();                            // and its bank connections, unless it's the same account again
   $('syncChoiceModal')?.classList.remove('show');
 }
 

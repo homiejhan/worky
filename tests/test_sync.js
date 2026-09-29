@@ -3,49 +3,23 @@
  * an "older build" device that strips fields it does not know about — the
  * situation that made the digest revert and sync bounce forever. */
 const { loadApp } = require('./load-app');
+const { createFakeFirebase } = require('./fake-firebase');
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; console.log('  ✓', msg); } else { fail++; console.log('  ✗', msg); } }
 function eq(a, b, msg) { ok(a === b, `${msg} (got ${JSON.stringify(a)})`); }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-/* fake RTDB: one node, value listeners, async echo like the real thing */
-const cloud = { val: null, listeners: [], writes: 0, hooks: [] };
-function makeRef() {
-  return {
-    on(ev, cb) { cloud.listeners.push(cb); setTimeout(() => cb({ val: () => cloud.val }), 0); },
-    off() {},
-    /* update(): rewrites only the children it names — siblings (digestInbox) survive */
-    update(payload) {
-      cloud.val = { ...(cloud.val || {}), ...payload }; cloud.writes++;
-      return new Promise(res => setTimeout(() => {
-        res();
-        cloud.hooks.forEach(h => h());                                  // "other" writers react first
-        cloud.listeners.forEach(cb => setTimeout(() => cb({ val: () => cloud.val }), 0));
-      }, 5));
-    },
-    /* child(k).set(v): replaces one sibling (digestPrompts, digestGithub); null deletes it */
-    child(k) {
-      return { set(v) {
-        const next = { ...(cloud.val || {}) };
-        if (v === null) delete next[k]; else next[k] = JSON.parse(JSON.stringify(v));
-        cloud.val = next; cloud.writes++;
-        return new Promise(res => setTimeout(() => {
-          res();
-          cloud.listeners.forEach(cb => setTimeout(() => cb({ val: () => cloud.val }), 0));
-        }, 5));
-      } };
-    },
-  };
-}
+/* one fake Realtime Database for every simulated device (tests/fake-firebase.js) */
+const { cloud, install } = createFakeFirebase();
 async function boot(name, storage = {}) {
-  let authCb = null;
+  let dev = null;
   const { w } = await loadApp({
     storage,
     before: w => {
       w.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} });
       w.HTMLElement.prototype.scrollIntoView = function () {};
-      w.firebase = { initializeApp() {}, auth: () => ({ onAuthStateChanged(cb) { authCb = cb; }, signOut() {} }), database: () => ({ ref: () => makeRef() }) };
+      dev = install(w);
       w.__stats = { applies: 0, pushes: 0 };
     },
     transform: src => src
@@ -53,8 +27,8 @@ async function boot(name, storage = {}) {
       .replace('  syncRef.update(payload)', '  window.__stats.pushes++;\n  syncRef.update(payload)'),
   });
   w.document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
-  w.__signIn = () => authCb({ uid: 'u1', email: 'me@example.com', getIdToken: async () => 't' });
-  w.__signOut = () => authCb(null);
+  w.__signIn = () => dev.signIn();
+  w.__signOut = () => dev.signOut();
   return { name, w, d: w.document };
 }
 const fpOf = w => w.eval('syncFingerprint(gatherState())');
@@ -111,7 +85,7 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
     setTimeout(() => {
       cloud.val = { state: JSON.stringify(st), updatedAt: Date.now(), client: 'old-device' };
       cloud.writes++;
-      cloud.listeners.forEach(cb => setTimeout(() => cb({ val: () => cloud.val }), 0));
+      cloud.emit(true);
     }, 5);
   };
   cloud.hooks.push(oldDevice);
@@ -132,7 +106,7 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
 
   console.log('\n── 4. Backend delivers to digestInbox; both devices merge it; pushes leave the inbox in place ──');
   {
-    cloud.val = null; cloud.listeners.length = 0; cloud.hooks.length = 0;
+    cloud.reset();
     const L = await boot('laptop', { 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }) });
     L.w.digestGet().enabled = true; L.w.saveToLocal();
     L.w.__signIn(); await sleep(80);
@@ -145,7 +119,7 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
     const at = Date.now();
     cloud.val = { ...cloud.val, digestInbox: { at, markdown: '## 🔝 Top of the inbox\nOne email.\n\n## 📬 Miscellaneous\n- **Mom** — dinner Sunday', count: 1, model: 'qwen3.5-4b', source: 'github',
       tasks: [{ title: 'Reply to Mom about Sunday dinner', why: 'Dinner at 6.', due: '', section: 'misc' }] } };
-    cloud.listeners.forEach(cb => cb({ val: () => cloud.val }));
+    cloud.emit();
     await sleep(400);
 
     ok(!!L.w.digestGet().last && L.w.digestGet().last.at === at, 'laptop merged the delivered digest');
@@ -171,7 +145,7 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
     const at2 = at + 1000;
     cloud.val = { ...cloud.val, digestInbox: { at: at2, markdown: '## 🔝 Top of the inbox\nTwo emails.', count: 2, model: 'qwen3.5-4b', source: 'github',
       tasks: [{ title: 'Reply to Mom about Sunday dinner', why: '', due: '', section: 'misc' }, { title: 'Pay Austin Energy', why: 'due Friday', due: '', section: 'misc' }] } };
-    cloud.listeners.forEach(cb => cb({ val: () => cloud.val }));
+    cloud.emit();
     await sleep(400);
     eq(L.w.digestGet().last.at, at2, 'second delivery replaced the first');
     eq(L.w.digestGet().suggestions.length, 2, 'repeated title skipped, new one added');
@@ -181,8 +155,8 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
 
   const INBOX = (at, n) => ({ at, markdown: '## 🔝 Top of the inbox\nRun ' + n + '.', count: n, model: 'qwen3.5-4b', source: 'github',
     tasks: [{ title: 'Reply to Mom about Sunday dinner', why: 'Dinner at 6.', due: '', section: 'misc' }] });
-  const deliver = inbox => { cloud.val = { ...cloud.val, digestInbox: inbox }; cloud.listeners.forEach(cb => cb({ val: () => cloud.val })); };
-  const reset = () => { cloud.val = null; cloud.listeners.length = 0; cloud.hooks.length = 0; };
+  const deliver = inbox => { cloud.val = { ...cloud.val, digestInbox: inbox }; cloud.emit(); };
+  const reset = () => cloud.reset();
   const hashOf = w => w.eval('syncHash(syncFingerprint(gatherState()))');
 
   console.log('\n── 5. Laptop → phone: the phone was closed at delivery and opens with a fresh edit of its own ──');
@@ -251,7 +225,7 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
     eq(L.w.digestGet().last, null, 'laptop cleared');
     eq(P.w.digestGet().last, null, 'phone cleared through sync');
     ok(!!cloud.val.digestInbox, 'inbox is still there');
-    cloud.listeners.forEach(cb => cb({ val: () => cloud.val })); await sleep(300);
+    cloud.emit(); await sleep(300);
     eq(L.w.digestGet().last, null, 'a later cloud event does not bring it back on the laptop');
     eq(P.w.digestGet().last, null, 'nor on the phone');
     /* a device reopened from its saved state */
@@ -319,7 +293,7 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
     const O2 = await boot('old-laptop-2', { ...meta, 'focus-digest-github': JSON.stringify({ token: 'github_pat_OLD' }) });
     O2.w.__signIn(); await sleep(80);
     cloud.val = { ...cloud.val, digestInbox: INBOX(Date.now(), 2) };
-    cloud.listeners.forEach(cb => cb({ val: () => cloud.val })); await sleep(150);
+    cloud.emit(); await sleep(150);
     eq(cloud.val.digestGithub && cloud.val.digestGithub.token, 'github_pat_OLD', 'never saved to the account: the older copy moves in once');
     eq(O2.w.localStorage.getItem('focus-digest-github'), null, 'and leaves the device');
     const P2 = await boot('phone-2', { 'focus-app-state': cloud.val.state, 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: hashOf(O2.w) }) });

@@ -50,5 +50,5 @@ export const DIGEST_GITHUB_WORKFLOW    = 'digest.yml';
  * https://focus-bank-relay.<you>.workers.dev. Empty = not set up here; a relay
  * address can still be set on one device, for testing. */
 export const BANK_RELAY_URL  = 'https://focus-bank-relay.focusplus-app.workers.dev';
-export const BANK_LS_KEY     = 'focus-bank';   // device-local: connections, balances, transactions
+export const BANK_LS_KEY     = 'focus-bank';   // this device's copy of the account's banks (offline), and a relay set here
 export const PLAID_LINK_JS   = 'https://cdn.plaid.com/link/v2/stable/link-initialize.js';

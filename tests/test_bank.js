@@ -8,6 +8,7 @@ const { pathToFileURL } = require('url');
 const { loadApp, ROOT } = require('./load-app');
 const { createFakePlaid } = require('./fake-plaid');
 const { createFakeFirebaseKeys } = require('./fake-firebase-keys');
+const { createFakeFirebase } = require('./fake-firebase');
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; console.log('  ✓', msg); } else { fail++; console.log('  ✗', msg); } }
@@ -273,15 +274,21 @@ async function sealV1(payload) {
 
 
   /* The app, with its fetch wired to the real relay code in front of a fake Plaid,
-   * and a stand-in for Plaid's window that "logs in" right away. */
+   * a stand-in for Plaid's window that "logs in" right away, and one fake Firebase
+   * (tests/fake-firebase.js) shared by every device. Devices sign in with ID tokens
+   * from the fake key server, so the relay checks them for real. */
   const RELAY = 'http://localhost:8787/api/bank';
+  const { cloud, install } = createFakeFirebase({ uid: 'user-a', email: 'me@example.com' });
   function bankWorld() {
     const plaid = createFakePlaid();
     const links = [];
+    const requests = [];                      // { route, auth }: what the app sent the relay
     const relayFetch = async (url, opts = {}) => {
       const u = String(url);
       if (!u.startsWith(RELAY + '/')) throw new TypeError('Failed to fetch');
-      return handle(new Request(u, { method: opts.method || 'GET', headers: opts.headers, body: opts.body }), ENV, plaid.fetchImpl);
+      const headers = new Headers(opts.headers || {});
+      requests.push({ route: u.slice(RELAY.length + 1), auth: headers.get('Authorization') });
+      return handle(new Request(u, { method: opts.method || 'GET', headers, body: opts.body }), ENV, upstream(plaid.fetchImpl));
     };
     const Link = {
       create(cfg) {
@@ -289,10 +296,33 @@ async function sealV1(payload) {
         return { open() { setTimeout(() => cfg.onSuccess(`public-sandbox-link${links.length}`, { institution: { name: 'First Platypus Bank', institution_id: 'ins_109508' } }), 0); } };
       },
     };
-    return { plaid, links, relayFetch, Link };
+    return { plaid, links, requests, relayFetch, Link };
+  }
+  /* Every ID token the app asked for, and how the next ones come out: 'good', 'stale'
+   * (the cached one has expired, a fresh one is fine) or 'bad' (both turned down). */
+  const tokenAsks = [];
+  let tokens = 'good';
+  const signInFields = uid => ({
+    uid, email: uid === 'user-a' ? 'me@example.com' : `${uid}@example.com`,
+    getIdToken: async fresh => {
+      tokenAsks.push({ uid, fresh: !!fresh });
+      const expired = tokens === 'bad' || (tokens === 'stale' && !fresh);
+      return keys.signIdToken({ sub: uid, ...(expired ? { iat: 1, exp: 2 } : {}) });
+    },
+  });
+  async function device(world, { storage = {}, url, transform = noRelay, before } = {}) {
+    let dev = null;
+    const app = await loadApp({ url, transform, storage: { 'focus-tour-done': '1', ...storage },
+      before: w => { w.fetch = world.relayFetch; w.Plaid = world.Link; dev = install(w); if (before) before(w); } });
+    app.d.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
+    app.signIn = (uid = 'user-a') => dev.signIn(signInFields(uid));
+    app.signOut = () => dev.signOut();
+    return app;
   }
   const saved = w => JSON.parse(w.localStorage.getItem('focus-bank') || 'null');
   const toast = d => d.getElementById('toast').textContent;
+  const status = d => d.getElementById('bankStatusLine').textContent;
+  const cloudItems = (uid = 'user-a') => cloud.at(`users/${uid}/bank/items`) || {};
   /* The app as if its js/config.js named `relay` as BANK_RELAY_URL ('' = none), whatever
    * this copy ships with: the flows below are about a device's own relay address. */
   const withRelay = relay => (src, file) =>
@@ -307,27 +337,48 @@ async function sealV1(payload) {
     const nav = [...d.querySelectorAll('[data-settings-nav]')].map(b => b.dataset.settingsNav);
     ok(nav.indexOf('bank') === nav.indexOf('gcal') + 1, 'Bank accounts sits right after Google Calendar in Settings');
     ok(d.querySelector('[data-settings-section="bank"]').classList.contains('active'), 'and opens');
-    eq(d.getElementById('bankStatusLine').textContent, 'Not set up on this copy of Focus.', 'says it is not set up');
+    eq(status(d), 'Not set up on this copy of Focus.', 'says it is not set up');
     ok(d.getElementById('bankRelayInput') && !d.querySelector('[data-bank="connect"]'), 'offers a relay address, no Connect button yet');
     ok(/How to set up bank connections/.test(d.getElementById('bankPanel').textContent), 'and links to the setup guide');
   }
 
-  console.log('\n── 7a. Settings → Bank accounts on a copy whose config names a relay ──');
+  console.log('\n── 7a. A copy whose config names a relay: Cloud sync first ──');
   {
     const checked = [];
-    const relayUp = async url => { checked.push(String(url)); return { ok: true, status: 200, json: async () => ({ ok: true, env: 'sandbox', problems: [] }) }; };
-    const { w, d } = await loadApp({ storage: { 'focus-tour-done': '1' }, before: w => { w.fetch = relayUp; },
-      transform: withRelay('https://relay.example.workers.dev') });
+    const relayUp = async (url, opts = {}) => {
+      checked.push({ url: String(url), auth: new Headers(opts.headers || {}).get('Authorization') });
+      return { ok: true, status: 200, json: async () => ({ ok: true, env: 'sandbox', auth: true, problems: [] }) };
+    };
+    let dev = null;
+    const { w, d } = await loadApp({ storage: { 'focus-tour-done': '1' }, before: w => { w.fetch = relayUp; dev = install(w); },
+      transform: (src, file) => withRelay('https://relay.example.workers.dev')(src, file)
+        .replace('window.location.href = `https://accounts.google.com', 'window.__wentTo = `https://accounts.google.com') });
     w.openSettings('bank');
-    eq(d.getElementById('bankStatusLine').textContent, 'No banks connected.', 'ready: no banks yet');
-    ok(d.querySelector('[data-bank="connect"]') && !d.getElementById('bankRelayInput'), 'Connect a bank straight away, no address to type');
+    eq(status(d), 'Sign in to Cloud sync to connect a bank.', 'signed out: asks for Cloud sync first');
+    ok(d.querySelector('[data-bank="sign-in"]') && !d.querySelector('[data-bank="connect"]'), 'with a sign-in button, and no Connect');
+    d.querySelector('[data-bank="sign-in"]').click();
+    ok(/^https:\/\/accounts\.google\.com\/.*state=worky-sync/.test(w.__wentTo || ''), 'the button starts the Cloud sync sign-in');
     ok(await until(() => /Plaid sandbox/.test(d.getElementById('bankPanel').textContent)), 'the relay is checked');
-    eq(checked[0], 'https://relay.example.workers.dev/health', 'at its /health');
+    ok(checked[0].url === 'https://relay.example.workers.dev/health' && !checked[0].auth, 'at its /health, which needs no sign-in');
+    dev.signIn(signInFields('user-z'));
+    eq(status(d), 'Loading the banks saved to your account…', 'signed in: first the account is read');
+    ok(!d.querySelector('[data-bank="connect"]'), 'no Connect until then: a second connection to the same bank costs another Plaid Item');
+    ok(await until(() => status(d) === 'No banks connected.'), 'then: no banks yet');
+    ok(d.querySelector('[data-bank="connect"]') && !d.getElementById('bankRelayInput'), 'and Connect a bank, no address to type');
+    ok(/every device signed in as user-z@example\.com shows it/.test(d.getElementById('bankPanel').textContent), 'saying the account keeps it');
+
+    const oldRelay = async () => ({ ok: true, status: 200, json: async () => ({ ok: true, env: 'production', redirect: true, problems: [] }) });
+    const o = await loadApp({ storage: { 'focus-tour-done': '1' }, before: w => { w.fetch = oldRelay; install(w); }, transform: withRelay('https://relay.example.workers.dev') });
+    o.w.openSettings('bank');
+    ok(await until(() => /out of date: it doesn't check sign-ins yet/.test(o.d.getElementById('bankPanel').textContent)),
+      'a relay from before sign-ins were checked (no `auth` in /health) is called out of date');
+    ok(o.d.querySelector('.bank-relay-line.warn'), 'as a warning');
   }
 
-  console.log('\n── 8. Connect a bank: relay address, Plaid\'s window, accounts, transactions ──');
+  console.log('\n── 8. Connect a bank: relay address, sign-in, Plaid\'s window, saved to the account ──');
   const world = bankWorld();
-  const { w, d } = await loadApp({ storage: { 'focus-tour-done': '1' }, before: w => { w.fetch = world.relayFetch; }, transform: noRelay });
+  const A = await device(world, { storage: { 'focus-bank-user': 'focus-3f1c0b3e-device-id' } });
+  const { w, d } = A;
   {
     w.openSettings('bank');
     const save = v => { d.getElementById('bankRelayInput').value = v; d.querySelector('[data-bank="relay-save"]').click(); };
@@ -342,15 +393,20 @@ async function sealV1(payload) {
     ok(!(w.localStorage.getItem('focus-app-state') || '').includes('localhost:8787'), 'not in the synced state');
     ok(await until(() => /Plaid sandbox/.test(d.getElementById('bankPanel').textContent)), 'the relay is checked: "Plaid sandbox"');
     ok(/user_good/.test(d.getElementById('bankPanel').textContent), 'with the sandbox login to use');
-    eq(d.getElementById('bankStatusLine').textContent, 'No banks connected.', 'no banks yet');
+    eq(status(d), 'Sign in to Cloud sync to connect a bank.', 'signed out: no Connect yet');
+    eq(w.localStorage.getItem('focus-bank-user'), null, 'the device id an older build gave Plaid is gone');
 
-    w.Plaid = world.Link;
+    A.signIn();
+    ok(await until(() => status(d) === 'No banks connected.'), 'signed in: no banks yet');
     d.querySelector('[data-bank="connect"]').click();
     ok(await until(() => d.querySelectorAll('#bankPanel .bank-item').length === 1 && d.querySelectorAll('#bankPanel .bank-tx').length > 0),
       'Connect → Plaid\'s window → back in Focus with the bank');
     ok(/^link-sandbox-/.test(world.links[0].token), 'Plaid\'s window got a link token from the relay');
-    eq(world.plaid.state.calls.find(c => c.path === '/link/token/create').body.user.client_user_id, w.localStorage.getItem('focus-bank-user'),
-      'Plaid knows this device only by a random id');
+    eq(world.plaid.state.calls.find(c => c.path === '/link/token/create').body.user.client_user_id, 'user-a',
+      'Plaid knows the account by its uid, not by a device');
+    const sent = world.requests.filter(r => r.route !== 'health');
+    ok(sent.length >= 4 && sent.every(r => /^Bearer [\w-]+\.[\w-]+\.[\w-]+$/.test(r.auth || '')), `every call but /health carries the sign-in (${sent.map(r => r.route).join(', ')})`);
+    ok(world.requests.filter(r => r.route === 'health').every(r => !r.auth), '/health goes without it');
     eq(d.querySelector('.bank-inst').textContent, 'First Platypus Bank', 'shows the bank');
     const accts = [...d.querySelectorAll('.bank-acct')].map(a => a.textContent.replace(/\s+/g, ' ').trim());
     eq(accts.length, 3, 'its three accounts');
@@ -361,15 +417,49 @@ async function sealV1(payload) {
     ok(/Starbucks pending -\$4\.33$/.test(txs[0]), `newest first, pending marked: "${txs[0]}"`);
     const pay = [...d.querySelectorAll('.bank-tx')].find(t => /payroll/.test(t.textContent));
     ok(pay && /\+\$232\.50/.test(pay.textContent) && pay.querySelector('.bank-tx-amt.in'), 'money in shows as +, in the accent colour');
-    eq(d.getElementById('bankStatusLine').textContent, '3 accounts at 1 bank, kept on this device only.', 'status line counts them');
+    eq(status(d), '3 accounts at 1 bank, saved to your account.', 'status line counts them');
     ok(/Connected to First Platypus Bank/.test(toast(d)), 'toast confirms');
-    const item = saved(w).items[0];
-    ok(/^v1\./.test(item.token) && item.transactions.length === 7 && item.cursor === 'cursor-7', 'saved on this device: sealed token, transactions, cursor');
-    const synced = w.eval('JSON.stringify(gatherState())') + w.eval('JSON.stringify(compressState(gatherState()))');
+
+    ok(await until(() => Object.keys(cloudItems()).length === 1), 'saved to the account');
+    const [id] = Object.keys(cloudItems());
+    const item = cloudItems()[id];
+    ok(/^v2\./.test(item.token) && item.transactions.length === 7 && item.cursor === 'cursor-7' && item.accounts.length === 3,
+      `at users/user-a/bank/items/${id}: sealed token (v2), accounts, transactions, cursor`);
+    eq(typeof cloud.at('users/user-a/bank/updatedAt'), 'number', 'with bank/updatedAt');
+    const copy = saved(w);
+    ok(copy.uid === 'user-a' && copy.relay === RELAY && copy.items.length === 1 && copy.items[0].token === item.token,
+      'this device keeps a copy for offline, marked with the account');
+    const synced = w.eval('JSON.stringify(gatherState())') + w.eval('JSON.stringify(compressState(gatherState()))') + (cloud.val.state || '');
     ok(!synced.includes('First Platypus') && !synced.includes(item.token) && !synced.includes('Starbucks'), 'nothing about the bank is in the synced state or Export');
+    w.eval("dbdTasks.push({ id: 5150, text: 'pay rent', date: '2026-09-21', done: false }); saveToLocal();");
+    ok(await until(() => /pay rent/.test(cloud.val.state || ''), 2500), 'a state push after that …');
+    ok(Object.keys(cloudItems()).length === 1, '… leaves the bank node alone (update(), not set())');
   }
 
-  console.log('\n── 9. Refresh, a bank that needs a new login, disconnect ──');
+  console.log('\n── 8a. The same account on another device; another account ──');
+  const P = await device(world, { transform: withRelay(RELAY) });
+  {
+    const mark = world.requests.length;
+    P.w.openSettings('bank');
+    eq(status(P.d), 'Sign in to Cloud sync to connect a bank.', 'the phone, signed out: nothing');
+    P.signIn();
+    ok(await until(() => P.d.querySelectorAll('#bankPanel .bank-item').length === 1), 'signed in to the same account: the bank is there');
+    eq(status(P.d), '3 accounts at 1 bank, saved to your account.', 'with its accounts');
+    eq(P.d.querySelectorAll('.bank-tx').length, 6, 'and transactions');
+    ok(!world.requests.slice(mark).some(r => r.route === 'link-token' || r.route === 'exchange'), 'without connecting anything');
+    P.d.querySelector('[data-bank="refresh"]').click();
+    ok(await until(() => world.requests.slice(mark).some(r => r.route === 'transactions')) && await until(() => !P.d.querySelector('.bank-item [disabled]')),
+      'Refresh works from the phone: the sealed token opens for the same account');
+    ok(!P.d.querySelector('.bank-error'), 'without an error');
+
+    const C = await device(world, { transform: withRelay(RELAY) });
+    C.w.openSettings('bank');
+    C.signIn('user-b');
+    ok(await until(() => status(C.d) === 'No banks connected.'), 'another account sees none of it');
+    ok(!C.d.querySelector('.bank-item') && saved(C.w).uid === 'user-b' && saved(C.w).items.length === 0, 'not even in its copy');
+  }
+
+  console.log('\n── 9. Refresh, a bank that needs a new login, a stale sign-in, sign-out, disconnect ──');
   {
     const access = [...world.plaid.state.items.keys()].pop();
     world.plaid.addTransactions(access, [{ transaction_id: 'tx-new', account_id: 'acc-checking', date: new Date().toISOString().slice(0, 10),
@@ -377,48 +467,103 @@ async function sealV1(payload) {
     d.querySelector('[data-bank="refresh"]').click();
     ok(await until(() => /Campus Bookstore/.test(d.getElementById('bankPanel').textContent)), 'Refresh brings in the new transaction');
     eq(world.plaid.state.calls.filter(c => c.path === '/transactions/sync').pop().body.cursor, 'cursor-7', 'asking only for what changed since the saved cursor');
-    eq(saved(w).items[0].transactions.length, 8, 'and keeps it');
+    ok(await until(() => Object.values(cloudItems())[0].transactions.length === 8), 'the account keeps it');
+    ok(await until(() => /Campus Bookstore/.test(P.d.getElementById('bankPanel').textContent)), 'and the phone shows it without a refresh of its own');
 
     world.plaid.state.failNext = { path: '/accounts/get', error_code: 'ITEM_LOGIN_REQUIRED' };
     d.querySelector('[data-bank="refresh"]').click();
     ok(await until(() => d.querySelector('.bank-error')), 'a bank that needs a new login shows it');
     ok(/needs you to log in again/.test(d.querySelector('.bank-error').textContent), 'in plain words');
+    ok(await until(() => P.d.querySelector('.bank-error')), 'on the phone too: it is about the connection, so the account keeps it');
 
-    let asked = '';
-    w.confirm = m => { asked = m; return false; };
+    tokens = 'stale';
+    const asked = tokenAsks.length;
+    d.querySelector('[data-bank="refresh"]').click();
+    ok(await until(() => !d.querySelector('.bank-error') && !d.querySelector('.bank-item [disabled]')), 'a sign-in the relay turns down (expired) …');
+    ok(tokenAsks.slice(asked).some(t => t.fresh), '… is asked for again, fresh, and the refresh goes through');
+    ok(await until(() => !P.d.querySelector('.bank-error')), 'which clears the error on the phone too');
+
+    tokens = 'bad';
+    d.querySelector('[data-bank="refresh"]').click();
+    ok(await until(() => /Sign in to Cloud sync again/.test(toast(d))), `a sign-in the relay keeps turning down says so: "${toast(d)}"`);
+    ok(!d.querySelector('.bank-error') && !P.d.querySelector('.bank-error'), 'without marking the connection: it is about this device');
+    tokens = 'good';
+
+    let message = '';
+    w.confirm = m => { message = m; return false; };
     w.confirmClearStorage();
-    ok(/Disconnect it first in Settings → Bank accounts/.test(asked), 'Clear storage warns that connected banks would be orphaned at Plaid');
+    ok(/Clear all saved data/.test(message) && !/bank/i.test(message), 'Clear storage has nothing to warn about banks: they are in the account');
 
-    w.confirm = m => { asked = m; return true; };
+    P.signOut();
+    ok(await until(() => status(P.d) === 'Sign in to Cloud sync to connect a bank.'), 'signing out of the phone …');
+    ok(!P.d.querySelector('.bank-item'), '… takes the bank off it');
+    const pc = saved(P.w);
+    ok(pc.uid === null && pc.items.length === 0, '… and its copy');
+    eq(Object.keys(cloudItems()).length, 1, 'while the account keeps it');
+    P.signIn();
+    ok(await until(() => P.d.querySelectorAll('#bankPanel .bank-item').length === 1), 'signing back in brings it back');
+
+    w.confirm = m => { message = m; return true; };
     d.querySelector('[data-bank="disconnect"]').click();
-    ok(/^Disconnect First Platypus Bank\?/.test(asked), 'Disconnect asks first');
+    ok(/^Disconnect First Platypus Bank\?/.test(message) && /deleted from your account, on every device/.test(message), 'Disconnect asks first, saying what goes');
     ok(await until(() => !d.querySelector('.bank-item')), 'then the bank is gone from Focus');
-    ok(world.plaid.state.calls.some(c => c.path === '/item/remove' && c.body.access_token === access), 'and the connection is ended at Plaid');
-    eq(saved(w).items.length, 0, 'nothing of it left on the device');
-    eq(d.getElementById('bankStatusLine').textContent, 'No banks connected.', 'back to no banks');
+    ok(world.plaid.state.calls.some(c => c.path === '/item/remove' && c.body.access_token === access), 'the connection is ended at Plaid');
+    ok(await until(() => cloud.at('users/user-a/bank/items') === null), 'and removed from the account');
+    eq(saved(w).items.length, 0, 'and from this device\'s copy');
+    eq(status(d), 'No banks connected.', 'back to no banks');
+    ok(await until(() => !P.d.querySelector('.bank-item') && status(P.d) === 'No banks connected.'), 'on the phone too');
   }
 
-  console.log('\n── 10. Plaid\'s window closed early, relay down, an OAuth bank sending the user back ──');
+  console.log('\n── 10. An older build\'s connection, Plaid\'s window closed early, relay down, an OAuth bank sending the user back ──');
   {
+    const old = await device(world, { storage: { 'focus-bank': JSON.stringify({ relay: RELAY, items: [
+      { id: 'item-old', token: 'v1.aaaa.bbbb', institution: { id: null, name: 'Old Bank' }, accounts: [], transactions: [], cursor: '' }] }) } });
+    eq(toast(old.d), 'Bank connections now live in your account. Connect your bank again.', 'a connection an older build kept on the device: one toast');
+    const oc = saved(old.w);
+    ok(oc.items.length === 0 && oc.relay === RELAY, 'it is dropped, the relay address stays');
+    old.signIn();
+    old.w.openSettings('bank');
+    ok(await until(() => status(old.d) === 'No banks connected.') && !/Old Bank/.test(old.d.getElementById('bankPanel').textContent), 'and it is not shown once signed in');
+    const reopened = await device(world, { storage: { 'focus-bank': old.w.localStorage.getItem('focus-bank') } });
+    ok(!/now live in your account/.test(toast(reopened.d)), 'the toast is once: reopening the app does not bring it back');
+
     w.Plaid = { create: cfg => ({ open() { setTimeout(() => cfg.onExit({ error_code: 'USER_CANCELLED', display_message: null, error_message: 'user closed Link' }), 0); } }) };
     d.querySelector('[data-bank="connect"]').click();
     ok(await until(() => /user closed Link/.test(toast(d))), 'closing Plaid\'s window with an error says so');
     ok(!d.querySelector('.bank-item') && !d.querySelector('[data-bank="connect"]').disabled, 'no bank added, and Connect works again');
+    eq(w.sessionStorage.getItem('focus-bank-link'), null, 'nothing left waiting for an OAuth bank');
 
     w.fetch = async () => { throw new TypeError('Failed to fetch'); };
     d.querySelector('[data-bank="connect"]').click();
     ok(await until(() => /Could not reach the bank relay/.test(toast(d))), 'relay unreachable → clear message');
     w.fetch = world.relayFetch;
+    w.Plaid = world.Link;
 
-    const back = bankWorld();
     const url = 'https://localhost/worky/?oauth_state_id=a1b2c3';
-    const app2 = await loadApp({ url, storage: { 'focus-tour-done': '1', 'focus-bank': JSON.stringify({ relay: RELAY, items: [] }) },
-      before: w2 => { w2.fetch = back.relayFetch; w2.Plaid = back.Link; w2.sessionStorage.setItem('focus-bank-link', 'link-sandbox-77'); }, transform: noRelay });
-    ok(await until(() => back.links.length === 1), 'returning from an OAuth bank reopens Plaid\'s window');
+    const back = bankWorld();
+    const link = JSON.stringify({ uid: 'user-a', token: 'link-sandbox-77' });
+    const R = await device(back, { url, transform: withRelay(RELAY), before: w2 => w2.sessionStorage.setItem('focus-bank-link', link) });
+    eq(R.w.location.search, '', 'back from an OAuth bank: the address is cleaned up');
+    await sleep(50);
+    eq(back.links.length, 0, 'Plaid\'s window waits for the account to sign in');
+    R.signIn();
+    ok(await until(() => back.links.length === 1), 'then reopens');
     ok(back.links[0].token === 'link-sandbox-77' && back.links[0].receivedRedirectUri === url, 'with the same link token and the address the bank sent back');
-    eq(app2.w.location.search, '', 'and the address is cleaned up');
-    app2.w.openSettings('bank');
-    ok(await until(() => app2.d.querySelectorAll('#bankPanel .bank-item').length === 1), 'then the connection finishes as usual');
+    R.w.openSettings('bank');
+    ok(await until(() => R.d.querySelectorAll('#bankPanel .bank-item').length === 1), 'then the connection finishes as usual');
+    ok(await until(() => Object.keys(cloudItems()).length === 1), 'into the account');
+
+    const other = bankWorld();
+    const X = await device(other, { url, transform: withRelay(RELAY), before: w2 => w2.sessionStorage.setItem('focus-bank-link', link) });
+    X.signIn('user-b');
+    ok(await until(() => /started by another account/.test(toast(X.d))), 'signed in as another account: it does not finish, and says why');
+    await sleep(50);
+    ok(other.links.length === 0 && X.w.sessionStorage.getItem('focus-bank-link') === null, 'Plaid\'s window stays closed and the link token is dropped');
+
+    const Y = await device(other, { url, transform: withRelay(RELAY), before: w2 => w2.sessionStorage.setItem('focus-bank-link', 'link-sandbox-78') });
+    Y.signIn();
+    await sleep(100);
+    eq(other.links.length, 0, 'a link token an older build left (not tied to an account) is not used');
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

@@ -2,44 +2,135 @@
  * then see its accounts, balances and recent transactions.
  *
  * Plaid's keys live on a small relay server (backend/bank/relay.mjs), never in the
- * app. For each connection the relay hands back a sealed token; it's kept here, on
- * this device only, next to the balances and transactions it fetched. None of it
- * is in the synced state or in Export. The connection is read-only. */
+ * app. A connection belongs to the signed-in account (Cloud sync), not to a
+ * device: every call to the relay carries the account's Firebase ID token, and the
+ * sealed token the relay hands back for a connection only opens for that account.
+ * The app saves each connection to the account, at users/<uid>/bank/items/<id>
+ * (the sealed token, balances and recent transactions), so every device signed in
+ * to it shows the bank, and Disconnect removes it from all of them. This device
+ * keeps a copy for when it's offline, dropped on sign-out. None of it is in the
+ * synced state or in Export. The connection is read-only. */
 import { BANK_LS_KEY, BANK_RELAY_URL, PLAID_LINK_JS } from './config.js';
 import { $, calKeyToDate, escAttr, showToast } from './util.js';
 import { money } from './budget.js';
+import { syncBtnClick, syncConfigured, syncRef, syncUser } from './sync.js';
 
-const BANK_USER_LS_KEY = 'focus-bank-user';   // random id Plaid knows this device by
-const BANK_LINK_SS_KEY = 'focus-bank-link';   // link token, while an OAuth bank sends the user back
+const BANK_LINK_SS_KEY = 'focus-bank-link';   // { uid, token }: the link token, while an OAuth bank sends the user back
+const BANK_TOKEN = /^v2\./;                    // sealed to an account; an older build's v1 tokens belonged to a device
+const BANK_ID = /^[\w-]{1,128}$/;              // a Plaid item id, used as a database key
 const BANK_TX_KEEP = 50;                        // newest transactions kept per bank
 const BANK_TX_SHOW = 6;
 
-/* { relay: address set on this device ('' = BANK_RELAY_URL),
+/* This device's copy, for the account `uid` (null = signed out):
+ * { uid, relay: address set on this device ('' = BANK_RELAY_URL),
  *   items: [{ id, token, institution: { id, name }, accounts, transactions, cursor,
- *             status, error, addedAt, updatedAt }] } */
-let bank = { relay: '', items: [] };
+ *             error, addedAt, updatedAt }] }
+ * The account's copy, users/<uid>/bank = { updatedAt, items: { <id>: item } }, is
+ * the one that counts: whenever it changes, this one follows. */
+let bank = { uid: null, relay: '', items: [] };
+let bankCloudKnown = false;   // the account's bank node has been seen since it signed in
 let bankBusy = '';            // 'connect', or the id of the bank being refreshed / removed
 let bankHealth = null;        // last /health answer this session: { url, state, env, problems }
 let bankRelayForm = false;    // show the relay address form even though a relay is set
 let bankRelayDraft = '';
 let bankLinkPromise = null;
+let bankResume = null;        // { uid, token, received }: an OAuth bank sent the user back mid-way
 
-/* ── state (localStorage, this device only) ── */
+/* ── this device's copy (localStorage) ── */
 function bankLoad() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(BANK_LS_KEY) || 'null');
-    if (raw && typeof raw === 'object') {
-      bank = {
-        relay: typeof raw.relay === 'string' ? raw.relay : '',
-        items: Array.isArray(raw.items) ? raw.items.filter(i => i && typeof i.token === 'string' && i.id) : [],
-      };
-    }
-  } catch (e) {}
+  let raw = null;
+  try { raw = JSON.parse(localStorage.getItem(BANK_LS_KEY) || 'null'); } catch (e) {}
+  if (!raw || typeof raw !== 'object') return;
+  const uid = typeof raw.uid === 'string' && raw.uid ? raw.uid : null;
+  const saved = Array.isArray(raw.items) ? raw.items : [];
+  bank = {
+    uid,
+    relay: typeof raw.relay === 'string' ? raw.relay : '',
+    items: uid ? saved.map(i => bankItem(i, i && i.id)).filter(Boolean) : [],
+  };
+  /* An older build kept each connection on its device, sealed to no one; the relay refuses those now. */
+  if (saved.some(i => i && typeof i.token === 'string' && !BANK_TOKEN.test(i.token))) {
+    bankSave();
+    showToast('Bank connections now live in your account. Connect your bank again.');
+  }
 }
 function bankSave() {
-  try { localStorage.setItem(BANK_LS_KEY, JSON.stringify(bank)); } catch (e) {}
+  try { localStorage.setItem(BANK_LS_KEY, JSON.stringify({ uid: bank.uid, relay: bank.relay, items: bank.uid ? bank.items : [] })); } catch (e) {}
 }
-export function bankConnectedCount() { return bank.items.length; }
+/* A connection as stored (in the account or here), or null if it can't be used.
+ * The database keeps no nulls or empty lists, so those can come back missing. */
+function bankItem(raw, id) {
+  if (!raw || typeof raw !== 'object' || typeof raw.token !== 'string' || !BANK_TOKEN.test(raw.token)) return null;
+  id = String(id || '');
+  if (!BANK_ID.test(id)) return null;
+  const list = v => (Array.isArray(v) ? v.filter(x => x && typeof x === 'object') : []);
+  const inst = raw.institution && typeof raw.institution === 'object' ? raw.institution : {};
+  const err = raw.error && typeof raw.error === 'object' ? raw.error : null;
+  return {
+    id, token: raw.token,
+    institution: { id: typeof inst.id === 'string' ? inst.id : null, name: typeof inst.name === 'string' && inst.name ? inst.name : 'Your bank' },
+    accounts: list(raw.accounts),
+    transactions: list(raw.transactions),
+    cursor: typeof raw.cursor === 'string' ? raw.cursor : '',
+    error: err ? { code: String(err.code || 'ERROR'), message: String(err.message || '') } : null,
+    addedAt: Number(raw.addedAt) || 0,
+    updatedAt: Number(raw.updatedAt) || 0,
+  };
+}
+/* The signed-in account's connections, as this device last saw them. */
+function bankItems() { return syncUser && bank.uid === syncUser.uid ? bank.items : []; }
+
+/* ── the account's copy: users/<uid>/bank ──
+ * Each connection is written on its own (items/<id>, set() or remove()) along with
+ * bank/updatedAt, never the whole node: two devices changing different banks don't
+ * overwrite each other, and for the same bank the last write wins. State pushes
+ * use update(), which leaves the node alone. `uid` is the account a change was
+ * made for; if another account has signed in since, the change is dropped. */
+function bankWrite(uid, id, item) {
+  if (!uid || !syncUser || syncUser.uid !== uid || bank.uid !== uid || !syncRef) return Promise.resolve(false);
+  bank.items = item
+    ? (bank.items.some(x => x.id === id) ? bank.items.map(x => (x.id === id ? item : x)) : [...bank.items, item])
+    : bank.items.filter(x => x.id !== id);
+  bankSave();                                            // here at once; the account's copy confirms it
+  const node = syncRef.child('bank');
+  const saved = item ? node.child('items/' + id).set(JSON.parse(JSON.stringify(item))) : node.child('items/' + id).remove();
+  return Promise.all([saved, node.child('updatedAt').set(Date.now())])
+    .then(() => true)
+    .catch(err => {
+      const perm = /permission/i.test(String((err && (err.message || err.code)) || ''));
+      showToast(perm ? 'Could not save: your database rules block users/<uid>/bank'
+                     : 'Could not save the bank to your account. Try again when you are online.');
+      return false;
+    });
+}
+/* sync.js hands over users/<uid>/bank (or nothing) whenever the account's node changes. */
+export function bankCloudSeen(node) {
+  if (!syncUser) return;
+  const raw = node && typeof node === 'object' && node.items && typeof node.items === 'object' ? node.items : {};
+  const items = Object.keys(raw).map(id => bankItem(raw[id], id)).filter(Boolean)
+    .sort((a, b) => a.addedAt - b.addedAt || (a.id < b.id ? -1 : 1));
+  const before = JSON.stringify([bank.uid, bank.items, bankCloudKnown]);
+  bank.uid = syncUser.uid;
+  bank.items = items;
+  bankCloudKnown = true;
+  if (JSON.stringify([bank.uid, bank.items, bankCloudKnown]) !== before) { bankSave(); bankRender(); }
+  bankResumeLink();
+}
+/* sync.js calls this whenever the signed-in account changes (sign-in, sign-out, the
+ * session coming back at start-up), before it listens again. Connections belong to
+ * the account: another account, or nobody, doesn't get this device's copy. */
+export function bankCloudForget() {
+  bankCloudKnown = false;
+  const uid = syncUser ? syncUser.uid : null;
+  if (bank.uid !== uid) { bank.uid = uid; bank.items = []; bankSave(); }
+  if (!syncUser && bankResume) {
+    bankResume = null;
+    bankBusy = '';
+    try { sessionStorage.removeItem(BANK_LINK_SS_KEY); } catch (e) {}
+    showToast('Sign in to Cloud sync, then connect your bank again.');
+  }
+  bankRender();
+}
 
 function bankRelay() { return (bank.relay || BANK_RELAY_URL || '').trim().replace(/\/+$/, ''); }
 /* https, or plain http on this computer for testing. No credentials in the address. */
@@ -51,45 +142,63 @@ function bankRelayValid(v) {
     return u.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname);
   } catch (e) { return false; }
 }
-function bankUserId() {
-  let id = null;
-  try { id = localStorage.getItem(BANK_USER_LS_KEY); } catch (e) {}
-  if (!id || !/^[\w-]{8,64}$/.test(id)) {
-    const rand = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2) + Date.now().toString(36);
-    id = 'focus-' + rand;
-    try { localStorage.setItem(BANK_USER_LS_KEY, id); } catch (e) {}
-  }
-  return id;
-}
 
 /* ── talking to the relay ── */
-function bankError(code, message) { const e = new Error(message); e.code = code; return e; }
-async function bankCall(route, body) {
+function bankError(code, message, more) { const e = new Error(message); e.code = code; return Object.assign(e, more); }
+async function bankFetch(route, body, idToken) {
   const base = bankRelay();
   if (!base) throw bankError('NO_RELAY', 'Bank connections are not set up on this copy of Focus.');
   let res;
   try {
-    res = await fetch(`${base}/${route}`, body === undefined ? { method: 'GET' }
-      : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    res = await fetch(`${base}/${route}`, body === undefined ? { method: 'GET' } : {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+      body: JSON.stringify(body),
+    });
   } catch (e) {
     throw bankError('RELAY_UNREACHABLE', 'Could not reach the bank relay. Check its address and your connection.');
   }
   let data = {};
   try { data = await res.json(); } catch (e) {}
-  if (!res.ok) throw bankError((data.error && data.error.code) || 'RELAY_ERROR', (data.error && data.error.message) || `The bank relay answered ${res.status}.`);
+  if (!res.ok) {
+    const err = data.error || {};
+    throw bankError(err.code || 'RELAY_ERROR', err.message || `The bank relay answered ${res.status}.`, { status: res.status, type: err.type || null });
+  }
   return data;
 }
+/* Every call but /health goes as the signed-in account, with its Firebase ID
+ * token. If the relay turns the sign-in down (401 AUTH_…), once more with a fresh one. */
+async function bankCall(route, body) {
+  if (body === undefined) return bankFetch(route);
+  const user = syncUser;
+  if (!user) throw bankError('AUTH_REQUIRED', 'Sign in to Cloud sync to use bank connections.');
+  const idToken = async fresh => {
+    try { return await user.getIdToken(fresh); }
+    catch (e) { throw bankError('AUTH_UNAVAILABLE', 'Could not check your sign-in. Check your connection and try again.'); }
+  };
+  try {
+    return await bankFetch(route, body, await idToken(false));
+  } catch (e) {
+    if (e.status !== 401 || !/^AUTH_/.test(e.code)) throw e;
+    return bankFetch(route, body, await idToken(true));
+  }
+}
+/* A problem with the connection itself, the same whichever device asks: Plaid's
+ * item errors (the bank wants a new login, …) or a connection Plaid no longer has.
+ * It's saved with the connection; anything else (offline, sign-in, this device's
+ * relay) stays on this device. */
+function bankItemError(e) { return e.type === 'ITEM_ERROR' || e.code === 'INVALID_ACCESS_TOKEN'; }
 async function bankCheckRelay() {
   const url = bankRelay();
   bankHealth = { url, state: 'checking' };
   try {
     const h = await bankCall('health');
-    bankHealth = { url, state: h.ok ? 'ok' : 'problem', env: h.env, problems: h.problems || [] };
+    /* a relay from before sign-ins were checked has no `auth`, and its CORS turns the sign-in header away */
+    bankHealth = { url, state: !h.ok ? 'problem' : h.auth === true ? 'ok' : 'outdated', env: h.env, problems: h.problems || [] };
   } catch (e) {
     bankHealth = { url, state: 'unreachable' };
   }
-  if (bankRelay() === url) bankRenderSettings();
+  if (bankRelay() === url) bankRender();
 }
 
 /* ── Plaid's window (Plaid Link, loaded from Plaid on first use) ── */
@@ -123,15 +232,16 @@ function bankOpenLink(Plaid, token, receivedRedirectUri) {
 }
 
 async function bankConnect() {
-  if (bankBusy) return;
+  if (bankBusy || !syncUser) return;
+  const uid = syncUser.uid;
   bankBusy = 'connect';
   bankRenderSettings();
   try {
     const [{ link_token }, Plaid] = await Promise.all([
-      bankCall('link-token', { user: bankUserId() }),
+      bankCall('link-token', {}),
       bankLoadLink().catch(() => { throw bankError('LINK_UNAVAILABLE', 'Plaid\'s window could not load. Check your connection and try again.'); }),
     ]);
-    try { sessionStorage.setItem(BANK_LINK_SS_KEY, link_token); } catch (e) {}
+    try { sessionStorage.setItem(BANK_LINK_SS_KEY, JSON.stringify({ uid, token: link_token })); } catch (e) {}
     bankOpenLink(Plaid, link_token);
   } catch (e) {
     bankBusy = '';
@@ -140,24 +250,23 @@ async function bankConnect() {
   }
 }
 
-/* Plaid's window finished: trade its one-time token for a sealed one, then fetch. */
+/* Plaid's window finished: trade its one-time token for a sealed one, save the
+ * connection to the account, then fetch its balances and transactions. */
 async function bankLinked(publicToken, metadata) {
   try { sessionStorage.removeItem(BANK_LINK_SS_KEY); } catch (e) {}
+  const uid = syncUser && syncUser.uid;
   bankBusy = 'connect';
   bankRenderSettings();
   try {
     const { token, item_id } = await bankCall('exchange', { public_token: publicToken });
     const inst = (metadata && metadata.institution) || {};
-    const item = {
-      id: item_id, token,
-      institution: { id: inst.institution_id || null, name: inst.name || 'Your bank' },
-      accounts: [], transactions: [], cursor: '', status: null, error: null,
-      addedAt: Date.now(), updatedAt: 0,
-    };
-    bank.items = bank.items.filter(i => i.id !== item_id).concat(item);
-    bankSave();
-    await bankRefresh(item, true);
-    showToast(`Connected to ${item.institution.name} ✓`);
+    const item = bankItem({
+      token, institution: { id: inst.institution_id || null, name: inst.name || 'Your bank' }, addedAt: Date.now(),
+    }, item_id);
+    if (!item) throw bankError('RELAY_ERROR', 'The bank relay sent back a connection this version of Focus can\'t use. Update the relay, then connect again.');
+    bankWrite(uid, item.id, item);                       // the connection exists at Plaid now: keep it first
+    const err = await bankRefresh(uid, item);
+    showToast(err ? `Connected to ${item.institution.name}, but: ${err.message}` : `Connected to ${item.institution.name} ✓`);
   } catch (e) {
     showToast(e.message);
   }
@@ -165,51 +274,56 @@ async function bankLinked(publicToken, metadata) {
   bankRenderSettings();
 }
 
-/* Balances, then whatever changed in transactions since the saved cursor. */
-async function bankRefresh(item, quiet) {
+/* Balances, then whatever changed in transactions since the saved cursor, saved to
+ * the account. Returns the error, if any (see bankItemError for which are saved). */
+async function bankRefresh(uid, item) {
+  const next = { ...item };
+  let failed = null;
   try {
     const acc = await bankCall('accounts', { token: item.token });
-    item.accounts = Array.isArray(acc.accounts) ? acc.accounts : [];
+    next.accounts = Array.isArray(acc.accounts) ? acc.accounts : [];
     const tx = await bankCall('transactions', { token: item.token, cursor: item.cursor || '' });
     const byId = new Map(item.transactions.map(t => [t.id, t]));
     (tx.removed || []).forEach(id => byId.delete(id));
     [...(tx.added || []), ...(tx.modified || [])].forEach(t => byId.set(t.id, t));
-    item.transactions = [...byId.values()]
+    next.transactions = [...byId.values()]
       .sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? 1 : -1))
       .slice(0, BANK_TX_KEEP);
-    item.cursor = tx.next_cursor || item.cursor || '';
-    item.status = tx.status || null;
-    item.error = null;
-    item.updatedAt = Date.now();
+    next.cursor = tx.next_cursor || item.cursor || '';
+    next.error = null;
+    next.updatedAt = Date.now();
   } catch (e) {
-    item.error = { code: e.code || 'ERROR', message: e.message };
-    if (!quiet) showToast(e.message);
+    failed = e;
+    if (!bankItemError(e)) return e;
+    next.error = { code: e.code || 'ERROR', message: e.message };
   }
-  bankSave();
+  bankWrite(uid, next.id, next);
+  return failed;
 }
 async function bankRefreshNow(item) {
-  if (bankBusy) return;
+  if (bankBusy || !syncUser) return;
   bankBusy = item.id;
   bankRenderSettings();
-  await bankRefresh(item, false);
+  const err = await bankRefresh(syncUser.uid, item);
   bankBusy = '';
   bankRenderSettings();
+  if (err) showToast(err.message);
 }
 
 async function bankDisconnect(item) {
-  if (bankBusy) return;
-  if (!confirm(`Disconnect ${item.institution.name}?\n\nFocus stops reading it, and its balances and transactions are deleted from this device.`)) return;
+  if (bankBusy || !syncUser) return;
+  if (!confirm(`Disconnect ${item.institution.name}?\n\nFocus stops reading it, and its balances and transactions are deleted from your account, on every device.`)) return;
+  const uid = syncUser.uid;
   bankBusy = item.id;
   bankRenderSettings();
   let ended = true;
   try { await bankCall('remove', { token: item.token }); }
   catch (e) { ended = e.code === 'INVALID_ACCESS_TOKEN' || e.code === 'ITEM_NOT_FOUND'; }
-  bank.items = bank.items.filter(i => i !== item);
-  bankSave();
+  bankWrite(uid, item.id, null);
   bankBusy = '';
   bankRenderSettings();
   showToast(ended ? `Disconnected ${item.institution.name}`
-    : `Removed from this device. To end it at Plaid too, use my.plaid.com.`);
+    : 'Removed from your account. To end it at Plaid too, use my.plaid.com.');
 }
 
 function bankSaveRelay(value) {
@@ -224,22 +338,39 @@ function bankSaveRelay(value) {
   showToast(v ? 'Relay saved on this device' : 'Relay address cleared');
 }
 
-/* Start-up: load the saved connections, and finish a connection an OAuth bank
- * (Chase, Bank of America, …) sent the user back from mid-way. */
+/* Start-up: this device's copy of the account's connections, and a connection an
+ * OAuth bank (Chase, Bank of America, …) sent the user back from mid-way. That one
+ * finishes once the account is signed in (bankResumeLink). */
 export function bankInit() {
   bankLoad();
+  try { localStorage.removeItem('focus-bank-user'); } catch (e) {}   // the device id an older build gave Plaid
   let params;
   try { params = new URLSearchParams(window.location.search); } catch (e) { return; }
   if (!params.has('oauth_state_id')) return;
-  let token = null;
-  try { token = sessionStorage.getItem(BANK_LINK_SS_KEY); } catch (e) {}
+  let link = null;
+  try { link = JSON.parse(sessionStorage.getItem(BANK_LINK_SS_KEY) || 'null'); } catch (e) {}
   const received = window.location.href;
   history.replaceState(null, '', window.location.pathname + window.location.hash);
-  if (!token) return;
+  if (!link || typeof link.uid !== 'string' || typeof link.token !== 'string') return;
+  bankResume = { uid: link.uid, token: link.token, received };
   bankBusy = 'connect';
+  bankLoadLink().catch(() => {});                        // fetch Plaid's window while the account signs in
+}
+/* Only the account that started the connection may finish it. */
+function bankResumeLink() {
+  if (!bankResume || !syncUser) return;
+  const { uid, token, received } = bankResume;
+  bankResume = null;
+  if (uid !== syncUser.uid) {
+    try { sessionStorage.removeItem(BANK_LINK_SS_KEY); } catch (e) {}
+    bankBusy = '';
+    bankRender();
+    showToast('That bank connection was started by another account. Connect your bank again.');
+    return;
+  }
   bankLoadLink()
     .then(Plaid => bankOpenLink(Plaid, token, received))
-    .catch(() => { bankBusy = ''; showToast('Plaid\'s window could not load to finish connecting your bank.'); });
+    .catch(() => { bankBusy = ''; bankRender(); showToast('Plaid\'s window could not load to finish connecting your bank.'); });
 }
 
 /* ── Settings → Bank accounts ── */
@@ -324,21 +455,32 @@ function bankRelayLine() {
   const where = escAttr(bankHost(bankRelay()));
   const state = h.state === 'ok' ? `Plaid ${h.env === 'production' ? 'production' : 'sandbox'}`
     : h.state === 'problem' ? `not set up: ${escAttr(h.problems.join('; '))}`
+    : h.state === 'outdated' ? 'out of date: it doesn\'t check sign-ins yet, so deploy the current backend/bank'
     : h.state === 'unreachable' ? 'can\'t reach it' : 'checking…';
   const sandbox = h.state === 'ok' && h.env !== 'production'
     ? '<div class="bank-fine">Sandbox: Plaid\'s test banks, no real money. Pick First Platypus Bank and log in with <b>user_good</b> / <b>pass_good</b>.</div>' : '';
-  return `${sandbox}<div class="bank-relay-line${h.state === 'problem' || h.state === 'unreachable' ? ' warn' : ''}">Relay: ${where} · ${state} <button class="dg-prompt-link" data-bank="relay-change">Change</button></div>`;
+  return `${sandbox}<div class="bank-relay-line${['problem', 'outdated', 'unreachable'].includes(h.state) ? ' warn' : ''}">Relay: ${where} · ${state} <button class="dg-prompt-link" data-bank="relay-change">Change</button></div>`;
 }
 
+/* Settings → Bank accounts, and the relay's health once per relay address. */
 export function bankRenderSettings() {
+  bankRender();
+  const relay = bankRelay();
+  if (relay && (!bankHealth || bankHealth.url !== relay)) bankCheckRelay();
+}
+function bankRender() {
   const line = $('bankStatusLine'), panel = $('bankPanel');
   if (!line || !panel) return;
   bankBind(panel);
   const relay = bankRelay();
-  const accounts = bank.items.reduce((n, i) => n + i.accounts.length, 0);
+  const items = bankItems();
+  const loading = !!syncUser && !bankCloudKnown && !items.length;
+  const accounts = items.reduce((n, i) => n + i.accounts.length, 0);
   line.textContent = !relay ? 'Not set up on this copy of Focus.'
-    : !bank.items.length ? 'No banks connected.'
-    : `${plural(accounts, 'account')} at ${plural(bank.items.length, 'bank')}, kept on this device only.`;
+    : !syncUser ? 'Sign in to Cloud sync to connect a bank.'
+    : loading ? 'Loading the banks saved to your account…'
+    : !items.length ? 'No banks connected.'
+    : `${plural(accounts, 'account')} at ${plural(items.length, 'bank')}, saved to your account.`;
 
   if (!relay) {
     panel.innerHTML = bankRelayFormHtml(`
@@ -346,14 +488,26 @@ export function bankRenderSettings() {
       <a class="bank-link" href="help/#bank-setup" target="_blank" rel="noopener">How to set up bank connections</a>`);
     return;
   }
+  const help = '<a class="settings-help-link" href="help/#bank" target="_blank" rel="noopener">How bank connections work</a>';
+  const relayBlock = bankRelayForm ? bankRelayFormHtml('') : bankRelayLine();
+  if (!syncUser) {
+    panel.innerHTML = `
+      <div class="bank-intro">See balances and recent transactions from your bank accounts. A bank connection belongs to your account, so it needs Cloud sync: sign in, connect a bank once, and every device you sign in on shows it.</div>
+      ${syncConfigured() ? '<button class="gcal-connect-btn bank-connect-btn" data-bank="sign-in">Sign in to Cloud sync</button>'
+        : '<div class="bank-fine">Cloud sync is not set up on this copy of Focus.</div>'}
+      ${help}
+      ${relayBlock}`;
+    return;
+  }
+  if (loading) { panel.innerHTML = `${help}${relayBlock}`; return; }
   const connecting = bankBusy === 'connect';
+  const who = syncUser.email ? `every device signed in as ${escAttr(syncUser.email)}` : 'every device signed in to it';
   panel.innerHTML = `
-    ${bank.items.map(bankItemHtml).join('')}
-    <button class="gcal-connect-btn bank-connect-btn" data-bank="connect"${bankBusy ? ' disabled' : ''}>${connecting ? 'Connecting…' : bank.items.length ? 'Connect another bank' : 'Connect a bank'}</button>
-    <div class="bank-fine">You log in to your bank in Plaid's window; Focus never sees your password. The connection is read-only, and balances and transactions stay on this device.</div>
-    <a class="settings-help-link" href="help/#bank" target="_blank" rel="noopener">How bank connections work</a>
-    ${bankRelayForm ? bankRelayFormHtml('') : bankRelayLine()}`;
-  if (!bankHealth || bankHealth.url !== relay) bankCheckRelay();
+    ${items.map(bankItemHtml).join('')}
+    <button class="gcal-connect-btn bank-connect-btn" data-bank="connect"${bankBusy ? ' disabled' : ''}>${connecting ? 'Connecting…' : items.length ? 'Connect another bank' : 'Connect a bank'}</button>
+    <div class="bank-fine">You log in to your bank in Plaid's window; Focus never sees your password. The connection is read-only, and it's saved to your account: ${who} shows it.</div>
+    ${help}
+    ${relayBlock}`;
 }
 
 function bankBind(panel) {
@@ -363,8 +517,9 @@ function bankBind(panel) {
     const b = e.target.closest('[data-bank]');
     if (!b || b.disabled) return;
     const act = b.dataset.bank;
-    const item = bank.items.find(i => i.id === b.dataset.item);
-    if (act === 'connect') bankConnect();
+    const item = bankItems().find(i => i.id === b.dataset.item);
+    if (act === 'sign-in') { if (!syncUser) syncBtnClick(); }
+    else if (act === 'connect') bankConnect();
     else if (act === 'refresh' && item) bankRefreshNow(item);
     else if (act === 'disconnect' && item) bankDisconnect(item);
     else if (act === 'relay-save') bankSaveRelay($('bankRelayInput') && $('bankRelayInput').value);
