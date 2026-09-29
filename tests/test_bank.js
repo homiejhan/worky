@@ -194,6 +194,7 @@ async function sealV1(payload) {
     ok(pay.amount === -232.5 && pay.name === 'Campus Café payroll' && pay.category === 'INCOME', 'amounts keep Plaid\'s sign (negative = money in)');
     eq(r.data.next_cursor, 'cursor-7', 'returns the cursor for next time');
     eq(r.data.status, 'HISTORICAL_UPDATE_COMPLETE', 'and Plaid\'s update status');
+    ok(r.data.added.every(t => 'pending_id' in t) && r.data.added.every(t => t.pending_id === null), 'each transaction says which pending one it replaces (none yet)');
     const cursor = r.data.next_cursor;
     r = await call('transactions', { token, cursor });
     eq(r.data.added.length, 0, 'nothing new since the cursor');
@@ -564,6 +565,155 @@ async function sealV1(payload) {
     Y.signIn();
     await sleep(100);
     eq(other.links.length, 0, 'a link token an older build left (not tied to an account) is not used');
+  }
+
+  console.log('\n── 11. New transactions are logged in Budget ──');
+  {
+    const W = bankWorld();
+    const tx = W.plaid.transaction;
+    const L = await device(W, { transform: withRelay(RELAY) });
+    const today = L.w.eval('dbdTodayKey()'), yesterday = L.w.eval('addDays(dbdTodayKey(), -1)');
+    const bud = app => app.d.getElementById('budgetContainer-d');
+    const purchases = app => JSON.parse(app.w.eval('JSON.stringify(budget.purchases)'));
+    const refresh = async app => {
+      const before = W.plaid.state.calls.filter(c => c.path === '/transactions/sync').length;
+      app.w.openSettings('bank');
+      app.d.querySelector('[data-bank="refresh"]').click();
+      await until(() => W.plaid.state.calls.filter(c => c.path === '/transactions/sync').length > before && !app.d.querySelector('.bank-item [disabled]'), 3000);
+    };
+    L.w.eval(`budget.initial = 500; budget.daily = 20; budget.purchases = []; budget.lastDate = '${today}'; saveToLocal();`);   // no sample purchase
+    L.signIn('user-c');
+    L.w.openSettings('bank');
+    ok(await until(() => status(L.d) === 'No banks connected.'), 'a new account, no banks yet');
+    L.d.querySelector('[data-bank="connect"]').click();
+    ok(await until(() => L.d.querySelectorAll('#bankPanel .bank-tx').length > 0), 'connect a bank');
+    ok(await until(() => Object.keys(L.w.eval('bankBudget.items')).length === 1), 'its first refresh is the sync point');
+    const itemId = Object.keys(L.w.eval('bankBudget.items'))[0];
+    const tracked = () => L.w.eval('bankBudget.items')[itemId];
+    eq(tracked().since, today, 'dated today');
+    eq(Object.keys(tracked().seen).sort().join(), 'tx-1,tx-2,tx-4,tx-6', 'counting what the checking account shows as already in the balance');
+    ok(L.w.eval('budget.initial') === 500 && purchases(L).length === 0, 'Budget is left as it was: its balance is taken to match the bank');
+    ok(L.w.eval('budgetFollowsBank()') && !/Logged/.test(toast(L.d)), 'it follows the bank from now on, with nothing logged');
+    const toggle = () => L.d.querySelector('#bankPanel [data-bank="budget"]');
+    ok(toggle() && toggle().checked, 'Settings → Bank accounts: "Log new transactions in Budget" is on');
+    ok(!L.w.eval('JSON.stringify(gatherState())').includes('Starbucks'), 'the sync point keeps ids, amounts and dates, not names');
+
+    const access = [...W.plaid.state.items.keys()].pop();
+    W.plaid.changeTransactions(access, { added: [
+      tx('n-chipotle', 12.5, today, 'Chipotle', { pending: true }),
+      tx('n-target', 30, yesterday, 'Target'),
+      tx('n-pay', -500, today, 'Campus Café payroll'),
+      tx('n-save', 20, today, 'Transfer to savings', { account_id: 'acc-saving' }),
+      tx('n-card', 55, today, 'Amazon', { account_id: 'acc-credit' }),
+    ] });
+    await refresh(L);
+    ok(await until(() => purchases(L).length === 1), 'Refresh brings new transactions into Budget');
+    const chip = purchases(L)[0];
+    ok(chip.title === 'Chipotle' && chip.amount === 12.5 && chip.pending === true && chip.bank === 'n-chipotle', "today's spending is a purchase today, still pending");
+    eq(L.w.eval('budget.initial'), 970, "yesterday's Target (−30) and today's payroll (+500) move the balance");
+    ok(L.w.eval('totalBalance()') === 957.5 && L.w.eval('todayBalance()') === 7.5, 'total balance $957.50, and today\'s envelope $20 − $12.50');
+    ok(/Logged 3 bank transactions in Budget/.test(toast(L.d)), `a toast says so: "${toast(L.d)}"`);
+    ok(!purchases(L).some(p => /savings|Amazon/.test(p.title)) && L.w.eval('budget.initial') === 970, 'savings and the credit card are left out');
+    const tag = bud(L).querySelector('.budget-purchase-row.from-bank .budget-bank-tag');
+    ok(tag && tag.textContent === 'pending', 'on the Budget screen it is marked as from the bank, pending');
+    const lines = [...bud(L).querySelectorAll('.budget-bank-list .bank-tx')].map(r => r.textContent.replace(/\s+/g, ' ').trim());
+    ok(lines.length === 2 && /Campus Café payroll \+\$500\.00$/.test(lines[0]) && /Target -\$30\.00$/.test(lines[1]), `From your bank lists the rest: ${lines.join(' | ')}`);
+    ok(/What you let yourself spend a day/.test(bud(L).textContent) && /money in and out of your bank is logged for you/.test(bud(L).textContent),
+      'the daily budget is spending, and the balance follows the bank');
+
+    await sleep(1500);                                                       // the laptop's state reaches the account
+    const P = await device(W, { transform: withRelay(RELAY), storage: { 'focus-app-state': cloud.at('users/user-c/state'),
+      'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: L.w.eval('syncHash(syncFingerprint(gatherState()))') }) } });
+    P.signIn('user-c');
+    ok(await until(() => P.d.querySelectorAll('#bankPanel .bank-item').length === 1 || P.w.eval('bank.items.length') === 1), 'the phone signs in to the same account');
+    await sleep(200);
+    ok(purchases(P).length === 1 && P.w.eval('totalBalance()') === 957.5, 'and has the same budget: nothing logged twice');
+
+    W.plaid.changeTransactions(access, { removed: ['n-chipotle'],
+      added: [tx('n-chipotle-posted', 14, today, 'CHIPOTLE 1234', { pending_transaction_id: 'n-chipotle' })] });
+    await refresh(P);
+    ok(await until(() => purchases(P)[0] && purchases(P)[0].amount === 14), 'the charge posts with a tip: Refresh on the phone updates the purchase');
+    ok(purchases(P).length === 1 && !purchases(P)[0].pending && purchases(P)[0].bank === 'n-chipotle-posted', 'the same purchase, posted, not a second one');
+    ok(await until(() => purchases(L)[0] && purchases(L)[0].amount === 14, 4000), 'the laptop has it too');
+    await sleep(1500);
+    ok(purchases(L).length === 1 && purchases(P).length === 1, 'and neither logs it again');
+
+    W.plaid.changeTransactions(access, { added: [tx('n-hold', 45, today, 'Shell gas hold', { pending: true })] });
+    await refresh(L);
+    ok(await until(() => purchases(L).some(p => p.bank === 'n-hold')), 'a pending hold shows as a purchase');
+    W.plaid.changeTransactions(access, { removed: ['n-hold'] });
+    await refresh(L);
+    ok(await until(() => !purchases(L).some(p => p.bank === 'n-hold')), 'the bank drops it: it leaves Budget');
+
+    const add = (title, amount) => {
+      bud(L).querySelector('.budget-new-title').value = title;
+      bud(L).querySelector('.budget-new-amount').value = amount;
+      bud(L).querySelector('[data-pact="add"]').click();
+    };
+    add('Coffee', '4.75');
+    W.plaid.changeTransactions(access, { added: [tx('n-coffee', 4.75, today, 'STARBUCKS 800', { pending: true })] });
+    await refresh(L);
+    ok(await until(() => purchases(L).some(p => p.title === 'Coffee' && p.bank === 'n-coffee')), 'a purchase typed by hand is matched to the bank\'s copy');
+    eq(purchases(L).filter(p => p.amount === 4.75).length, 1, 'not counted twice');
+    const coffee = purchases(L).find(p => p.title === 'Coffee');
+    bud(L).querySelector(`.budget-purchase-row[data-purchase-id="${coffee.id}"] [data-pact="del"]`).click();
+    ok(!purchases(L).some(p => p.title === 'Coffee'), 'taken out of Budget with ×');
+    const kept = L.w.eval('budget.initial'), lines0 = L.w.eval('bankBudget.log.length');
+    W.plaid.changeTransactions(access, { removed: ['n-coffee'], added: [tx('n-coffee-posted', 5.25, today, 'STARBUCKS 800', { pending_transaction_id: 'n-coffee' })] });
+    await refresh(L);
+    ok(!purchases(L).some(p => /STARBUCKS|Coffee/.test(p.title)) && L.w.eval('budget.initial') === kept && L.w.eval('bankBudget.log.length') === lines0,
+      'and it stays out when the bank posts it, with another amount');
+
+    const exported = L.w.eval('JSON.stringify(compressState(gatherState()))');
+    ok(/"bb":\{"o":1,"i":\{/.test(exported) && /"b":"n-chipotle-posted"/.test(exported), 'Export keeps the sync point and which purchases came from the bank');
+    const I = await loadApp({ storage: { 'focus-tour-done': '1' }, transform: noRelay });
+    I.w.applyState(JSON.parse(exported));
+    ok(I.w.eval('bankBudget.items')[itemId] && purchases(I).some(p => p.bank === 'n-chipotle-posted'), 'and Import brings them back');
+
+    const total = L.w.eval('totalBalance()');
+    L.w.eval(`budget.lastDate = '${yesterday}'`);
+    L.w.eval('budgetRollover()');
+    ok(L.w.eval('budget.initial') === total && purchases(L).length === 0, 'a new day carries the total balance over as it is: no daily budget added, the bank moves it');
+
+    await sleep(1500);                                                       // the rollover reaches the phone
+    L.w.openSettings('bank');
+    toggle().click();
+    ok(!L.w.eval('bankBudget.on') && !L.w.eval('budgetFollowsBank()'), 'turned off: Budget stops following the bank');
+    ok(!bud(L).querySelector('.budget-bank-note'), 'and From your bank goes away');
+    ok(await until(() => !P.w.eval('bankBudget.on'), 3000), 'on the phone too, through sync');
+    W.plaid.changeTransactions(access, { added: [tx('n-off', 9, today, 'Lunch while off')] });
+    await refresh(L);
+    ok(!purchases(L).some(p => p.bank === 'n-off'), 'nothing is logged while it is off');
+    await sleep(300);
+    ok(!purchases(P).some(p => p.bank === 'n-off'), 'nor on the phone');
+    toggle().click();
+    ok(L.w.eval('bankBudget.on') && L.w.eval('bankBudget.items')[itemId].since === today && L.w.eval('bankBudget.items')[itemId].seen['n-off'],
+      'turned on again: a new sync point, counting what the bank shows now');
+    ok(!purchases(L).some(p => p.bank === 'n-off'), 'so the lunch from while it was off is taken as already in the balance');
+
+    /* a refresh on a device that closed before its Budget changes reached the account */
+    await sleep(1500);
+    P.w.eval('BANK_BUDGET_WAIT_MS = 400');
+    const snack = { id: 'n-snack', account: 'acc-checking', date: today, name: 'Vending machine', amount: 2.5, pending: false };
+    cloud.at(`users/user-c/bank/items/${itemId}`).transactions.unshift(snack);
+    cloud.emit();
+    await sleep(50);
+    ok(!purchases(P).some(p => p.bank === 'n-snack'), 'a transaction another device fetched is not logged here at once: that device logs it');
+    ok(await until(() => purchases(P).some(p => p.bank === 'n-snack'), 2000), 'but if its Budget changes never arrive, this device logs it after a short wait');
+    await sleep(1800);
+    ok([L, P].every(app => purchases(app).filter(p => p.bank === 'n-snack').length === 1), 'once, on every device');
+
+    await sleep(1500);
+    const node = cloud.at(`users/user-c/bank/items/${itemId}`);
+    node.updatedAt = Date.now() - 2 * 3600e3;                                // the bank hasn't been refreshed for two hours
+    cloud.emit();
+    W.plaid.changeTransactions(access, { added: [tx('n-bus', 8, today, 'Bus pass')] });
+    const Q = await device(W, { transform: withRelay(RELAY), storage: { 'focus-app-state': cloud.at('users/user-c/state'),
+      'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: L.w.eval('syncHash(syncFingerprint(gatherState()))') }) } });
+    Q.signIn('user-c');
+    ok(await until(() => purchases(Q).some(p => p.bank === 'n-bus'), 3000), 'a device that opens with the bank two hours old refreshes it on its own and logs what is new');
+    await sleep(2500);
+    ok([L, P, Q].every(app => purchases(app).filter(p => p.bank === 'n-bus').length === 1), 'every device ends up with it once');
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

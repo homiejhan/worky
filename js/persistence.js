@@ -19,8 +19,8 @@ import {
   setCalEvents, setCalTemplates,
 } from './calendar.js';
 import {
-  budget, budgetRollover, normalizeBudget, normalizeRunway, purchaseIdCounter, renderBudget,
-  runway, setBudget, setPurchaseIdCounter, setRunway,
+  bankBudget, budget, budgetRollover, normalizeBankBudget, normalizeBudget, normalizeRunway, purchaseIdCounter,
+  purchaseRecord, renderBudget, runway, setBankBudget, setBudget, setPurchaseIdCounter, setRunway,
 } from './budget.js';
 import { syncOnLocalSave } from './sync.js';
 import {
@@ -47,6 +47,8 @@ import { normalizeShiftCals, setShiftCals, shiftCals } from './gcal.js';
  *     shift→sh wage→wg             (paid shift and its hourly wage, see shifts.js)
  *   shiftCals→sc  { calId: { shift, wage } } per Google calendar (see gcal.js)
  *   runway→rw {p: payday, r: repeat, b: bills [{i: id, n: name, a: amount, d: day}]} (see budget.js)
+ *   purchase: id→i title→t amount→a bank→b pending→pd   (a purchase logged from the bank)
+ *   bankBudget→bb {o: on (0 = off), i: items, l: log}    (bank transactions in Budget, see budget.js)
  *   digest: enabled→en last→l {at, md, n, m, s} clearedAt→ca   (see digest.js)
  */
 export function compressState(st) {
@@ -62,7 +64,7 @@ export function compressState(st) {
     if (b.todayAllowance !== null && b.todayAllowance !== undefined) o.ta = b.todayAllowance;
     if (b.lastDate) o.ld = b.lastDate;
     if (b.purchases && b.purchases.length) {
-      o.p = b.purchases.map(p => ({ i: p.id, t: p.title, a: p.amount }));
+      o.p = b.purchases.map(p => ({ i: p.id, t: p.title, a: p.amount, ...(p.bank ? { b: p.bank } : {}), ...(p.pending ? { pd: 1 } : {}) }));
     }
     return o;
   };
@@ -108,6 +110,9 @@ export function compressState(st) {
     ...(st.runway && (st.runway.payday || st.runway.bills.length)
       ? { rw: { p: st.runway.payday, r: st.runway.repeat, b: st.runway.bills.map(b => ({ i: b.id, n: b.name, a: b.amount, d: b.day })) } }
       : {}),
+    ...(st.bankBudget && (!st.bankBudget.on || Object.keys(st.bankBudget.items).length || st.bankBudget.log.length)
+      ? { bb: { o: st.bankBudget.on ? 1 : 0, i: st.bankBudget.items, l: st.bankBudget.log } }
+      : {}),
     cal: { ce: cEvents, ct: (st.calendar.calTemplates||[]).map(cCalEv), cec: st.calendar.calEventIdCtr },
   };
 }
@@ -136,7 +141,7 @@ function decompressState(c) {
     initial: b?.ib || 0,
     daily:   b?.dy || 0,
     todayAllowance: (b && b.ta !== undefined) ? b.ta : null,
-    purchases: (b?.p || []).map(p => ({ id: p.i, title: p.t, amount: p.a })),
+    purchases: (b?.p || []).map(p => ({ id: p.i, title: p.t, amount: p.a, ...(p.b ? { bank: p.b } : {}), ...(p.pd ? { pending: true } : {}) })),
     lastDate: b?.ld || null,
   });
   const dEvents = {};
@@ -158,6 +163,7 @@ function decompressState(c) {
     digest: decompressDigest(c.dg),
     shiftCals: normalizeShiftCals(c.sc),
     runway: normalizeRunway(c.rw ? { payday: c.rw.p, repeat: c.rw.r, bills: (c.rw.b || []).map(b => ({ id: b.i, name: b.n, amount: b.a, day: b.d })) } : null),
+    bankBudget: normalizeBankBudget(c.bb ? { on: c.bb.o !== 0, items: c.bb.i, log: c.bb.l } : null),
     calendar: { calEvents: dEvents, calTemplates: (c.cal.ct||[]).map(dCalEv), calEventIdCtr: c.cal.cec || 1 },
   };
 }
@@ -182,16 +188,16 @@ function liveTimerRecord(t) {
 
 /* Build number of the state schema. Bumped whenever gatherState() learns a
  * new top-level key (digest was build 2, digest tasks build 3, shiftCals
- * build 4, runway build 5, timerLog build 6). Lets a newer device recognise
+ * build 4, runway build 5, timerLog build 6, bankBudget build 7). Lets a newer device recognise
  * a cloud copy written by an older build, which cannot have carried the
  * newer fields. timerLog (days a timer ran past zero) went away again when
  * timers went back to stopping at zero; a copy from a build-6 device is not
  * in the known keys below, so it passes through untouched instead of being
  * stripped and written back. */
-export const STATE_BUILD = 6;
+export const STATE_BUILD = 7;
 const STATE_KNOWN_KEYS = new Set(['version', 'build', 'wokenUp', 'timerDefaults', 'timers', 'todoIdCounter',
   'taskIdCounter', 'todoLists', 'dbdTasks', 'dbdIdCounter', 'budget', 'purchaseIdCounter', 'views', 'theme',
-  'digest', 'shiftCals', 'runway', 'calendar']);
+  'digest', 'shiftCals', 'runway', 'bankBudget', 'calendar']);
 /* Top-level keys this build does not understand, carried through untouched so
  * an older device never strips what a newer one wrote (see syncApplyRemote). */
 let stateExtra = {};
@@ -224,7 +230,7 @@ export function gatherState() {
       daily: budget.daily,
       todayAllowance: budget.todayAllowance,
       lastDate: budget.lastDate,
-      purchases: budget.purchases.map(p => ({ id: p.id, title: p.title, amount: p.amount })),
+      purchases: budget.purchases.map(purchaseRecord),
     },
     purchaseIdCounter,
     views: { ...views },
@@ -232,6 +238,7 @@ export function gatherState() {
     digest: digestRecord(),
     shiftCals: normalizeShiftCals(shiftCals),
     runway: normalizeRunway(runway),
+    bankBudget: { on: bankBudget.on, items: bankBudget.items, log: bankBudget.log },
     calendar: { calEvents, calTemplates, calEventIdCtr },
   };
 }
@@ -264,6 +271,7 @@ function hydrateState(st) {
   setDigest(normalizeDigest(st.digest));
   setShiftCals(normalizeShiftCals(st.shiftCals));
   setRunway(normalizeRunway(st.runway));
+  setBankBudget(normalizeBankBudget(st.bankBudget));
   if (st.calendar) {
     setCalEvents(st.calendar.calEvents     || {});
     setCalTemplates(st.calendar.calTemplates  || []);

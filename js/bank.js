@@ -9,10 +9,13 @@
  * (the sealed token, balances and recent transactions), so every device signed in
  * to it shows the bank, and Disconnect removes it from all of them. This device
  * keeps a copy for when it's offline, dropped on sign-out. None of it is in the
- * synced state or in Export. The connection is read-only. */
+ * synced state or in Export, except what Budget logs from it (budget.js, with
+ * the rules in bankbudget.js): the app refreshes the banks on its own when
+ * what it has is half an hour old, and hands every change to Budget. The
+ * connection is read-only. */
 import { BANK_LS_KEY, BANK_RELAY_URL, PLAID_LINK_JS } from './config.js';
 import { $, calKeyToDate, escAttr, showToast } from './util.js';
-import { money } from './budget.js';
+import { bankBudget, budgetFollowBank, budgetFromBank, money } from './budget.js';
 import { syncBtnClick, syncConfigured, syncRef, syncUser } from './sync.js';
 
 const BANK_LINK_SS_KEY = 'focus-bank-link';   // { uid, token }: the link token, while an OAuth bank sends the user back
@@ -20,11 +23,14 @@ const BANK_TOKEN = /^v2\./;                    // sealed to an account; an older
 const BANK_ID = /^[\w-]{1,128}$/;              // a Plaid item id, used as a database key
 const BANK_TX_KEEP = 50;                        // newest transactions kept per bank
 const BANK_TX_SHOW = 6;
+const BANK_AUTO_MS = 30 * 60000;                // a bank refreshes on its own once what we have is this old
+const BANK_AUTO_TICK_MS = 5 * 60000;            // how often to look, and the least time between tries
+let   BANK_BUDGET_WAIT_MS = 10000;              // another device's refresh: give its own Budget changes time to arrive (let: tests shorten it)
 
 /* This device's copy, for the account `uid` (null = signed out):
  * { uid, relay: address set on this device ('' = BANK_RELAY_URL),
  *   items: [{ id, token, institution: { id, name }, accounts, transactions, cursor,
- *             error, addedAt, updatedAt }] }
+ *             status (Plaid's transactions_update_status), error, addedAt, updatedAt }] }
  * The account's copy, users/<uid>/bank = { updatedAt, items: { <id>: item } }, is
  * the one that counts: whenever it changes, this one follows. */
 let bank = { uid: null, relay: '', items: [] };
@@ -35,6 +41,8 @@ let bankRelayForm = false;    // show the relay address form even though a relay
 let bankRelayDraft = '';
 let bankLinkPromise = null;
 let bankResume = null;        // { uid, token, received }: an OAuth bank sent the user back mid-way
+let bankAutoAt = 0;           // the last refresh made on its own
+let bankBudgetTimer = null;   // a Budget pass waiting for another device's changes (bankBudgetSoon)
 
 /* ── this device's copy (localStorage) ── */
 function bankLoad() {
@@ -72,6 +80,7 @@ function bankItem(raw, id) {
     accounts: list(raw.accounts),
     transactions: list(raw.transactions),
     cursor: typeof raw.cursor === 'string' ? raw.cursor : '',
+    status: typeof raw.status === 'string' ? raw.status : null,
     error: err ? { code: String(err.code || 'ERROR'), message: String(err.message || '') } : null,
     addedAt: Number(raw.addedAt) || 0,
     updatedAt: Number(raw.updatedAt) || 0,
@@ -92,6 +101,7 @@ function bankWrite(uid, id, item) {
     ? (bank.items.some(x => x.id === id) ? bank.items.map(x => (x.id === id ? item : x)) : [...bank.items, item])
     : bank.items.filter(x => x.id !== id);
   bankSave();                                            // here at once; the account's copy confirms it
+  if (bankCloudKnown) budgetFromBank(bank.items);        // new transactions → Budget (the account's list, not an offline copy)
   const node = syncRef.child('bank');
   const saved = item ? node.child('items/' + id).set(JSON.parse(JSON.stringify(item))) : node.child('items/' + id).remove();
   return Promise.all([saved, node.child('updatedAt').set(Date.now())])
@@ -110,17 +120,36 @@ export function bankCloudSeen(node) {
   const items = Object.keys(raw).map(id => bankItem(raw[id], id)).filter(Boolean)
     .sort((a, b) => a.addedAt - b.addedAt || (a.id < b.id ? -1 : 1));
   const before = JSON.stringify([bank.uid, bank.items, bankCloudKnown]);
+  const first = !bankCloudKnown;
   bank.uid = syncUser.uid;
   bank.items = items;
   bankCloudKnown = true;
   if (JSON.stringify([bank.uid, bank.items, bankCloudKnown]) !== before) { bankSave(); bankRender(); }
+  bankBudgetSoon();
   bankResumeLink();
+  if (first) bankAutoRefresh();
+}
+/* New transactions → Budget. The device that fetched them hands them over at
+ * once (bankWrite). A change seen in the account's copy was fetched by another
+ * device, which is logging it already: its Budget changes arrive through sync
+ * a moment later. Handing it over here at once as well would make this device
+ * write the same change, and whichever write came last could undo something
+ * typed on the other one meanwhile. So this waits, and only logs what is still
+ * missing then (that device went offline or closed first). */
+function bankBudgetSoon() {
+  if (bankBudgetTimer) return;
+  bankBudgetTimer = setTimeout(() => {
+    bankBudgetTimer = null;
+    if (syncUser && bankCloudKnown) budgetFromBank(bankItems());
+  }, BANK_BUDGET_WAIT_MS);
 }
 /* sync.js calls this whenever the signed-in account changes (sign-in, sign-out, the
  * session coming back at start-up), before it listens again. Connections belong to
  * the account: another account, or nobody, doesn't get this device's copy. */
 export function bankCloudForget() {
   bankCloudKnown = false;
+  clearTimeout(bankBudgetTimer);
+  bankBudgetTimer = null;
   const uid = syncUser ? syncUser.uid : null;
   if (bank.uid !== uid) { bank.uid = uid; bank.items = []; bankSave(); }
   if (!syncUser && bankResume) {
@@ -290,6 +319,7 @@ async function bankRefresh(uid, item) {
       .sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? 1 : -1))
       .slice(0, BANK_TX_KEEP);
     next.cursor = tx.next_cursor || item.cursor || '';
+    next.status = tx.status || item.status || null;
     next.error = null;
     next.updatedAt = Date.now();
   } catch (e) {
@@ -300,6 +330,31 @@ async function bankRefresh(uid, item) {
   bankWrite(uid, next.id, next);
   return failed;
 }
+/* Keep the banks fresh without a press of Refresh, so new transactions reach
+ * Budget: when the account's banks are first seen, when the app comes back into
+ * view, and every few minutes while it's open. Only what is half an hour old,
+ * never a connection another device is still making (not refreshed yet) or one
+ * waiting for a new login. Problems stay quiet; a bank's own error is saved as usual. */
+async function bankAutoRefresh() {
+  if (bankBusy || !syncUser || !bankCloudKnown || !bankRelay() || document.visibilityState === 'hidden') return;
+  if (Date.now() - bankAutoAt < BANK_AUTO_TICK_MS) return;
+  const stale = i => i.updatedAt > 0 && Date.now() - i.updatedAt > BANK_AUTO_MS && !(i.error && i.error.code === 'ITEM_LOGIN_REQUIRED');
+  const due = bankItems().filter(stale).map(i => i.id);
+  if (!due.length) return;
+  bankAutoAt = Date.now();
+  const uid = syncUser.uid;
+  for (const id of due) {
+    const item = bankItems().find(i => i.id === id);           // the latest copy: another device may have refreshed it
+    if (bankBusy || !syncUser || syncUser.uid !== uid) return;
+    if (!item || !stale(item)) continue;
+    bankBusy = item.id;
+    bankRender();
+    await bankRefresh(uid, item);
+    bankBusy = '';
+    bankRender();
+  }
+}
+
 async function bankRefreshNow(item) {
   if (bankBusy || !syncUser) return;
   bankBusy = item.id;
@@ -343,6 +398,7 @@ function bankSaveRelay(value) {
  * finishes once the account is signed in (bankResumeLink). */
 export function bankInit() {
   bankLoad();
+  bankWatch();
   try { localStorage.removeItem('focus-bank-user'); } catch (e) {}   // the device id an older build gave Plaid
   let params;
   try { params = new URLSearchParams(window.location.search); } catch (e) { return; }
@@ -355,6 +411,10 @@ export function bankInit() {
   bankResume = { uid: link.uid, token: link.token, received };
   bankBusy = 'connect';
   bankLoadLink().catch(() => {});                        // fetch Plaid's window while the account signs in
+}
+function bankWatch() {
+  setInterval(bankAutoRefresh, BANK_AUTO_TICK_MS);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') bankAutoRefresh(); });
 }
 /* Only the account that started the connection may finish it. */
 function bankResumeLink() {
@@ -502,8 +562,15 @@ function bankRender() {
   if (loading) { panel.innerHTML = `${help}${relayBlock}`; return; }
   const connecting = bankBusy === 'connect';
   const who = syncUser.email ? `every device signed in as ${escAttr(syncUser.email)}` : 'every device signed in to it';
+  const toBudget = items.length ? `
+    <div class="settings-view-row">
+      <span class="settings-view-name">Log new transactions in Budget</span>
+      <label class="gcal-toggle"><input type="checkbox" data-bank="budget"${bankBudget.on ? ' checked' : ''}><span class="gcal-toggle-track"></span></label>
+    </div>
+    <div class="bank-fine">From checking accounts. When it starts, Budget takes its balance to match your bank's, then logs each new transaction: today's spending as purchases, money in and earlier days in the total balance.</div>` : '';
   panel.innerHTML = `
     ${items.map(bankItemHtml).join('')}
+    ${toBudget}
     <button class="gcal-connect-btn bank-connect-btn" data-bank="connect"${bankBusy ? ' disabled' : ''}>${connecting ? 'Connecting…' : items.length ? 'Connect another bank' : 'Connect a bank'}</button>
     <div class="bank-fine">You log in to your bank in Plaid's window; Focus never sees your password. The connection is read-only, and it's saved to your account: ${who} shows it.</div>
     ${help}
@@ -528,6 +595,11 @@ function bankBind(panel) {
     else if (act === 'relay-cancel') { bankRelayForm = false; bankRelayDraft = ''; bankRenderSettings(); }
   });
   panel.addEventListener('input', e => { if (e.target.id === 'bankRelayInput') bankRelayDraft = e.target.value; });
+  panel.addEventListener('change', e => {
+    if (e.target.dataset.bank !== 'budget') return;
+    budgetFollowBank(e.target.checked, bankItems());
+    showToast(e.target.checked ? 'Budget logs new bank transactions from now on' : 'Budget no longer logs bank transactions');
+  });
   panel.addEventListener('keydown', e => {
     if (e.key === 'Enter' && e.target.id === 'bankRelayInput') { e.preventDefault(); bankSaveRelay(e.target.value); }
   });

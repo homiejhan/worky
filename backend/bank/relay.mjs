@@ -156,6 +156,7 @@ function txn(t) {
     amount: t.amount,              // Plaid: positive = money out of the account
     currency: t.iso_currency_code || t.unofficial_currency_code || null,
     pending: !!t.pending,
+    pending_id: t.pending_transaction_id ?? null,   // on a posted transaction: the pending one it replaces
     category: t.personal_finance_category?.primary ?? null,
   };
 }

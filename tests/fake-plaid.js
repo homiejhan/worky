@@ -36,7 +36,7 @@ function sandboxTransactions() {
 function createFakePlaid({ clientId = 'test-client', secret = 'test-secret' } = {}) {
   const state = {
     calls: [],                 // { path, body } for every request
-    items: new Map(),          // access_token → { item_id, transactions, removed }
+    items: new Map(),          // access_token → { item_id, events, removed }: events are what /transactions/sync pages through
     failNext: null,            // { path, status, error_code, error_type, error_message, display_message }
     mutateOnce: false,         // second sync page answers TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION once
     pageSize: 4,
@@ -62,7 +62,7 @@ function createFakePlaid({ clientId = 'test-client', secret = 'test-secret' } = 
         if (!/^public-sandbox-/.test(body.public_token || '')) return error(400, 'INVALID_PUBLIC_TOKEN', 'provided public token is in an invalid format');
         const id = ++state.n;
         const token = `access-sandbox-${id}`;
-        state.items.set(token, { item_id: `item-${id}`, transactions: sandboxTransactions(), removed: false, delivered: 0 });
+        state.items.set(token, { item_id: `item-${id}`, events: sandboxTransactions().map(tx => ({ kind: 'added', tx })), removed: false });
         return [200, { access_token: token, item_id: `item-${id}`, request_id: 'r' }];
       }
       case '/accounts/get':
@@ -70,9 +70,11 @@ function createFakePlaid({ clientId = 'test-client', secret = 'test-secret' } = 
       case '/transactions/sync': {
         const start = body.cursor ? Number(String(body.cursor).split('-').pop()) : 0;
         if (state.mutateOnce && start > 0) { state.mutateOnce = false; return error(400, 'TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION', 'data changed while paging', 'TRANSACTIONS_ERROR'); }
-        const added = item.transactions.slice(start, start + state.pageSize);
-        const next = start + added.length;
-        return [200, { added, modified: [], removed: [], next_cursor: `cursor-${next}`, has_more: next < item.transactions.length,
+        const page = item.events.slice(start, start + state.pageSize);
+        const next = start + page.length;
+        const of = kind => page.filter(e => e.kind === kind);
+        return [200, { added: of('added').map(e => e.tx), modified: of('modified').map(e => e.tx),
+          removed: of('removed').map(e => ({ transaction_id: e.id })), next_cursor: `cursor-${next}`, has_more: next < item.events.length,
           transactions_update_status: 'HISTORICAL_UPDATE_COMPLETE', request_id: 'r' }];
       }
       case '/item/remove':
@@ -103,10 +105,21 @@ function createFakePlaid({ clientId = 'test-client', secret = 'test-secret' } = 
     return new Promise(resolve => server.listen(port, '127.0.0.1', () => resolve(server)));
   }
 
-  /* Add transactions after the first sync, to test Refresh. */
-  function addTransactions(accessToken, list) { state.items.get(accessToken).transactions.push(...list); }
+  /* What the bank does after the first sync, to test Refresh: new transactions,
+   * changed ones, removed ones (a pending charge that posted or was dropped). */
+  function addTransactions(accessToken, list) { changeTransactions(accessToken, { added: list }); }
+  function changeTransactions(accessToken, { added = [], modified = [], removed = [] }) {
+    const events = state.items.get(accessToken).events;
+    removed.forEach(id => events.push({ kind: 'removed', id }));
+    added.forEach(tx => events.push({ kind: 'added', tx }));
+    modified.forEach(tx => events.push({ kind: 'modified', tx }));
+  }
+  /* A transaction in Plaid's shape, on the sandbox checking account unless `account_id` says otherwise. */
+  const transaction = (id, amount, date, name, more = {}) => ({ transaction_id: id, account_id: 'acc-checking', date, authorized_date: date,
+    name, merchant_name: name, amount, iso_currency_code: 'USD', pending: false, pending_transaction_id: null,
+    personal_finance_category: { primary: amount < 0 ? 'INCOME' : 'GENERAL_MERCHANDISE' }, ...more });
 
-  return { state, fetchImpl, listen, addTransactions };
+  return { state, fetchImpl, listen, addTransactions, changeTransactions, transaction };
 }
 
 module.exports = { createFakePlaid, sandboxAccounts, sandboxTransactions };

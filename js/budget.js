@@ -7,12 +7,15 @@ import { desktopNavSync } from './views.js';
 import { calDesktopOpen, calShiftSources, calToggleDesktop } from './calendar.js';
 import { shiftsOnDays } from './shifts.js';
 import { addDays, billsDueBetween, cashRunway, daysBetween, nextPayday, PAY_REPEATS } from './runway.js';
+import { bankBudgetSkip, bankBudgetStep } from './bankbudget.js';
 
 /* budget state
  *   initial        — balance allocated at the start of today
  *   daily          — amount added to the balance each new day
  *   todayAllowance — null = use `daily`; set when the user edits Today's balance
- *   purchases      — today's purchases only; cleared on rollover / reset all
+ *   purchases      — today's purchases only; cleared on rollover / reset all.
+ *                    One logged from the bank has `bank` (its transaction id)
+ *                    and `pending` while the bank hasn't posted it.
  *   lastDate       — date key of the last rollover, drives new-day detection */
 export let budget = {
   initial: 0,
@@ -33,6 +36,16 @@ export function nextPurchaseId() { return purchaseIdCounter++; }
  * With a payday set the envelope runs paycheck to paycheck (budgetRollover). */
 export let runway = { payday: null, repeat: 'biweekly', bills: [] };
 export function setRunway(v) { runway = v; }
+
+/* bank transactions logged in Budget (the rules are in bankbudget.js), synced with the state
+ *   on    — log new transactions from the account's banks (Settings → Bank accounts)
+ *   items — per bank connection: { since: the sync point, seen: what has been counted }
+ *   log   — the latest moves of the total balance from the bank, newest first:
+ *           [{ d: date, n: name, a: amount (+ = money in) }]. Every device that
+ *           logs a transaction writes the same thing, so they never disagree. */
+export let bankBudget = { on: true, items: {}, log: [] };
+export function setBankBudget(v) { bankBudget = v; }
+const BANK_LOG_DAYS = 14, BANK_LOG_MAX = 20;
 
 /* ───────────────────────── BUDGET ─────────────────────────
  * Minimal daily-envelope budgeting.
@@ -62,12 +75,32 @@ export function normalizeBudget(b) {
     daily:   round2(b?.daily),
     todayAllowance: (b && b.todayAllowance !== null && b.todayAllowance !== undefined)
       ? round2(b.todayAllowance) : null,
-    purchases: Array.isArray(b?.purchases)
-      ? b.purchases.map(p => ({ id: p.id, title: p.title || '', amount: round2(p.amount) }))
-      : [],
+    purchases: Array.isArray(b?.purchases) ? b.purchases.map(purchaseRecord) : [],
     lastDate: b?.lastDate || null,
   };
 }
+
+/* A purchase as saved: a bank one keeps its transaction id and pending mark. */
+export function purchaseRecord(p) {
+  return {
+    id: p.id, title: p.title || '', amount: round2(p.amount),
+    ...(typeof p.bank === 'string' && p.bank ? { bank: p.bank } : {}),
+    ...(p.bank && p.pending ? { pending: true } : {}),
+  };
+}
+
+export function normalizeBankBudget(b) {
+  const items = {};
+  Object.entries(b && typeof b.items === 'object' && b.items ? b.items : {}).forEach(([id, e]) => {
+    if (e && typeof e.since === 'string' && e.seen && typeof e.seen === 'object') items[id] = { since: e.since, seen: e.seen };
+  });
+  const log = Array.isArray(b?.log) ? b.log.filter(l => l && typeof l.d === 'string' && Number.isFinite(l.a))
+    .map(l => ({ d: l.d, n: String(l.n || '').slice(0, 60), a: round2(l.a) })).slice(0, BANK_LOG_MAX) : [];
+  return { on: b?.on !== false, items, log };
+}
+/* The balance follows a bank: Budget logs a bank's transactions, so those move
+ * the total balance, not the daily budget or the bills. */
+export function budgetFollowsBank() { return bankBudget.on && Object.keys(bankBudget.items).length > 0; }
 
 export function normalizeRunway(r) {
   const bills = Array.isArray(r?.bills) ? r.bills : [];
@@ -107,14 +140,19 @@ function daysBetweenKeys(fromKey, toKey) {
  * (total balance) plus a fresh daily budget; purchases then clear, so the
  * total equals the initial again and today's balance is a full envelope.
  * With a payday set (runwayOn) the balance is real cash between paychecks: no
- * daily budget is added, and the bills due since the last rollover come out. */
+ * daily budget is added, and the bills due since the last rollover come out.
+ * Following a bank, the balance is the bank's: it carries over as it is, since
+ * the paychecks and bills come in with the bank's own transactions. */
 let budgetBillsPaid = [];   // what the last rollover took out, for its toast
 export function budgetRollover() {
   const today = dbdTodayKey();
   if (!budget.lastDate) { budget.lastDate = today; return false; }
   if (budget.lastDate === today) return false;
   const days = daysBetweenKeys(budget.lastDate, today);
-  if (runwayOn()) {
+  if (budgetFollowsBank()) {
+    budgetBillsPaid = [];
+    budget.initial = totalBalance();
+  } else if (runwayOn()) {
     // the daily budget is what you spend, not income; bills come out on their day
     budgetBillsPaid = billsDueBetween(runway.bills, budget.lastDate, today);
     budget.initial = round2(totalBalance() - budgetBillsPaid.reduce((t, b) => t + b.amount, 0));
@@ -177,10 +215,12 @@ function budgetHtml() {
   const spent = purchasesTotal();
   const tb = todayBalance();
   const total = totalBalance();
+  const follows = budgetFollowsBank();
   const rows = budget.purchases.map(p => `
-    <div class="budget-purchase-row" data-purchase-id="${p.id}">
+    <div class="budget-purchase-row${p.bank ? ' from-bank' : ''}" data-purchase-id="${p.id}">
       <input class="budget-purchase-title" data-pact="title"
         value="${escAttr(p.title)}" placeholder="Purchase…">
+      ${p.bank ? `<span class="budget-bank-tag" title="${p.pending ? 'From your bank, not posted yet' : 'From your bank'}">${p.pending ? 'pending' : 'bank'}</span>` : ''}
       <input class="budget-purchase-amount" data-pact="amount" type="text" inputmode="decimal"
         value="${Number(p.amount).toFixed(2)}">
       <button class="budget-purchase-del" data-pact="del" title="Remove">×</button>
@@ -201,8 +241,9 @@ function budgetHtml() {
 
       <div class="budget-fields">
         ${budgetFieldHtml('today', "Today's balance", tb, 'Spending envelope — editing it won\'t change your total')}
-        ${budgetFieldHtml('daily', 'Daily budget', round2(budget.daily), runwayOn() ? 'What you let yourself spend a day' : 'Added to your balance each new day')}
-        ${budgetFieldHtml('initial', 'Initial balance', round2(budget.initial), runwayOn() ? 'Your cash this morning: add each paycheck here' : 'Grows by the daily budget each morning')}
+        ${budgetFieldHtml('daily', 'Daily budget', round2(budget.daily), follows || runwayOn() ? 'What you let yourself spend a day' : 'Added to your balance each new day')}
+        ${budgetFieldHtml('initial', 'Initial balance', round2(budget.initial), follows ? 'Your cash this morning: money in and out of your bank is logged for you'
+          : runwayOn() ? 'Your cash this morning: add each paycheck here' : 'Grows by the daily budget each morning')}
       </div>
 
       ${runwayHtml()}
@@ -221,7 +262,24 @@ function budgetHtml() {
       <div class="budget-purchase-list">
         ${rows || '<div class="budget-empty">No purchases yet today.</div>'}
       </div>
+      ${follows ? bankLogHtml() : ''}
     </div>`;
+}
+
+/* What the bank moved outside today's purchases: money in, and earlier days. */
+function bankLogHtml() {
+  const rows = bankBudget.log.map(l => `
+    <div class="bank-tx">
+      <span class="bank-tx-date">${calKeyToDate(l.d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+      <span class="bank-tx-name">${escAttr(l.n || 'Transaction')}</span>
+      <span class="bank-tx-amt${l.a > 0 ? ' in' : ''}">${l.a > 0 ? '+' : '-'}${money(Math.abs(l.a))}</span>
+    </div>`).join('');
+  return `
+    <div class="budget-section-header">
+      <span class="section-sublabel">From your bank</span>
+    </div>
+    <div class="budget-bank-note">New transactions from your checking account are logged for you: today's spending under Purchases today, money in and earlier days' spending here, in your total balance.</div>
+    ${rows ? `<div class="bank-txs budget-bank-list">${rows}</div>` : ''}`;
 }
 
 /* ── cash runway (the math is in runway.js) ── */
@@ -280,7 +338,9 @@ function runwayHtml() {
   if (!runwayOn()) return `
     <div class="runway empty">
       <div class="runway-label">Cash runway</div>
-      <div class="runway-sub">Set your next payday to see whether your cash lasts until then. From then on your daily budget is what you spend each day. It is no longer added to your balance each morning, so add each paycheck to your balance when it lands.</div>
+      <div class="runway-sub">${budgetFollowsBank()
+        ? 'Set your next payday to see whether your cash lasts until then. Paychecks come in with your bank\'s transactions.'
+        : 'Set your next payday to see whether your cash lasts until then. From then on your daily budget is what you spend each day. It is no longer added to your balance each morning, so add each paycheck to your balance when it lands.'}</div>
       ${setup}
     </div>`;
 
@@ -295,7 +355,7 @@ function runwayHtml() {
     const why = r.runsOutWith.length ? ` when ${escAttr(r.runsOutWith.join(' and '))} ${r.runsOutWith.length === 1 ? 'is' : 'are'} due` : '';
     const status = r.short
       ? `Runs out ${fmtDayKey(r.runsOutOn)}${why}, ${plural(r.shortBy, 'day')} before payday.`
-      : r.daysToPayday === 0 ? 'Add your paycheck to the balance above.'
+      : r.daysToPayday === 0 ? (budgetFollowsBank() ? 'Your paycheck comes in when your bank shows it.' : 'Add your paycheck to the balance above.')
       : `Covers you to payday${r.paycheck > 0 ? `, when about ${money(r.paycheck)} lands` : ''}.`;
     const parts = [`${money(totalBalance())} now`, `${money(budget.daily)} a day`];
     if (r.billsBeforePayday) parts.push(`−${money(r.billsBeforePayday)} bills before payday`);
@@ -329,7 +389,7 @@ function runwayHtml() {
         <span class="section-sublabel">Monthly bills</span>
         <span class="budget-spent">${money(billTotal)}</span>
       </div>
-      <div class="runway-bill-list">${bills || '<div class="budget-empty">No bills yet. They come out of your balance on their day.</div>'}</div>
+      <div class="runway-bill-list">${bills || `<div class="budget-empty">${budgetFollowsBank() ? 'No bills yet. The runway counts each one on its day.' : 'No bills yet. They come out of your balance on their day.'}</div>`}</div>
       <div class="budget-add-row runway-add-row">
         <input class="runway-new-name" placeholder="Rent, phone, bus pass…">
         <input class="runway-new-amount" type="text" inputmode="decimal" placeholder="0.00">
@@ -483,7 +543,35 @@ function setPurchaseAmount(id, value) {
 }
 
 function removePurchase(id) {
-  budget.purchases = budget.purchases.filter(p => p.id !== id);
+  const p = purchaseById(id);
+  if (p && p.bank) bankBudget.items = bankBudgetSkip(bankBudget.items, p.bank);   // taken out of Budget: not counted again
+  budget.purchases = budget.purchases.filter(q => q.id !== id);
+  budgetChanged();
+}
+
+/* ── bank transactions (the rules are in bankbudget.js) ──
+ * bank.js hands over the signed-in account's connections whenever they change:
+ * a refresh on this device, or the account's copy changing. */
+export function budgetFromBank(items) {
+  if (!bankBudget.on || !Array.isArray(items)) return;
+  const rolled = budgetRollover();                     // today's purchases must be today's
+  const r = bankBudgetStep({ tracked: bankBudget.items, items, purchases: budget.purchases, today: dbdTodayKey(), nextId: purchaseIdCounter });
+  if (r.changed) {
+    bankBudget.items = r.tracked;
+    budget.purchases = r.purchases;
+    purchaseIdCounter = r.nextId;
+    budget.initial = round2(budget.initial + r.balance);
+    const since = addDays(dbdTodayKey(), -BANK_LOG_DAYS);
+    bankBudget.log = [...r.log.reverse(), ...bankBudget.log].filter(l => l.d >= since).slice(0, BANK_LOG_MAX);
+  }
+  if (!r.changed && !rolled) return;
+  budgetChanged();
+  if (r.logged) showToast(r.logged === 1 ? 'Logged 1 bank transaction in Budget' : `Logged ${r.logged} bank transactions in Budget`);
+}
+/* Settings → Bank accounts: turning it on starts a new sync point, off forgets it. */
+export function budgetFollowBank(on, items) {
+  bankBudget = { on: !!on, items: {}, log: on ? bankBudget.log : [] };
+  if (on) budgetFromBank(items);
   budgetChanged();
 }
 
