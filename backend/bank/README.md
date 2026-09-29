@@ -23,8 +23,17 @@ Plaid's window: pick a bank, log in ◄───── link token
 login done (one-time public token) ──────► POST /exchange ─────────────────────► /item/public_token/exchange
 saves it to users/<uid>/bank/items/<id> ◄─ token sealed with the uid
 Refresh, on any device of the account ───► POST /accounts, /transactions ──────► /accounts/get, /transactions/sync
+  (or on its own, every half hour)
 Disconnect ──────────────────────────────► POST /remove ───────────────────────► /item/remove
 ```
+
+The app refreshes a bank on its own once what it has is half an hour old, and,
+with **Log new transactions in Budget** on (the default), logs each new
+transaction from a checking account in Budget (`js/bankbudget.js` has the rules).
+A posted transaction carries `pending_id`, the pending one it replaces, so a
+charge that posts stays one purchase. That needs this relay as it is now: an
+older one leaves `pending_id` out, and a posted charge then shows up as the
+pending one given back plus a new purchase, which adds up the same.
 
 **How the relay checks a sign-in.** An ID token is a JWT that Google signs with
 RS256. The relay fetches Google's public keys
@@ -153,6 +162,10 @@ hosts that run one (Deno Deploy, Bun, Vercel Edge) work too. On a plain Node ser
   node alone. It sits next to the synced state (`users/<uid>/state`), not in it, so
   Export doesn't include it. The database rules that already limit `users/<uid>` to
   its owner cover it: no rules change.
+- **In the user's synced data** (`users/<uid>/state`, and Export), only with **Log
+  new transactions in Budget** on: the purchases and balance changes Budget logged
+  (description, amount, date), and for each bank the day logging started and the
+  transactions it has counted (their ids, amounts and dates, no descriptions).
 - **On the device** (`localStorage`, key `focus-bank`): a copy of the signed-in
   account's banks, to show while offline (`{ uid, relay, items }`), dropped on
   sign-out; and a relay address set on that device for testing. Nothing else about

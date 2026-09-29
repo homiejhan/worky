@@ -101,6 +101,9 @@ console.log('\n── 3. The how-tos the help page was asked for ──');
     'bank: how to set up the relay and prove the connection');
   ok(/needs[^.]*cloud sync/.test(bank) && /every device you sign in on shows it/.test(bank), 'bank: a connection belongs to the account, so it needs cloud sync');
   ok(/FIREBASE_JWKS_URL=http:\/\/127\.0\.0\.1:0\/jwks npm run bank:check/.test(bank), 'bank: the check makes a test sign-in');
+  const budgetText = text('budget');
+  ok(/From your bank/.test(budgetText) && /takes your total balance to match your bank's/.test(budgetText) && /pending/.test(budgetText),
+    'budget: what the bank logs, from the sync point on');
   ok(/user_good/.test(bank) && /pass_good/.test(bank), 'bank: the sandbox login');
   const gcal = text('google-calendar');
   ok(/Connect Google Calendar/.test(gcal) && /From URL/.test(gcal) && /paid shifts/.test(gcal), 'Google Calendar: connect, subscribe a work schedule, mark it as shifts');
@@ -125,7 +128,8 @@ console.log('\n── 4. The privacy policy lives on the help page ──');
   [['Google Calendar', /Google Calendar/], ['Gmail (gmail.readonly)', /gmail\.readonly/], ['cloud sync (Firebase)', /Firebase/],
     ['bank connections (Plaid)', /Plaid/], ['the relay keeps nothing', /relay[^.]*(keeps none|has no database)/],
     ['bank data in the account, readable only by it', /bank[^.]*under your account/], ['only the owner reads it', /no one else can read them/],
-    ['Disconnect deletes bank data from the account', /Disconnect[^.]*deletes the bank data from your account/], ['Limited Use', /Limited Use/], ['how to delete', /Retention and deletion/],
+    ['Disconnect deletes bank data from the account', /Disconnect[^.]*deletes the bank data from your account/],
+    ['what Budget logs is part of the synced data and Export', /part of your synced data and of Export/], ['Limited Use', /Limited Use/], ['how to delete', /Retention and deletion/],
     ['revoking Google access', /myaccount\.google\.com\/permissions/], ['ending bank connections', /my\.plaid\.com/],
     ['a contact address', /justhan47@gmail\.com/]]
     .forEach(([what, re]) => ok(re.test(p), `it covers ${what}`));

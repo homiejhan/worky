@@ -261,9 +261,19 @@
       <h2>Budget and cash runway</h2>
       <p>The budget answers two questions: what can I spend today, and does my cash last until payday?</p>
       <ul>
-        <li><strong>Initial balance</strong> is your cash this morning. Add each paycheck to it.</li>
+        <li><strong>Initial balance</strong> is your cash this morning. Add each paycheck to it, or let your bank's transactions do it (<a href="#budget-bank">below</a>).</li>
         <li><strong>Daily budget</strong> is what you let yourself spend a day. <strong>Today's balance</strong> is what's left of today's amount.</li>
         <li><strong>Purchases today</strong>: add what you buy and it comes off today's balance and your total.</li>
+      </ul>
+      <h3 id="budget-bank">From your bank</h3>
+      <p>With a <a href="#bank">bank connected</a> and <strong>Log new transactions in Budget</strong> on (Settings → Bank accounts; it starts on), Focus logs each new transaction from your checking account in Budget. Savings and credit cards are left out.</p>
+      <ul>
+        <li>When logging starts, Focus takes your total balance to match your bank's as it is then. Nothing from before is added.</li>
+        <li>Today's spending shows under <strong>Purchases today</strong>, marked <strong>bank</strong>, or <strong>pending</strong> until the bank posts it. When it posts it stays the same purchase, with the final amount (a tip, say). A pending charge the bank drops comes off again.</li>
+        <li>Money in, like a paycheck or a refund, and spending dated an earlier day go to your total balance and are listed under <strong>From your bank</strong>.</li>
+        <li>A purchase you typed today for the same amount is matched to the bank's copy instead of counted twice. Remove a purchase from the bank with × and it won't come back.</li>
+        <li>While Budget follows your bank, a new day carries your total balance over as it is: paychecks and bills come in and out with your bank's transactions, and the daily budget is only what you let yourself spend. The cash runway still counts the bills ahead.</li>
+        <li>Focus checks your banks every half hour while it's open, so you don't need to press Refresh.</li>
       </ul>
       <h3>Cash runway</h3>
       <p>Enter your <strong>next payday</strong>, how often you're paid, and your <strong>monthly bills</strong> with the day each is due. Focus walks forward day by day: each day costs your daily budget, each bill comes out on its day, and pay for the shifts you work before payday arrives on payday. It tells you how many days of cash you have and, if the money runs out first, on which day and why.</p>
@@ -324,7 +334,7 @@
         <li>Sign in to cloud sync, if you haven't: <strong>Settings → Cloud sync</strong>, or <strong>Sign in to Cloud sync</strong> in Settings → Bank accounts.</li>
         <li>Open <strong>Settings → Bank accounts</strong> and press <strong>Connect a bank</strong>.</li>
         <li>Plaid's window opens. Find your bank, log in, and choose the accounts to share. Some banks, such as Chase, Bank of America and Wells Fargo, open their own site for you to approve, then send you back to Focus.</li>
-        <li>Your accounts, balances and newest transactions appear. Press <strong>Refresh</strong> any time for new ones.</li>
+        <li>Your accounts, balances and newest transactions appear. Focus checks for new ones every half hour while it's open; press <strong>Refresh</strong> to check now.</li>
       </ol>
       <figure>
         <picture>
@@ -343,6 +353,7 @@
       <ul>
         <li><strong>Disconnect</strong> ends the connection at Plaid and deletes it from your account, on every device. You can also see and end connections at <a href="https://my.plaid.com" target="_blank" rel="noopener">my.plaid.com</a>.</li>
         <li>Balances and transactions are saved to your account, next to your synced data rather than in it: every device signed in to the account shows them, and Export doesn't include them. Connect a bank on one device only; your other devices show it once you sign in there. Signing out takes the banks off that device, and signing back in brings them back.</li>
+        <li><strong>Log new transactions in Budget</strong> puts new transactions from your checking account into Budget: see <a href="#budget-bank">From your bank</a>.</li>
         <li>If Focus says your bank <strong>needs you to log in again</strong>, the bank ended the connection. Disconnect it and connect again.</li>
         <li><strong>Testing with the sandbox:</strong> pick <strong>First Platypus Bank</strong> and log in with <code>user_good</code> / <code>pass_good</code>. If it asks for a code, use <code>1234</code>. No real money is involved.</li>
       </ul>
@@ -444,6 +455,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"</cod
         <li>transactions: date, description or merchant, amount, category, and whether it's pending. The last 30 days come in when you connect, then new ones.</li>
       </ul>
       <p>Bank accounts need cloud sync: a connection belongs to your signed-in account. This data travels from Plaid through Focus's relay server to the app. The relay has no database and keeps none of it; it holds Focus's Plaid keys, and it answers only requests that carry your cloud-sync sign-in, which it checks with Google. The key to your connection is encrypted so that only the relay can use it, and only for your account. Focus stores that key and the accounts, balances and newest 50 transactions for each bank in the Firebase Realtime Database under your account, next to your synced data rather than in it, so Export doesn't include them. The database rules allow access only to the signed-in account that owns it: every device signed in to your account can show your banks, and no one else can read them. Each device keeps a copy to show while it's offline, removed when you sign out there. Focus tells Plaid which account a connection belongs to by your account identifier, not your name or email address.</p>
+      <p>If <strong>Log new transactions in Budget</strong> is on (Settings → Bank accounts), each new transaction from your checking account is also added to your budget: its description, amount and date become a purchase or a line under From your bank. Those are part of your synced data and of Export, like anything you type into the budget, and stay there after you disconnect the bank. To recognise transactions it has already counted, Focus keeps their identifiers, amounts and dates with your budget, but not their descriptions or your account details. Turn it off to stop this; what was logged stays until you delete it.</p>
       <p>Plaid handles your data under the <a href="https://plaid.com/legal/#end-user-privacy-policy" target="_blank" rel="noopener">Plaid End User Privacy Policy</a>. Disconnect in Settings → Bank accounts ends the connection at Plaid and deletes the bank data from your account and your devices. You can also see and end connections at <a href="https://my.plaid.com" target="_blank" rel="noopener">my.plaid.com</a>.</p>
 
       <h3>What is not collected</h3>
