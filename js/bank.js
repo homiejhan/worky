@@ -101,7 +101,7 @@ function bankWrite(uid, id, item) {
     ? (bank.items.some(x => x.id === id) ? bank.items.map(x => (x.id === id ? item : x)) : [...bank.items, item])
     : bank.items.filter(x => x.id !== id);
   bankSave();                                            // here at once; the account's copy confirms it
-  if (bankCloudKnown) budgetFromBank(bank.items);        // new transactions → Budget (the account's list, not an offline copy)
+  if (bankCloudKnown && !budgetFromBank(bank.items)) bankBudgetSoon();   // new transactions → Budget (the account's list, not an offline copy); after the typing, if any
   const node = syncRef.child('bank');
   const saved = item ? node.child('items/' + id).set(JSON.parse(JSON.stringify(item))) : node.child('items/' + id).remove();
   return Promise.all([saved, node.child('updatedAt').set(Date.now())])
@@ -140,7 +140,7 @@ function bankBudgetSoon() {
   if (bankBudgetTimer) return;
   bankBudgetTimer = setTimeout(() => {
     bankBudgetTimer = null;
-    if (syncUser && bankCloudKnown) budgetFromBank(bankItems());
+    if (syncUser && bankCloudKnown && !budgetFromBank(bankItems())) bankBudgetSoon();   // something is being typed: again later
   }, BANK_BUDGET_WAIT_MS);
 }
 /* sync.js calls this whenever the signed-in account changes (sign-in, sign-out, the

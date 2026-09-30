@@ -34,6 +34,7 @@ export const FIREBASE_CONFIG = {
  * The `state` tag tells the two redirect handlers apart. */
 export const SYNC_STATE_TAG   = 'worky-sync';
 export const SYNC_META_LS_KEY = 'focus-sync-meta';
+export const SYNC_BASE_LS_KEY = 'focus-sync-base';   // the last copy this device and the cloud agreed on (merges start from it)
 
 /* ── Email Digest ──
  * Built by backend/digest.py on GitHub Actions and delivered through

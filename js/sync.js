@@ -1,8 +1,8 @@
 /* sync.js — Cloud sync of the whole state through Firebase. */
 import {
-  FIREBASE_CONFIG, GCAL_CLIENT_ID, GCAL_REDIRECT, LS_KEY, SYNC_META_LS_KEY, SYNC_STATE_TAG,
+  FIREBASE_CONFIG, GCAL_CLIENT_ID, GCAL_REDIRECT, LS_KEY, SYNC_BASE_LS_KEY, SYNC_META_LS_KEY, SYNC_STATE_TAG,
 } from './config.js';
-import { $, closeModal, showToast } from './util.js';
+import { $, closeModal, showToast, userTyping } from './util.js';
 import {
   gatherState, loadFromLocal, renderLoadedState, saveToLocal, STATE_BUILD,
 } from './persistence.js';
@@ -15,6 +15,7 @@ import {
 } from './digest-prompts.js';
 import { setTourReoffer, tourMarkSeen, tourOffer, tourReoffer } from './onboarding.js';
 import { bankCloudForget, bankCloudSeen } from './bank.js';
+import { syncMerge } from './syncmerge.js';
 
 /* ───────────────────────── CLOUD SYNC ─────────────────────────
  * Live cross-device sync of the full app state via Firebase.
@@ -34,8 +35,14 @@ import { bankCloudForget, bankCloudSeen } from './bank.js';
  *     devices through the same localStorage → loadFromLocal() path
  *     used everywhere else. Own writes echo back and are ignored via
  *     the per-session client id.
- *   • Conflicts: last-write-wins by timestamp. Offline edits win over
- *     an older cloud copy when the device reconnects.
+ *   • Conflicts: when both this device and the cloud changed since the
+ *     copy they last agreed on (kept in localStorage, SYNC_BASE_LS_KEY),
+ *     the two are merged against it (syncmerge.js): a task added here and
+ *     a purchase logged there are both kept. Without that copy, the newer
+ *     edit wins by timestamp.
+ *   • Typing: while a text field has the focus, other devices' changes
+ *     wait (applying one redraws the screen and would take what is being
+ *     typed); they are merged in when the field is left.
  *   • Formats (template mode): the cloud is held in both directions
  *     while Formats is open; the Done click is the single, priority
  *     push (see syncHeld / syncCommitFormat below).
@@ -115,14 +122,25 @@ function syncHash(str) {
 }
 
 /* Record that cloud and this device now hold `fp` (post-push, echo,
- * apply, or an identical-on-connect check). */
-function syncAgree(fp, extra) {
+ * apply, or an identical-on-connect check), and keep that copy of the state
+ * (`stateStr`): the base a later conflict is merged against. */
+function syncAgree(fp, extra, stateStr) {
   syncKnownFp = fp;
   syncLastSyncAt = Date.now();
   const meta = syncLoadMeta();
   meta.knownHash = syncHash(fp);
   Object.assign(meta, extra || {});
   syncSaveMeta(meta);
+  if (typeof stateStr === 'string') {
+    try { localStorage.setItem(SYNC_BASE_LS_KEY, JSON.stringify({ hash: meta.knownHash, state: stateStr })); } catch(e) {}
+  }
+}
+/* The copy both sides last agreed on, if this device still has it. */
+function syncBase(hash) {
+  try {
+    const b = JSON.parse(localStorage.getItem(SYNC_BASE_LS_KEY));
+    return b && b.hash === hash && typeof b.state === 'string' ? JSON.parse(b.state) : null;
+  } catch(e) { return null; }
 }
 
 function syncLoadMeta() {
@@ -185,6 +203,7 @@ function syncSchedulePush() {
 function syncPushNow(opts) {
   const priority = !!(opts && opts.priority);
   if (!syncUser || !syncRef || syncPendingRemote) return false;
+  if (syncTypingValue) return false;           // another device's change is waiting to be merged in: don't write over it
   if (!syncReconciled) return false;          // never write blind over an unseen cloud copy
   if (syncHeld() && !priority) return false;  // Formats open — only Done may push
   clearTimeout(syncPushTimer);
@@ -203,7 +222,7 @@ function syncPushNow(opts) {
    * available to devices that open later (see digest.js → delivery). */
   syncRef.update(payload)
     .then(() => {
-      syncAgree(fp, { pushedAt: Date.now() });
+      syncAgree(fp, { pushedAt: Date.now() }, payload.state);
       syncCommitPending = 0;                  // server has it — priority window closes
       syncUpdateUI();
     })
@@ -228,33 +247,34 @@ export function syncCommitFormat() {
 
 /* Apply a remote state through the standard load path, then let the
  * normal save machinery detect any follow-up local diff (e.g. a budget
- * rollover triggered by the incoming state) and push it back. */
-let syncApplyTimes = [];        // recent remote applies, for bounce detection
+ * rollover triggered by the incoming state) and push it back. `mergedStr`
+ * is what to load instead when this device's own changes were merged in
+ * (syncMergeRemote): the remote is still what both sides now agree on, and
+ * the merged difference is pushed as the follow-up. */
+let syncApplyTimes = [];        // recent applies this device had to answer, for bounce detection
 let syncBouncing   = false;     // true once we've decided another device is fighting us
-const SYNC_BOUNCE_N  = 4;       // applies …
+const SYNC_BOUNCE_N  = 4;       // answers …
 const SYNC_BOUNCE_MS = 90000;   // … within this window = a loop, not a person editing
 
-function syncApplyRemote(remoteStr, remoteUpdatedAt) {
+function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr) {
   let remoteFp = null;
-  const now = Date.now();
-  syncApplyTimes = syncApplyTimes.filter(t => now - t < SYNC_BOUNCE_MS);
-  syncApplyTimes.push(now);
-  const bouncing = syncApplyTimes.length >= SYNC_BOUNCE_N;
   /* A cloud copy written by an older build cannot carry fields it never knew
    * about (digest, suggested tasks, …). Missing there does not mean "the user
    * removed it" — so keep this device's copy of any top-level field the
    * remote lacks, instead of letting the old build silently erase it. */
-  let effective = remoteStr;
-  try {
-    const remote = JSON.parse(remoteStr);
-    if (remote && typeof remote === 'object' && (Number(remote.build) || 1) < STATE_BUILD) {
-      const local = gatherState();
-      let patched = false;
-      Object.keys(local).forEach(k => { if (!(k in remote)) { remote[k] = local[k]; patched = true; } });
-      remote.build = STATE_BUILD;
-      if (patched) effective = JSON.stringify(remote);
-    }
-  } catch(e) {}
+  let effective = mergedStr || remoteStr;
+  if (!mergedStr) {
+    try {
+      const remote = JSON.parse(remoteStr);
+      if (remote && typeof remote === 'object' && (Number(remote.build) || 1) < STATE_BUILD) {
+        const local = gatherState();
+        let patched = false;
+        Object.keys(local).forEach(k => { if (!(k in remote)) { remote[k] = local[k]; patched = true; } });
+        remote.build = STATE_BUILD;
+        if (patched) effective = JSON.stringify(remote);
+      }
+    } catch(e) {}
+  }
   syncApplying = true;
   try {
     localStorage.setItem(LS_KEY, effective);
@@ -262,17 +282,27 @@ function syncApplyRemote(remoteStr, remoteUpdatedAt) {
     renderLoadedState();
     try { remoteFp = syncFingerprint(JSON.parse(remoteStr)); } catch(e) {}
   } finally {
-    if (remoteFp) { syncLastSeenFp = remoteFp; syncAgree(remoteFp, { editAt: remoteUpdatedAt || Date.now() }); }
+    if (remoteFp) { syncLastSeenFp = remoteFp; syncAgree(remoteFp, { editAt: remoteUpdatedAt || Date.now() }, remoteStr); }
     else syncLastSyncAt = Date.now();
     syncApplying = false;
   }
+  /* A loop is two devices each answering what the other just sent: an apply
+   * after which this device has to push something back (the other copy lacks
+   * what an older build strips). Changes made on the other device need no
+   * answer, however many there are, and a merge answers once and then agrees,
+   * so neither counts. */
+  const now = Date.now();
+  syncApplyTimes = syncApplyTimes.filter(t => now - t < SYNC_BOUNCE_MS);
+  const answer = !mergedStr && !!remoteFp && syncFingerprint(gatherState()) !== remoteFp;
+  if (answer) syncApplyTimes.push(now);
+  const bouncing = answer && syncApplyTimes.length >= SYNC_BOUNCE_N;
   if (bouncing && !syncBouncing) {
     syncBouncing = true;
     console.warn('[sync] remote applies are bouncing — another device is probably running an older Worky build');
     showToast('Sync keeps bouncing — update Worky on your other devices (close and reopen the app there).');
   } else if (!bouncing) {
     if (syncBouncing) syncBouncing = false;
-    showToast('Synced from cloud ✓');
+    showToast(mergedStr ? 'Synced from cloud, with your changes kept ✓' : 'Synced from cloud ✓');
   }
   syncUpdateUI();
   /* Persist any follow-up diff (rollover, or fields we protected above).
@@ -295,6 +325,8 @@ function syncApplyRemote(remoteStr, remoteUpdatedAt) {
  * that won the reconcile (and so dropped the digest) gets it merged back in. */
 function syncOnRemoteValue(snap) {
   const v = snap.val();
+  if (userTyping() && syncForeignChange(v)) { syncTypingValue = v; return; }
+  syncTypingValue = null;
   digestInboxLatest = (v && v.digestInbox) || null;
   syncReconcileRemote(v);
   digestInboxSeen(digestInboxLatest);         // backend-delivered digest, if any
@@ -302,6 +334,37 @@ function syncOnRemoteValue(snap) {
   digestGithubSeen(v ? v.digestGithub : null);     // the Run now token (Settings → Email Digest)
   bankCloudSeen(v ? v.bank : null);                // bank connections (Settings → Bank accounts)
 }
+/* While a text field has the focus, a change from another device waits:
+ * applying it redraws the screen, and whatever is half typed would go. The
+ * latest one is kept and taken in (merged with what was typed) when the
+ * field loses the focus; meanwhile this device doesn't push either, so it
+ * can't write over it. */
+let syncTypingValue = null;
+function syncForeignChange(v) {
+  if (!v || typeof v.state !== 'string' || v.client === syncClientId) return false;
+  try { return syncFingerprint(JSON.parse(v.state)) !== syncFingerprint(gatherState()); } catch(e) { return false; }
+}
+function syncTypingDone() {
+  if (!syncTypingValue || userTyping() || !syncRef) return;
+  const v = syncTypingValue;
+  syncTypingValue = null;
+  syncOnRemoteValue({ val: () => v });
+}
+
+/* Both this device and the cloud changed since the copy they last agreed on:
+ * the state with both sets of changes, or null without that copy. */
+function syncMergeRemote(remoteStr, knownHash, preferLocal) {
+  const base = knownHash ? syncBase(knownHash) : null;
+  if (!base) return null;
+  try {
+    const remote = JSON.parse(remoteStr);
+    if (!remote || typeof remote !== 'object') return null;
+    /* fields an older build's copy lacks were not deleted there: it never knew them */
+    if ((Number(remote.build) || 1) < STATE_BUILD) Object.keys(base).forEach(k => { if (!(k in remote)) remote[k] = base[k]; });
+    return JSON.stringify(syncMerge(base, gatherState(), remote, { preferLocal }));
+  } catch(e) { return null; }
+}
+
 function syncReconcileRemote(v) {
   const localFp = syncFingerprint(gatherState());
   syncReconciled = true;                      // from here on pushes are allowed
@@ -320,7 +383,7 @@ function syncReconcileRemote(v) {
     return;
   }
   if (v.client === syncClientId) {            // echo of our own write
-    try { syncAgree(syncFingerprint(JSON.parse(v.state))); } catch(e) {}
+    try { syncAgree(syncFingerprint(JSON.parse(v.state)), undefined, v.state); } catch(e) {}
     syncUpdateUI();
     return;
   }
@@ -342,7 +405,7 @@ function syncReconcileRemote(v) {
   }
   if (remoteFp === localFp) {                 // already identical
     syncLastSeenFp = remoteFp;
-    syncAgree(remoteFp);
+    syncAgree(remoteFp, undefined, v.state);
     syncUpdateUI();
     return;
   }
@@ -366,7 +429,8 @@ function syncReconcileRemote(v) {
    *   • only the cloud moved → apply it (the common "other device
    *     edited while this one was closed" case)
    *   • only this device moved → push it (offline edits)
-   *   • both moved → true conflict: newer edit wins by timestamp */
+   *   • both moved → merge the two against the copy both last agreed on;
+   *     without that copy, the newer edit wins by timestamp */
   const knownHash = syncKnownFp !== null ? syncHash(syncKnownFp) : (meta.knownHash || null);
   const localDirty  = knownHash ? syncHash(localFp)  !== knownHash : true;
   const remoteDirty = knownHash ? syncHash(remoteFp) !== knownHash : true;
@@ -374,10 +438,12 @@ function syncReconcileRemote(v) {
     syncApplyRemote(v.state, v.updatedAt);
   } else if (!remoteDirty) {
     syncPushNow();
-  } else if ((meta.editAt || 0) > (v.updatedAt || 0)) {
-    syncPushNow();
   } else {
-    syncApplyRemote(v.state, v.updatedAt);
+    const preferLocal = (meta.editAt || 0) > (v.updatedAt || 0);
+    const merged = syncMergeRemote(v.state, knownHash, preferLocal);
+    if (merged) syncApplyRemote(v.state, v.updatedAt, merged);
+    else if (preferLocal) syncPushNow();
+    else syncApplyRemote(v.state, v.updatedAt);
   }
 }
 
@@ -395,6 +461,7 @@ function syncStop() {
   syncPendingRemote = null;
   syncDeferredRemote = null;
   syncCommitPending = 0;
+  syncTypingValue = null;
   digestInboxLatest = null;
   setDigestInboxPending(null);
   setDigestPromptsSaved(undefined);             // they belong to the account that just left
@@ -566,6 +633,7 @@ export function syncInit() {
     syncUpdateUI();
     return;
   }
+  document.addEventListener('focusout', () => setTimeout(syncTypingDone, 0));   // a field was left: take in what waited
   firebase.auth().onAuthStateChanged(user => {
     syncUser = user;
     syncStop();

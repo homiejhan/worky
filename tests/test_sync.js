@@ -23,7 +23,7 @@ async function boot(name, storage = {}) {
       w.__stats = { applies: 0, pushes: 0 };
     },
     transform: src => src
-      .replace('function syncApplyRemote(remoteStr, remoteUpdatedAt) {', 'function syncApplyRemote(remoteStr, remoteUpdatedAt) { window.__stats.applies++;')
+      .replace('function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr) {', 'function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr) { window.__stats.applies++;')
       .replace('  syncRef.update(payload)', '  window.__stats.pushes++;\n  syncRef.update(payload)'),
   });
   w.document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
@@ -303,6 +303,77 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
     P2.w.__signOut(); await sleep(20);
     eq(P2.w.digestGithubToken(), '', 'signing out takes it off the phone');
     eq(cloud.val.digestGithub && cloud.val.digestGithub.token, 'github_pat_OLD', 'while the account keeps it');
+  }
+
+  /* Two devices open on one account, the way a person uses them. */
+  async function pair() {
+    reset();
+    const L = await boot('laptop', { 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }) });
+    L.w.__signIn(); await sleep(150);
+    const P = await boot('phone', { 'focus-app-state': cloud.val.state, 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: hashOf(L.w) }) });
+    P.w.__signIn(); await sleep(300);
+    return { L, P };
+  }
+  const dbdTexts = w => w.eval('dbdTasks.map(t => t.text)');
+  const addDbd = (w, text) => w.eval(`dbdTasks.push({ id: dbdIdCounter++, text: ${JSON.stringify(text)}, date: dbdTodayKey(), done: false }); saveToLocal();`);
+
+  console.log('\n── 10. Edits made on the other device are not a bounce ──');
+  {
+    const { L, P } = await pair();
+    for (let i = 1; i <= 5; i++) { addDbd(P.w, `phone task ${i}`); await sleep(2500); }
+    ok(L.w.__stats.applies >= 5, `the laptop took each of the phone's five edits (${L.w.__stats.applies} applies)`);
+    ok(!L.w.eval('syncBouncing') && !/older version/.test(L.d.getElementById('syncStatusLine').textContent), 'without calling it a loop or blaming an older version');
+    ok(!/keeps bouncing/.test(L.d.getElementById('toast').textContent), 'and without the bounce toast');
+    ok(hashOf(L.w) === hashOf(P.w), 'the two agree');
+  }
+
+  console.log('\n── 11. Both devices change something at once: both changes are kept ──');
+  {
+    const { L, P } = await pair();
+    const before = L.w.eval('dbdIdCounter');
+    addDbd(L.w, 'added on the laptop');
+    await sleep(400);
+    addDbd(P.w, 'added on the phone');                              // same new id: each device numbers its own
+    await sleep(4000);
+    ok(dbdTexts(L.w).includes('added on the laptop') && dbdTexts(L.w).includes('added on the phone'), 'the laptop has both');
+    ok(dbdTexts(P.w).includes('added on the laptop') && dbdTexts(P.w).includes('added on the phone'), 'the phone has both');
+    const ids = L.w.eval('dbdTasks.map(t => t.id)');
+    ok(new Set(ids).size === ids.length && L.w.eval('dbdIdCounter') >= before + 2, 'each under its own id, with the counter past both');
+    ok(hashOf(L.w) === hashOf(P.w) && JSON.parse(cloud.val.state).dbdTasks.length === ids.length, 'the devices and the account agree');
+    const n = L.w.__stats.pushes + P.w.__stats.pushes; await sleep(2500);
+    eq(L.w.__stats.pushes + P.w.__stats.pushes, n, 'and settle');
+    ok(/with your changes kept/.test(P.d.getElementById('toast').textContent) || /with your changes kept/.test(L.d.getElementById('toast').textContent),
+      'the device that merged says both were kept');
+
+    L.w.eval('budget.daily = 25; saveToLocal();');
+    await sleep(300);
+    P.w.eval("budget.purchases.push({ id: purchaseIdCounter++, title: 'Bagel', amount: 3 }); saveToLocal();");
+    await sleep(4000);
+    ok(L.w.eval('budget.daily') === 25 && P.w.eval('budget.daily') === 25 && [L, P].every(d => d.w.eval("budget.purchases.some(p => p.title === 'Bagel')")),
+      'a budget setting changed on one and a purchase added on the other: both, everywhere');
+  }
+
+  console.log('\n── 12. Typing on one device while the other saves ──');
+  {
+    const { L, P } = await pair();
+    P.w.eval("goTab('budget')");
+    const field = () => P.d.querySelector('#budgetContainer-m .budget-new-title');
+    field().focus();
+    field().value = 'Groceries';
+    addDbd(L.w, 'saved on the laptop meanwhile');
+    await sleep(2500);
+    ok(field().value === 'Groceries' && P.d.activeElement === field(), 'what is being typed on the phone stays, with the cursor');
+    ok(!dbdTexts(P.w).includes('saved on the laptop meanwhile'), 'the laptop\'s change waits');
+    P.d.querySelector('#budgetContainer-m .budget-new-amount').value = '23.40';
+    field().dispatchEvent(new P.w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await sleep(2000);
+    ok(P.w.eval("budget.purchases.some(p => p.title === 'Groceries')") && P.d.activeElement === field(), 'the purchase is added, the cursor back in the field');
+    ok(!L.w.eval("budget.purchases.some(p => p.title === 'Groceries')"), 'and not sent yet: it would go out over the laptop\'s change');
+    P.d.activeElement.blur();
+    await sleep(3000);
+    ok([L, P].every(d => d.w.eval("budget.purchases.some(p => p.title === 'Groceries')") && dbdTexts(d.w).includes('saved on the laptop meanwhile')),
+      'leaving the field takes the laptop\'s change in, merged with the purchase, on both');
+    ok(hashOf(L.w) === hashOf(P.w), 'and they agree');
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

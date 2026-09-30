@@ -624,6 +624,7 @@ async function sealV1(payload) {
     await sleep(1500);                                                       // the laptop's state reaches the account
     const P = await device(W, { transform: withRelay(RELAY), storage: { 'focus-app-state': cloud.at('users/user-c/state'),
       'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: L.w.eval('syncHash(syncFingerprint(gatherState()))') }) } });
+    P.w.eval('BANK_BUDGET_WAIT_MS = 2500');                                // shorter than 10 s, still past the laptop's 1.2 s push
     P.signIn('user-c');
     ok(await until(() => P.d.querySelectorAll('#bankPanel .bank-item').length === 1 || P.w.eval('bank.items.length') === 1), 'the phone signs in to the same account');
     await sleep(200);
@@ -651,9 +652,12 @@ async function sealV1(payload) {
       bud(L).querySelector('[data-pact="add"]').click();
     };
     add('Coffee', '4.75');
+    ok(L.w.eval('userTyping()'), 'after Add the cursor stays in "What did you buy?" for the next one');
     W.plaid.changeTransactions(access, { added: [tx('n-coffee', 4.75, today, 'STARBUCKS 800', { pending: true })] });
     await refresh(L);
-    ok(await until(() => purchases(L).some(p => p.title === 'Coffee' && p.bank === 'n-coffee')), 'a purchase typed by hand is matched to the bank\'s copy');
+    ok(!purchases(L).some(p => p.bank === 'n-coffee'), 'so a new bank transaction waits: logging would redraw Budget under the cursor');
+    L.d.activeElement.blur();
+    ok(await until(() => purchases(L).some(p => p.title === 'Coffee' && p.bank === 'n-coffee'), 12000), 'leaving the field lets it in: a purchase typed by hand is matched to the bank\'s copy');
     eq(purchases(L).filter(p => p.amount === 4.75).length, 1, 'not counted twice');
     const coffee = purchases(L).find(p => p.title === 'Coffee');
     bud(L).querySelector(`.budget-purchase-row[data-purchase-id="${coffee.id}"] [data-pact="del"]`).click();
@@ -693,13 +697,12 @@ async function sealV1(payload) {
 
     /* a refresh on a device that closed before its Budget changes reached the account */
     await sleep(1500);
-    P.w.eval('BANK_BUDGET_WAIT_MS = 400');
     const snack = { id: 'n-snack', account: 'acc-checking', date: today, name: 'Vending machine', amount: 2.5, pending: false };
     cloud.at(`users/user-c/bank/items/${itemId}`).transactions.unshift(snack);
     cloud.emit();
     await sleep(50);
     ok(!purchases(P).some(p => p.bank === 'n-snack'), 'a transaction another device fetched is not logged here at once: that device logs it');
-    ok(await until(() => purchases(P).some(p => p.bank === 'n-snack'), 2000), 'but if its Budget changes never arrive, this device logs it after a short wait');
+    ok(await until(() => purchases(P).some(p => p.bank === 'n-snack'), 4000), 'but if its Budget changes never arrive, this device logs it after a short wait');
     await sleep(1800);
     ok([L, P].every(app => purchases(app).filter(p => p.bank === 'n-snack').length === 1), 'once, on every device');
 

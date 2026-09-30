@@ -1,5 +1,5 @@
 /* budget.js — The daily-envelope budget. */
-import { $, calKeyToDate, escAttr, showToast } from './util.js';
+import { $, calKeyToDate, escAttr, showToast, userTyping } from './util.js';
 import { saveToLocal } from './persistence.js';
 import { dbdTodayKey } from './dbd.js';
 import { homeDesktopOpen, homeToggleDesktop, renderHome } from './home.js';
@@ -551,9 +551,12 @@ function removePurchase(id) {
 
 /* ── bank transactions (the rules are in bankbudget.js) ──
  * bank.js hands over the signed-in account's connections whenever they change:
- * a refresh on this device, or the account's copy changing. */
+ * a refresh on this device, or the account's copy changing. Returns false when
+ * it waited because something is being typed (logging redraws Budget), for
+ * bank.js to hand them over again a little later. */
 export function budgetFromBank(items) {
-  if (!bankBudget.on || !Array.isArray(items)) return;
+  if (!bankBudget.on || !Array.isArray(items)) return true;
+  if (userTyping()) return false;
   const rolled = budgetRollover();                     // today's purchases must be today's
   const r = bankBudgetStep({ tracked: bankBudget.items, items, purchases: budget.purchases, today: dbdTodayKey(), nextId: purchaseIdCounter });
   if (r.changed) {
@@ -564,9 +567,10 @@ export function budgetFromBank(items) {
     const since = addDays(dbdTodayKey(), -BANK_LOG_DAYS);
     bankBudget.log = [...r.log.reverse(), ...bankBudget.log].filter(l => l.d >= since).slice(0, BANK_LOG_MAX);
   }
-  if (!r.changed && !rolled) return;
+  if (!r.changed && !rolled) return true;
   budgetChanged();
   if (r.logged) showToast(r.logged === 1 ? 'Logged 1 bank transaction in Budget' : `Logged ${r.logged} bank transactions in Budget`);
+  return true;
 }
 /* Settings → Bank accounts: turning it on starts a new sync point, off forgets it. */
 export function budgetFollowBank(on, items) {

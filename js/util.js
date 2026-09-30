@@ -52,6 +52,14 @@ export function escAttr(s) {
 }
 
 let _toastTimer = null;
+/* A text field has the focus: something may be half typed in it, and redrawing
+ * the screen now would take it away (sync.js holds other devices' changes). */
+export function userTyping() {
+  const el = document.activeElement;
+  return !!el && typeof el.matches === 'function' && el.matches('textarea, [contenteditable="true"], input:not([type]), '
+    + 'input[type="text"], input[type="search"], input[type="email"], input[type="url"], input[type="tel"], input[type="number"], input[type="password"]');
+}
+
 export function showToast(msg) {
   const t = $('toast');
   t.textContent = msg;
