@@ -17,6 +17,9 @@
  *   • a plain value both sides changed goes to the newer edit (`preferLocal`),
  *     except an id counter, which takes the higher of the two;
  *   • any other list (a list's active days, …) is one value.
+ * Budget's balance and the bank transactions it counted go together: when both
+ * sides changed the balance, the counted transactions come from the same side
+ * as the balance (see keepBankWithBalance).
  * Afterwards every id counter is moved past the ids in use, and a purchase that
  * both devices logged from the bank is kept once. */
 
@@ -106,9 +109,27 @@ function settle(st) {
   return st;
 }
 
+/* When both sides changed Budget's balance (a new day rolled over on the phone
+ * while the laptop logged a paycheck, say), the merged balance is one side's.
+ * The bank transactions counted in it (bankBudget.items) and the From your bank
+ * lines (bankBudget.log) must be that side's too: merged key by key, the other
+ * side's paycheck would be marked as counted without being in the balance, and
+ * never logged again. This way whatever only the other side counted is logged
+ * on the next pass (bankbudget.js), and a purchase it logged is taken as is. */
+function keepBankWithBalance(out, base, local, remote, preferLocal) {
+  const initial = st => (isObj(st) && isObj(st.budget) ? st.budget.initial : undefined);
+  const [b, l, r] = [initial(base), initial(local), initial(remote)];
+  if (same(l, r) || same(l, b) || same(r, b)) return out;
+  const side = preferLocal ? local : remote;
+  if (isObj(out.bankBudget) && isObj(side.bankBudget)) {
+    out.bankBudget = { ...out.bankBudget, items: side.bankBudget.items, log: side.bankBudget.log };
+  }
+  return out;
+}
+
 /* The state with both devices' changes. base: the copy both last agreed on;
  * local: this device's; remote: the cloud's. preferLocal: this device's edit is
  * the newer one, for a value both changed. */
 export function syncMerge(base, local, remote, { preferLocal = false } = {}) {
-  return settle(merge(base, local, remote, { preferLocal }));
+  return settle(keepBankWithBalance(merge(base, local, remote, { preferLocal }), base, local, remote, preferLocal));
 }

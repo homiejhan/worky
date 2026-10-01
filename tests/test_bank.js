@@ -65,6 +65,7 @@ async function sealV1(payload) {
     let r = await call('health', undefined, { auth: null });
     ok(r.status === 200 && r.data.ok && r.data.env === 'sandbox' && r.data.redirect === false, 'health: set up, sandbox, no OAuth redirect');
     eq(r.data.auth, true, 'and checks sign-ins (FIREBASE_PROJECT_ID is set)');
+    eq(r.data.version, 3, 'and says which version it is, so the app can tell an older relay to be redeployed');
     ok(r.status === 200, 'health needs no sign-in');
     r = await call('health', undefined, { env: { PLAID_ENV: 'sandbox' }, auth: null });
     ok(!r.data.ok && r.data.problems.length === 4 && r.data.auth === false, `health names what is missing: ${r.data.problems.join('; ')}`);
@@ -186,6 +187,10 @@ async function sealV1(payload) {
     ok(chk.name === 'Plaid Checking' && chk.mask === '0000' && chk.current === 110 && chk.available === 100 && chk.currency === 'USD', 'names, masks, balances and currency');
     eq(r.data.institution_id, 'ins_109508', 'and the bank');
     eq(Object.keys(chk).sort().join(), 'available,currency,current,id,limit,mask,name,official_name,subtype,type', 'nothing else is passed on');
+    eq(r.data.checked_at, '2026-09-30T06:12:00Z', 'and when Plaid last got transactions from the bank (/item/get)');
+    plaid.state.failNext = { path: '/item/get', status: 500, error_code: 'INTERNAL_SERVER_ERROR', error_type: 'API_ERROR' };
+    r = await call('accounts', { token });
+    ok(r.status === 200 && r.data.accounts.length === 3 && r.data.checked_at === null, 'if Plaid can\'t say, the accounts still come back, without it');
 
     r = await call('transactions', { token, cursor: '' });
     eq(r.data.added.length, 7, 'all pages in one answer (Plaid paged 4 + 3)');
@@ -374,6 +379,12 @@ async function sealV1(payload) {
     ok(await until(() => /out of date: it doesn't check sign-ins yet/.test(o.d.getElementById('bankPanel').textContent)),
       'a relay from before sign-ins were checked (no `auth` in /health) is called out of date');
     ok(o.d.querySelector('.bank-relay-line.warn'), 'as a warning');
+    const v2Relay = async () => ({ ok: true, status: 200, json: async () => ({ ok: true, env: 'production', redirect: true, auth: true, problems: [] }) });
+    const o2 = await loadApp({ storage: { 'focus-tour-done': '1' }, before: w => { w.fetch = v2Relay; install(w); }, transform: withRelay('https://relay.example.workers.dev') });
+    o2.w.openSettings('bank');
+    ok(await until(() => /Plaid production, out of date: deploy the current backend\/bank/.test(o2.d.getElementById('bankPanel').textContent)),
+      'one that checks sign-ins but is older than version 3 works, and is asked to be redeployed');
+    ok(o2.d.querySelector('.bank-relay-line.warn'), 'as a warning too');
   }
 
   console.log('\n── 8. Connect a bank: relay address, sign-in, Plaid\'s window, saved to the account ──');
@@ -651,14 +662,31 @@ async function sealV1(payload) {
       bud(L).querySelector('.budget-new-amount').value = amount;
       bud(L).querySelector('[data-pact="add"]').click();
     };
+    const newTitle = () => bud(L).querySelector('.budget-new-title');
     add('Coffee', '4.75');
-    ok(L.w.eval('userTyping()'), 'after Add the cursor stays in "What did you buy?" for the next one');
+    newTitle().focus();                                                    // "+ Add" puts the cursor back for the next one
     W.plaid.changeTransactions(access, { added: [tx('n-coffee', 4.75, today, 'STARBUCKS 800', { pending: true })] });
     await refresh(L);
-    ok(!purchases(L).some(p => p.bank === 'n-coffee'), 'so a new bank transaction waits: logging would redraw Budget under the cursor');
-    L.d.activeElement.blur();
-    ok(await until(() => purchases(L).some(p => p.title === 'Coffee' && p.bank === 'n-coffee'), 12000), 'leaving the field lets it in: a purchase typed by hand is matched to the bank\'s copy');
+    ok(await until(() => purchases(L).some(p => p.title === 'Coffee' && p.bank === 'n-coffee'), 1000),
+      'a cursor left in "What did you buy?" holds nothing up: the bank\'s copy is matched to the purchase typed by hand');
     eq(purchases(L).filter(p => p.amount === 4.75).length, 1, 'not counted twice');
+    ok(L.d.activeElement === newTitle(), 'and the cursor is still in the field');
+
+    /* someone typing: logging waits for a pause, then keeps what was typed */
+    L.w.eval('TYPING_PAUSE_MS = 1000; BANK_BUDGET_WAIT_MS = 1500');
+    newTitle().focus();
+    newTitle().value = 'Ban';
+    newTitle().dispatchEvent(new L.w.Event('input', { bubbles: true }));
+    W.plaid.changeTransactions(access, { added: [tx('n-vend', 1.25, today, 'Vending machine')] });
+    const syncs = W.plaid.state.calls.filter(c => c.path === '/transactions/sync').length;
+    L.w.eval('bankRefreshNow(bankItems()[0])');                               // Refresh without leaving the field
+    await until(() => W.plaid.state.calls.filter(c => c.path === '/transactions/sync').length > syncs, 3000);
+    await sleep(100);
+    ok(!purchases(L).some(p => p.bank === 'n-vend'), 'while something is being typed, a new bank transaction waits: logging redraws Budget');
+    ok(await until(() => purchases(L).some(p => p.bank === 'n-vend'), 4000), 'a pause in the typing lets it in');
+    ok(newTitle().value === 'Ban' && L.d.activeElement === newTitle(), 'with what was typed still in the field, and the cursor');
+    newTitle().value = '';
+    L.w.eval('TYPING_PAUSE_MS = 4000; BANK_BUDGET_WAIT_MS = 10000');
     const coffee = purchases(L).find(p => p.title === 'Coffee');
     bud(L).querySelector(`.budget-purchase-row[data-purchase-id="${coffee.id}"] [data-pact="del"]`).click();
     ok(!purchases(L).some(p => p.title === 'Coffee'), 'taken out of Budget with ×');
@@ -717,6 +745,86 @@ async function sealV1(payload) {
     ok(await until(() => purchases(Q).some(p => p.bank === 'n-bus'), 3000), 'a device that opens with the bank two hours old refreshes it on its own and logs what is new');
     await sleep(2500);
     ok([L, P, Q].every(app => purchases(app).filter(p => p.bank === 'n-bus').length === 1), 'every device ends up with it once');
+
+    /* what From your bank says */
+    await refresh(L);
+    const note = () => [...bud(L).querySelectorAll('.budget-bank-note')].map(n => n.textContent.replace(/\s+/g, ' ').trim()).join(' | ');
+    ok(/Following Plaid Checking ••0000 at First Platypus Bank since today\./.test(note()), `From your bank says which account it follows, since when: "${note()}"`);
+    ok(/Checked at \d{1,2}:\d\d [AP]M; Plaid last heard from First Platypus Bank (at|on) [^.]*\d:\d\d [AP]M\./.test(note()), 'when Focus last checked, and when Plaid last heard from the bank');
+    ok(/a purchase can take a few hours to show up/.test(note()), 'and that a purchase can take hours to reach Plaid');
+    eq(L.w.eval('bankItems()[0].checkedAt'), Date.parse('2026-09-30T06:12:00Z'), 'the relay\'s checked_at is kept with the connection');
+
+    /* a slow refresh finishing after a faster one */
+    const realFetch = L.w.fetch;
+    let release = null;
+    const gate = new Promise(r => { release = r; });
+    L.w.fetch = async (u, o) => { const res = await realFetch(u, o); if (String(u).endsWith('/transactions')) await gate; return res; };
+    const slow = L.w.eval('bankRefresh(syncUser.uid, bankItems()[0])');   // fetched now, written later
+    await sleep(100);
+    L.w.fetch = realFetch;
+    W.plaid.changeTransactions(access, { added: [tx('n-late', 3, today, 'Parking')] });
+    await refresh(P);                                                      // the phone refreshes meanwhile, and logs it
+    ok(await until(() => (cloudItems('user-c')[itemId].transactions || []).some(t => t.id === 'n-late') && L.w.eval('bankItems()[0].transactions.some(t => t.id === "n-late")'), 3000),
+      'meanwhile another device\'s refresh brings a new transaction');
+    release();
+    await slow;
+    await sleep(100);
+    ok((cloudItems('user-c')[itemId].transactions || []).some(t => t.id === 'n-late'), 'the slower refresh, written last, keeps it: it is written onto the latest copy');
+    await sleep(2500);
+    ok([L, P].every(app => purchases(app).filter(p => p.bank === 'n-late').length === 1), 'and it is counted once');
+
+    /* a slow refresh that ends in a bank error */
+    W.plaid.state.failNext = { path: '/transactions/sync', status: 400, error_code: 'ITEM_LOGIN_REQUIRED', error_type: 'ITEM_ERROR' };
+    let release2 = null;
+    const gate2 = new Promise(r => { release2 = r; });
+    L.w.fetch = async (u, o) => { const res = await realFetch(u, o); if (String(u).endsWith('/transactions')) await gate2; return res; };
+    const failing = L.w.eval('bankRefresh(syncUser.uid, bankItems()[0])');
+    await sleep(100);
+    L.w.fetch = realFetch;
+    W.plaid.changeTransactions(access, { added: [tx('n-late2', 4, today, 'Bus')] });
+    await refresh(P);
+    ok(await until(() => L.w.eval('bankItems()[0].transactions.some(t => t.id === "n-late2")'), 3000), 'meanwhile another device\'s refresh brings another');
+    release2();
+    await failing;
+    await sleep(100);
+    const errored = cloudItems('user-c')[itemId];
+    ok(errored.error && errored.error.code === 'ITEM_LOGIN_REQUIRED', 'the slow refresh fails with a bank error: saved with the connection');
+    ok(errored.transactions.some(t => t.id === 'n-late2'), 'onto the latest copy: its transactions stay');
+    ok(/First Platypus Bank needs attention: log in to it again/.test(note()), `and From your bank says so: "${note()}"`);
+    await refresh(L);
+    ok(!cloudItems('user-c')[itemId].error, 'a refresh that works clears it');
+
+    /* a pending charge crowded out by other accounts' rows, then posting */
+    const twoDaysAgo = L.w.eval('addDays(dbdTodayKey(), -2)');
+    W.plaid.changeTransactions(access, { added: [tx('n-hotel', 80, twoDaysAgo, 'Hotel hold', { pending: true })] });
+    await refresh(L);
+    ok(await until(() => L.w.eval('bankBudget.log').some(l => l.n === 'Hotel hold')), 'a pending hold dated two days ago is logged in the balance');
+    const held = L.w.eval('budget.initial');
+    W.plaid.changeTransactions(access, { added: Array.from({ length: 55 }, (_, i) => tx(`n-card-${i}`, 2, yesterday, `Card ${i}`, { account_id: 'acc-credit' })) });
+    await refresh(L);
+    ok(L.w.eval('bankItems()[0].transactions.some(t => t.id === "n-hotel")'), 'fifty-five newer credit card rows: the pending hold stays in the list (every pending one does)');
+    W.plaid.changeTransactions(access, { removed: ['n-hotel'], added: [tx('n-hotel-posted', 80, today, 'Hotel', { pending_transaction_id: 'n-hotel' })] });
+    await refresh(L);
+    await sleep(100);
+    ok(L.w.eval('budget.initial') === held && !purchases(L).some(p => p.bank === 'n-hotel-posted'), 'so when it posts it is the same charge, not counted again');
+
+    /* a connection whose first refresh never finished */
+    const node0 = cloud.at(`users/user-c/bank/items/${itemId}`);
+    node0.updatedAt = 0;
+    node0.addedAt = Date.now() - 10 * 60000;
+    cloud.emit();
+    await sleep(50);
+    const syncs0 = W.plaid.state.calls.filter(c => c.path === '/transactions/sync').length;
+    L.w.eval('bankAutoAt = 0; bankAutoRefresh()');
+    ok(await until(() => W.plaid.state.calls.filter(c => c.path === '/transactions/sync').length > syncs0 && L.w.eval('bankItems()[0].updatedAt') > 0, 3000),
+      'a connection never refreshed (its first refresh failed) is refreshed on its own once it is five minutes old');
+
+    /* Disconnect */
+    await sleep(1500);
+    L.w.openSettings('bank');
+    L.d.querySelector(`[data-bank="disconnect"][data-item="${itemId}"]`).click();
+    ok(await until(() => !L.w.eval('bankBudget.items')[itemId], 3000), 'Disconnect drops the bank\'s sync point');
+    ok(await until(() => !P.w.eval('bankBudget.items')[itemId], 4000), 'on every device');
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

@@ -22,7 +22,7 @@ Settings → Bank accounts → Connect ──────► POST /link-token �
 Plaid's window: pick a bank, log in ◄───── link token
 login done (one-time public token) ──────► POST /exchange ─────────────────────► /item/public_token/exchange
 saves it to users/<uid>/bank/items/<id> ◄─ token sealed with the uid
-Refresh, on any device of the account ───► POST /accounts, /transactions ──────► /accounts/get, /transactions/sync
+Refresh, on any device of the account ───► POST /accounts, /transactions ──────► /accounts/get, /item/get, /transactions/sync
   (or on its own, every half hour)
 Disconnect ──────────────────────────────► POST /remove ───────────────────────► /item/remove
 ```
@@ -31,9 +31,14 @@ The app refreshes a bank on its own once what it has is half an hour old, and,
 with **Log new transactions in Budget** on (the default), logs each new
 transaction from a checking account in Budget (`js/bankbudget.js` has the rules).
 A posted transaction carries `pending_id`, the pending one it replaces, so a
-charge that posts stays one purchase. That needs this relay as it is now: an
-older one leaves `pending_id` out, and a posted charge then shows up as the
-pending one given back plus a new purchase, which adds up the same.
+charge that posts stays one purchase, and `/accounts` says when Plaid last got
+transactions from the bank (`checked_at`, from `/item/get`): banks send Plaid new
+ones only a few times a day, and Budget shows that time so a purchase that hasn't
+appeared yet isn't a mystery. Both need this relay as it is now, version 3
+(`/health` says `"version":3`). Settings calls an older one out of date: it
+still works, but a posted charge then shows up as the pending one given back
+plus a new purchase (which adds up the same), and Plaid's last check is unknown.
+To update it, run `npx wrangler deploy` in this folder again.
 
 **How the relay checks a sign-in.** An ID token is a JWT that Google signs with
 RS256. The relay fetches Google's public keys
@@ -130,7 +135,7 @@ npx wrangler secret put PLAID_CLIENT_ID
 npx wrangler secret put PLAID_SECRET
 npx wrangler secret put RELAY_KEY        # a new one for this relay; keep it safe
 npx wrangler deploy                      # prints https://focus-bank-relay.<you>.workers.dev
-curl https://focus-bank-relay.<you>.workers.dev/health    # → {"ok":true,"env":"sandbox",…,"auth":true,…}
+curl https://focus-bank-relay.<you>.workers.dev/health    # → {"ok":true,"env":"sandbox",…,"auth":true,"version":3,…}
 ```
 
 In `wrangler.toml`, set `ALLOWED_ORIGINS` to where the app runs

@@ -22,6 +22,8 @@ import { addDays } from './runway.js';
 const HISTORY_DAYS = 3;          // new rows dated this long before the sync point are late history, not new money
 const SPENDING = new Set(['checking', 'prepaid', 'cash management', 'paypal']);
 const round2 = n => Math.round((Number(n) || 0) * 100) / 100;
+const canon = v => (Array.isArray(v) ? v.map(canon)
+  : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k => [k, canon(v[k])])) : v);   // key order is not a change
 
 /* The accounts Budget follows: where day-to-day money comes and goes. */
 export function bankSpendingAccount(a) { return !!a && a.type === 'depository' && SPENDING.has(a.subtype); }
@@ -54,8 +56,9 @@ function rec(t, prev, logged) {
  * Returns the new tracked and purchases, `balance` (how much the total balance
  * moves outside today's purchases; + is more money), `log` (a line for each of
  * those moves: { d, n, a }, a signed the same way), `nextId`, `logged` (how many
- * transactions changed the budget) and `changed`. A connection that is gone
- * loses its sync point: connected again, it starts a new one. */
+ * transactions changed the budget) and `changed`. A connection missing from
+ * `items` keeps its sync point (a copy of the list can lag); Disconnect drops it
+ * (budget.js → budgetForgetBank), and connected again it starts a new one. */
 export function bankBudgetStep({ tracked = {}, items = [], purchases = [], today, nextId = 1 }) {
   const res = { tracked: {}, purchases: purchases.map(p => ({ ...p })), balance: 0, log: [], nextId, logged: 0, changed: false };
   const entryFor = id => res.purchases.find(p => p.bank === id);
@@ -63,6 +66,8 @@ export function bankBudgetStep({ tracked = {}, items = [], purchases = [], today
     res.balance = round2(res.balance - amount);
     res.log.push({ d: date, n: String(name || '').slice(0, 60), a: round2(-amount) });
   };
+  const listed = new Set(items.filter(i => i && i.id).map(i => i.id));
+  Object.keys(tracked).forEach(id => { if (!listed.has(id)) res.tracked[id] = tracked[id]; });
 
   for (const item of items) {
     if (!item || !item.id) continue;
@@ -87,22 +92,25 @@ export function bankBudgetStep({ tracked = {}, items = [], purchases = [], today
       const known = seen[t.id];
       if (known) {                                                               // Plaid changed a transaction we counted
         const delta = round2(t.amount - known.a);
+        const e = entryFor(t.id);
         if (delta && !known.x) {
-          const e = entryFor(t.id);
           if (e) e.amount = round2(e.amount + delta); else toBalance(delta, t.date, t.name);
           res.logged++;
         }
+        if (e) { if (t.pending) e.pending = true; else delete e.pending; }       // some banks post a charge under the same id
         seen[t.id] = rec(t, known);
         continue;
       }
       const pend = t.pending_id ? seen[t.pending_id] : null;
       if (pend) {                                                                // a pending charge posted
         const delta = round2(t.amount - pend.a);
-        const e = entryFor(t.pending_id);
+        const e = entryFor(t.pending_id) || entryFor(t.id);
         if (e) {
-          e.bank = t.id;
+          if (e.bank !== t.id) {                                                 // (another device's copy may have moved it already)
+            e.bank = t.id;
+            if (delta) { e.amount = round2(e.amount + delta); res.logged++; }
+          }
           if (t.pending) e.pending = true; else delete e.pending;
-          if (delta) { e.amount = round2(e.amount + delta); res.logged++; }
         } else if (delta && !pend.x) { toBalance(delta, t.date, t.name); res.logged++; }
         seen[t.id] = rec(t, pend);
         delete seen[t.pending_id];
@@ -110,8 +118,9 @@ export function bankBudgetStep({ tracked = {}, items = [], purchases = [], today
       }
       if (t.date < addDays(before.since, -HISTORY_DAYS)) { seen[t.id] = rec(t); continue; }   // history Plaid sent late
       seen[t.id] = rec(t, null, true);
+      if (entryFor(t.id)) continue;                                              // already a purchase: another device logged it, and this pass's count lost a merge to it
       res.logged++;
-      if (t.amount > 0 && t.date === today) {
+      if (t.amount > 0 && t.date >= today) {                                     // (a bank a time zone ahead can date it tomorrow)
         const typed = res.purchases.find(p => !p.bank && round2(p.amount) === round2(t.amount));
         if (typed) { typed.bank = t.id; if (t.pending) typed.pending = true; }
         else {
@@ -124,14 +133,19 @@ export function bankBudgetStep({ tracked = {}, items = [], purchases = [], today
     }
 
     /* Counted transactions no longer in the bank's list. The list keeps only the
-     * newest rows, so an old one simply aged out; a pending charge dated inside
-     * what the list still covers was dropped by the bank, and is given back. */
+     * newest rows (and every pending one), so an old one simply aged out; a
+     * pending charge dated inside what the list still covers was dropped by the
+     * bank, and is given back. A posted one that should still be listed is
+     * missing only from this copy of the list (one saved before it came): it
+     * stays counted, so it isn't counted again when it comes back. */
     const full = all.length >= 50;
     const oldest = all.reduce((m, t) => (t && t.date && (!m || t.date < m) ? t.date : m), '');
     for (const [id, s] of Object.entries(seen)) {
       if (present.has(id) && !superseded.has(id)) continue;
+      const agedOut = full && !(s.d > oldest);
+      if (!s.p && !superseded.has(id) && !agedOut) continue;
       delete seen[id];
-      if (superseded.has(id) || !s.p || s.x || (full && !(s.d > oldest))) continue;
+      if (superseded.has(id) || !s.p || s.x || agedOut) continue;
       const e = entryFor(id);
       if (e) res.purchases = res.purchases.filter(p => p !== e);
       else toBalance(-s.a, s.d, s.n || 'A pending charge');
@@ -141,8 +155,24 @@ export function bankBudgetStep({ tracked = {}, items = [], purchases = [], today
   }
 
   res.changed = res.balance !== 0 || res.nextId !== nextId
-    || JSON.stringify([tracked, purchases]) !== JSON.stringify([res.tracked, res.purchases]);
+    || JSON.stringify(canon([tracked, purchases])) !== JSON.stringify(canon([res.tracked, res.purchases]));
   return res;
+}
+
+/* What Budget does with each connection, for Budget to say so:
+ *   { id, bank, accounts: [{ name, mask }], state, since }
+ * state: 'following' (its checking accounts are logged from `since`), 'none'
+ * (it has no checking account, so nothing to log), 'waiting' (no sync point
+ * yet: Plaid is still gathering its history) or 'error' (it needs attention in
+ * Settings → Bank accounts; `error` says why). */
+export function bankBudgetFollowing(tracked = {}, items = []) {
+  return items.filter(i => i && i.id).map(item => {
+    const t = tracked[item.id];
+    const accounts = (item.accounts || []).filter(bankSpendingAccount).map(a => ({ name: a.name || 'Checking', mask: a.mask || null }));
+    const state = item.error ? 'error' : !(t && t.since) ? 'waiting' : accounts.length ? 'following' : 'none';
+    return { id: item.id, bank: (item.institution && item.institution.name) || 'Your bank', accounts, state,
+      since: t && t.since ? t.since : null, ...(item.error ? { error: item.error } : {}) };
+  });
 }
 
 /* The user took a purchase from the bank out of Budget: never count that

@@ -274,6 +274,8 @@
         <li>A purchase you typed today for the same amount is matched to the bank's copy instead of counted twice. Remove a purchase from the bank with × and it won't come back.</li>
         <li>While Budget follows your bank, a new day carries your total balance over as it is: paychecks and bills come in and out with your bank's transactions, and the daily budget is only what you let yourself spend. The cash runway still counts the bills ahead.</li>
         <li>Focus checks your banks every half hour while it's open, so you don't need to press Refresh.</li>
+        <li><strong>How quickly a purchase shows up</strong> depends on your bank: banks send Plaid new transactions only a few times a day, so a card purchase can take a few hours to appear, and some banks only send it once it posts. Under From your bank, Budget says which account it follows and since when, when Focus last checked, and when Plaid last heard from your bank. A purchase that arrives on a later day than you made it goes to your total balance, listed under From your bank, not under Purchases today.</li>
+        <li>If From your bank says a bank has <strong>no checking account connected</strong>, nothing from it is logged: credit cards are left out because their purchases would be counted again when you pay the card from checking.</li>
       </ul>
       <h3>Cash runway</h3>
       <p>Enter your <strong>next payday</strong>, how often you're paid, and your <strong>monthly bills</strong> with the day each is due. Focus walks forward day by day: each day costs your daily budget, each bill comes out on its day, and pay for the shifts you work before payday arrives on payday. It tells you how many days of cash you have and, if the money runs out first, on which day and why.</p>
@@ -316,7 +318,7 @@
       <ul>
         <li><strong>What syncs:</strong> timers, lists and tasks, Daily routines, the calendar and its weekly blocks, shifts and wages, the budget, payday and bills, your theme and which sections show, the email digest with its GitHub token for Run now, and your <a href="#bank">bank connections</a>.</li>
         <li><strong>What stays on each device:</strong> the Google Calendar connection.</li>
-        <li><strong>Both devices open:</strong> changes made on each are combined, even at the same moment: a task added on your phone and a purchase added on your computer both stay. While you type in a field, changes from your other devices wait until you leave it, so nothing you're typing is cleared.</li>
+        <li><strong>Both devices open:</strong> changes made on each are combined, even at the same moment: a task added on your phone and a purchase added on your computer both stay. While you type, changes from your other devices wait until you pause, then come in without clearing what you typed or moving your cursor.</li>
         <li>While <a href="#formats">Formats</a> is open, sync waits until you press Done.</li>
         <li><strong>Sign out</strong> in the same place. Your data stays on the device and in the cloud.</li>
       </ul>

@@ -52,12 +52,67 @@ export function escAttr(s) {
 }
 
 let _toastTimer = null;
-/* A text field has the focus: something may be half typed in it, and redrawing
- * the screen now would take it away (sync.js holds other devices' changes). */
+/* ── Typing ──
+ * Someone is typing: a text field has the focus and was typed in a moment ago.
+ * Meanwhile other devices' changes and new bank transactions wait (sync.js,
+ * budget.js), since taking one in redraws the screen under the cursor. A cursor
+ * merely left in a field (the one "+ Add" puts back for the next purchase)
+ * holds nothing up: keepField() carries it, and anything typed but not saved
+ * yet, across the redraw. */
+let TYPING_PAUSE_MS = 4000;       // this long without a keystroke ends the typing (let: tests shorten it)
+let typedAt = 0;
+const TEXT_FIELD = 'textarea, [contenteditable="true"], input:not([type]), input[type="text"], input[type="search"], '
+  + 'input[type="email"], input[type="url"], input[type="tel"], input[type="number"], input[type="password"]';
+const isTextField = el => !!el && typeof el.matches === 'function' && el.matches(TEXT_FIELD);
+export function watchTyping() {
+  document.addEventListener('input', e => { if (isTextField(e.target)) typedAt = Date.now(); }, true);
+}
 export function userTyping() {
+  return isTextField(document.activeElement) && Date.now() - typedAt < TYPING_PAUSE_MS;
+}
+/* Milliseconds until the typing counts as paused (0 when nobody is typing). */
+export function typingPauseIn() { return userTyping() ? TYPING_PAUSE_MS - (Date.now() - typedAt) : 0; }
+
+/* Run a redraw, then put the focus back in the redrawn copy of the field that
+ * had it, with the cursor where it was and anything typed that isn't saved yet.
+ * The field is found again by where it sits: the nearest element with an id,
+ * then each element's tag and data-* attributes down to it (and its classes). */
+export function keepField(redraw) {
   const el = document.activeElement;
-  return !!el && typeof el.matches === 'function' && el.matches('textarea, [contenteditable="true"], input:not([type]), '
-    + 'input[type="text"], input[type="search"], input[type="email"], input[type="url"], input[type="tel"], input[type="number"], input[type="password"]');
+  if (!isTextField(el) || el.isContentEditable) return redraw();
+  const where = fieldPath(el);
+  const typed = el.value !== el.defaultValue ? el.value : null;
+  let sel = null;
+  try { sel = [el.selectionStart, el.selectionEnd]; } catch (e) {}
+  const out = redraw();
+  const next = !el.isConnected && where ? document.querySelector(where) : null;
+  if (next && isTextField(next) && !next.isContentEditable) {
+    if (typed !== null) {
+      next.value = typed;
+      /* set by script, the field sends no change event when it is left: send
+       * one then, so what was typed is saved like any edit */
+      let changed = false;
+      next.addEventListener('change', () => { changed = true; }, { once: true });
+      next.addEventListener('blur', () => {
+        if (!changed && next.isConnected && next.value !== next.defaultValue) next.dispatchEvent(new Event('change', { bubbles: true }));
+      }, { once: true });
+    }
+    next.focus({ preventScroll: true });
+    try { if (sel && sel[0] !== null) next.setSelectionRange(sel[0], sel[1]); } catch (e) {}
+  }
+  return out;
+}
+function fieldPath(el) {
+  const q = v => String(v).replace(/[\\"]/g, '\\$&').replace(/\n/g, '\\a ');
+  const steps = [];
+  for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+    if (n.id) return [`[id="${q(n.id)}"]`, ...steps].join(' > ');
+    let s = n.tagName.toLowerCase();
+    for (const a of n.attributes) if (a.name.startsWith('data-')) s += `[${a.name}="${q(a.value)}"]`;
+    if (n === el) for (const c of n.classList) s += `[class~="${q(c)}"]`;
+    steps.unshift(s);
+  }
+  return '';
 }
 
 export function showToast(msg) {

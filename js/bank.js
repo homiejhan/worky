@@ -15,22 +15,25 @@
  * connection is read-only. */
 import { BANK_LS_KEY, BANK_RELAY_URL, PLAID_LINK_JS } from './config.js';
 import { $, calKeyToDate, escAttr, showToast } from './util.js';
-import { bankBudget, budgetFollowBank, budgetFromBank, money } from './budget.js';
+import { bankBudget, budgetFollowBank, budgetForgetBank, budgetFromBank, budgetSeeBank, money } from './budget.js';
 import { syncBtnClick, syncConfigured, syncRef, syncUser } from './sync.js';
 
 const BANK_LINK_SS_KEY = 'focus-bank-link';   // { uid, token }: the link token, while an OAuth bank sends the user back
 const BANK_TOKEN = /^v2\./;                    // sealed to an account; an older build's v1 tokens belonged to a device
 const BANK_ID = /^[\w-]{1,128}$/;              // a Plaid item id, used as a database key
-const BANK_TX_KEEP = 50;                        // newest transactions kept per bank
+const BANK_RELAY_VERSION = 3;                   // what /health must say: pending_id on transactions, checked_at on accounts
+const BANK_TX_KEEP = 50;                        // newest transactions kept per bank (and every pending one)
 const BANK_TX_SHOW = 6;
 const BANK_AUTO_MS = 30 * 60000;                // a bank refreshes on its own once what we have is this old
+const BANK_FIRST_MS = 5 * 60000;                // or, never refreshed, once the device connecting it has had this long
 const BANK_AUTO_TICK_MS = 5 * 60000;            // how often to look, and the least time between tries
 let   BANK_BUDGET_WAIT_MS = 10000;              // another device's refresh: give its own Budget changes time to arrive (let: tests shorten it)
 
 /* This device's copy, for the account `uid` (null = signed out):
  * { uid, relay: address set on this device ('' = BANK_RELAY_URL),
  *   items: [{ id, token, institution: { id, name }, accounts, transactions, cursor,
- *             status (Plaid's transactions_update_status), error, addedAt, updatedAt }] }
+ *             status (Plaid's transactions_update_status), error, addedAt, updatedAt,
+ *             checkedAt (when Plaid last got transactions from the bank; 0 = the relay didn't say) }] }
  * The account's copy, users/<uid>/bank = { updatedAt, items: { <id>: item } }, is
  * the one that counts: whenever it changes, this one follows. */
 let bank = { uid: null, relay: '', items: [] };
@@ -84,6 +87,7 @@ function bankItem(raw, id) {
     error: err ? { code: String(err.code || 'ERROR'), message: String(err.message || '') } : null,
     addedAt: Number(raw.addedAt) || 0,
     updatedAt: Number(raw.updatedAt) || 0,
+    checkedAt: Number(raw.checkedAt) || 0,
   };
 }
 /* The signed-in account's connections, as this device last saw them. */
@@ -101,6 +105,7 @@ function bankWrite(uid, id, item) {
     ? (bank.items.some(x => x.id === id) ? bank.items.map(x => (x.id === id ? item : x)) : [...bank.items, item])
     : bank.items.filter(x => x.id !== id);
   bankSave();                                            // here at once; the account's copy confirms it
+  budgetSeeBank(bankItems());
   if (bankCloudKnown && !budgetFromBank(bank.items)) bankBudgetSoon();   // new transactions → Budget (the account's list, not an offline copy); after the typing, if any
   const node = syncRef.child('bank');
   const saved = item ? node.child('items/' + id).set(JSON.parse(JSON.stringify(item))) : node.child('items/' + id).remove();
@@ -125,6 +130,7 @@ export function bankCloudSeen(node) {
   bank.items = items;
   bankCloudKnown = true;
   if (JSON.stringify([bank.uid, bank.items, bankCloudKnown]) !== before) { bankSave(); bankRender(); }
+  budgetSeeBank(bank.items);
   bankBudgetSoon();
   bankResumeLink();
   if (first) bankAutoRefresh();
@@ -152,6 +158,7 @@ export function bankCloudForget() {
   bankBudgetTimer = null;
   const uid = syncUser ? syncUser.uid : null;
   if (bank.uid !== uid) { bank.uid = uid; bank.items = []; bankSave(); }
+  budgetSeeBank(bankItems());
   if (!syncUser && bankResume) {
     bankResume = null;
     bankBusy = '';
@@ -222,8 +229,10 @@ async function bankCheckRelay() {
   bankHealth = { url, state: 'checking' };
   try {
     const h = await bankCall('health');
-    /* a relay from before sign-ins were checked has no `auth`, and its CORS turns the sign-in header away */
-    bankHealth = { url, state: !h.ok ? 'problem' : h.auth === true ? 'ok' : 'outdated', env: h.env, problems: h.problems || [] };
+    /* a relay from before sign-ins were checked has no `auth`, and its CORS turns the sign-in header away;
+     * one from before version 3 works, but posted charges don't name their pending one and Plaid's last check is unknown */
+    bankHealth = { url, state: !h.ok ? 'problem' : h.auth !== true ? 'outdated' : !(h.version >= BANK_RELAY_VERSION) ? 'old' : 'ok',
+      env: h.env, problems: h.problems || [] };
   } catch (e) {
     bankHealth = { url, state: 'unreachable' };
   }
@@ -304,41 +313,52 @@ async function bankLinked(publicToken, metadata) {
 }
 
 /* Balances, then whatever changed in transactions since the saved cursor, saved to
- * the account. Returns the error, if any (see bankItemError for which are saved). */
+ * the account. Returns the error, if any (see bankItemError for which are saved).
+ * Both are written onto this device's latest copy of the connection, not the one
+ * the refresh started from: another device may have refreshed it meanwhile, and
+ * a list that went back to an older copy would lose transactions it had. */
 async function bankRefresh(uid, item) {
-  const next = { ...item };
-  let failed = null;
+  const latest = () => bank.items.find(i => i.id === item.id) || item;
+  let fresh;
   try {
     const acc = await bankCall('accounts', { token: item.token });
-    next.accounts = Array.isArray(acc.accounts) ? acc.accounts : [];
     const tx = await bankCall('transactions', { token: item.token, cursor: item.cursor || '' });
-    const byId = new Map(item.transactions.map(t => [t.id, t]));
-    (tx.removed || []).forEach(id => byId.delete(id));
-    [...(tx.added || []), ...(tx.modified || [])].forEach(t => byId.set(t.id, t));
-    next.transactions = [...byId.values()]
-      .sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? 1 : -1))
-      .slice(0, BANK_TX_KEEP);
-    next.cursor = tx.next_cursor || item.cursor || '';
-    next.status = tx.status || item.status || null;
-    next.error = null;
-    next.updatedAt = Date.now();
+    fresh = { acc, tx };
   } catch (e) {
-    failed = e;
-    if (!bankItemError(e)) return e;
-    next.error = { code: e.code || 'ERROR', message: e.message };
+    if (bankItemError(e)) bankWrite(uid, item.id, { ...latest(), error: { code: e.code || 'ERROR', message: e.message } });
+    return e;
   }
+  const { acc, tx } = fresh;
+  const base = latest();
+  const byId = new Map(base.transactions.map(t => [t.id, t]));
+  (tx.removed || []).forEach(id => byId.delete(id));
+  [...(tx.added || []), ...(tx.modified || [])].forEach(t => byId.set(t.id, t));
+  const next = {
+    ...base,
+    accounts: Array.isArray(acc.accounts) ? acc.accounts : [],
+    checkedAt: Date.parse(acc.checked_at || '') || base.checkedAt || 0,
+    transactions: [...byId.values()]
+      .sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? 1 : -1))
+      .filter((t, i) => i < BANK_TX_KEEP || t.pending),                 // a pending one stays until it posts, for Budget to match
+    cursor: tx.next_cursor || item.cursor || '',
+    status: tx.status || base.status || null,
+    error: null,
+    updatedAt: Date.now(),
+  };
   bankWrite(uid, next.id, next);
-  return failed;
+  return null;
 }
 /* Keep the banks fresh without a press of Refresh, so new transactions reach
  * Budget: when the account's banks are first seen, when the app comes back into
  * view, and every few minutes while it's open. Only what is half an hour old,
- * never a connection another device is still making (not refreshed yet) or one
- * waiting for a new login. Problems stay quiet; a bank's own error is saved as usual. */
+ * or never refreshed (its first refresh failed) five minutes after it was
+ * connected: not one another device is still connecting, nor one waiting for a
+ * new login. Problems stay quiet; a bank's own error is saved as usual. */
 async function bankAutoRefresh() {
   if (bankBusy || !syncUser || !bankCloudKnown || !bankRelay() || document.visibilityState === 'hidden') return;
   if (Date.now() - bankAutoAt < BANK_AUTO_TICK_MS) return;
-  const stale = i => i.updatedAt > 0 && Date.now() - i.updatedAt > BANK_AUTO_MS && !(i.error && i.error.code === 'ITEM_LOGIN_REQUIRED');
+  const stale = i => !(i.error && i.error.code === 'ITEM_LOGIN_REQUIRED')
+    && (i.updatedAt > 0 ? Date.now() - i.updatedAt > BANK_AUTO_MS : Date.now() - i.addedAt > BANK_FIRST_MS);
   const due = bankItems().filter(stale).map(i => i.id);
   if (!due.length) return;
   bankAutoAt = Date.now();
@@ -375,6 +395,7 @@ async function bankDisconnect(item) {
   try { await bankCall('remove', { token: item.token }); }
   catch (e) { ended = e.code === 'INVALID_ACCESS_TOKEN' || e.code === 'ITEM_NOT_FOUND'; }
   bankWrite(uid, item.id, null);
+  budgetForgetBank(item.id);                             // connected again, Budget starts a new sync point
   bankBusy = '';
   bankRenderSettings();
   showToast(ended ? `Disconnected ${item.institution.name}`
@@ -513,13 +534,15 @@ function bankRelayFormHtml(intro) {
 function bankRelayLine() {
   const h = bankHealth && bankHealth.url === bankRelay() ? bankHealth : { state: 'checking' };
   const where = escAttr(bankHost(bankRelay()));
-  const state = h.state === 'ok' ? `Plaid ${h.env === 'production' ? 'production' : 'sandbox'}`
+  const plaidEnv = `Plaid ${h.env === 'production' ? 'production' : 'sandbox'}`;
+  const state = h.state === 'ok' ? plaidEnv
+    : h.state === 'old' ? `${plaidEnv}, out of date: deploy the current backend/bank, so Budget knows a pending charge that posts and when Plaid last checked your bank`
     : h.state === 'problem' ? `not set up: ${escAttr(h.problems.join('; '))}`
     : h.state === 'outdated' ? 'out of date: it doesn\'t check sign-ins yet, so deploy the current backend/bank'
     : h.state === 'unreachable' ? 'can\'t reach it' : 'checking…';
-  const sandbox = h.state === 'ok' && h.env !== 'production'
+  const sandbox = ['ok', 'old'].includes(h.state) && h.env !== 'production'
     ? '<div class="bank-fine">Sandbox: Plaid\'s test banks, no real money. Pick First Platypus Bank and log in with <b>user_good</b> / <b>pass_good</b>.</div>' : '';
-  return `${sandbox}<div class="bank-relay-line${['problem', 'outdated', 'unreachable'].includes(h.state) ? ' warn' : ''}">Relay: ${where} · ${state} <button class="dg-prompt-link" data-bank="relay-change">Change</button></div>`;
+  return `${sandbox}<div class="bank-relay-line${['problem', 'outdated', 'old', 'unreachable'].includes(h.state) ? ' warn' : ''}">Relay: ${where} · ${state} <button class="dg-prompt-link" data-bank="relay-change">Change</button></div>`;
 }
 
 /* Settings → Bank accounts, and the relay's health once per relay address. */

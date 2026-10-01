@@ -40,6 +40,7 @@ function createFakePlaid({ clientId = 'test-client', secret = 'test-secret' } = 
     failNext: null,            // { path, status, error_code, error_type, error_message, display_message }
     mutateOnce: false,         // second sync page answers TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION once
     pageSize: 4,
+    checkedAt: '2026-09-30T06:12:00Z',   // when Plaid last got transactions from the bank (/item/get)
     n: 0,
   };
   const error = (status, code, message, type = 'INVALID_INPUT', display = null) =>
@@ -67,6 +68,9 @@ function createFakePlaid({ clientId = 'test-client', secret = 'test-secret' } = 
       }
       case '/accounts/get':
         return [200, { accounts: sandboxAccounts(), item: { item_id: item.item_id, institution_id: 'ins_109508' }, request_id: 'r' }];
+      case '/item/get':
+        return [200, { item: { item_id: item.item_id, institution_id: 'ins_109508' }, request_id: 'r',
+          status: { transactions: { last_successful_update: state.checkedAt, last_failed_update: null }, last_webhook: null } }];
       case '/transactions/sync': {
         const start = body.cursor ? Number(String(body.cursor).split('-').pop()) : 0;
         if (state.mutateOnce && start > 0) { state.mutateOnce = false; return error(400, 'TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION', 'data changed while paging', 'TRANSACTIONS_ERROR'); }

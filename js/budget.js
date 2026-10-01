@@ -1,5 +1,5 @@
 /* budget.js — The daily-envelope budget. */
-import { $, calKeyToDate, escAttr, showToast, userTyping } from './util.js';
+import { $, calDateKey, calKeyToDate, escAttr, keepField, showToast, userTyping } from './util.js';
 import { saveToLocal } from './persistence.js';
 import { dbdTodayKey } from './dbd.js';
 import { homeDesktopOpen, homeToggleDesktop, renderHome } from './home.js';
@@ -7,7 +7,7 @@ import { desktopNavSync } from './views.js';
 import { calDesktopOpen, calShiftSources, calToggleDesktop } from './calendar.js';
 import { shiftsOnDays } from './shifts.js';
 import { addDays, billsDueBetween, cashRunway, daysBetween, nextPayday, PAY_REPEATS } from './runway.js';
-import { bankBudgetSkip, bankBudgetStep } from './bankbudget.js';
+import { bankBudgetFollowing, bankBudgetSkip, bankBudgetStep } from './bankbudget.js';
 
 /* budget state
  *   initial        — balance allocated at the start of today
@@ -46,6 +46,9 @@ export function setRunway(v) { runway = v; }
 export let bankBudget = { on: true, items: {}, log: [] };
 export function setBankBudget(v) { bankBudget = v; }
 const BANK_LOG_DAYS = 14, BANK_LOG_MAX = 20;
+/* The account's bank connections as bank.js last handed them over (budgetSeeBank):
+ * From your bank says which accounts it follows, and how fresh they are. */
+let bankSeen = [];
 
 /* ───────────────────────── BUDGET ─────────────────────────
  * Minimal daily-envelope budgeting.
@@ -262,15 +265,16 @@ function budgetHtml() {
       <div class="budget-purchase-list">
         ${rows || '<div class="budget-empty">No purchases yet today.</div>'}
       </div>
-      ${follows ? bankLogHtml() : ''}
+      ${follows || (bankBudget.on && bankSeen.length) ? bankLogHtml() : ''}
     </div>`;
 }
 
-/* What the bank moved outside today's purchases: money in, and earlier days. */
+/* What the bank moved outside today's purchases (money in, and earlier days),
+ * after what Budget follows and how fresh it is. */
 function bankLogHtml() {
   const rows = bankBudget.log.map(l => `
     <div class="bank-tx">
-      <span class="bank-tx-date">${calKeyToDate(l.d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+      <span class="bank-tx-date">${fmtDay(l.d)}</span>
       <span class="bank-tx-name">${escAttr(l.n || 'Transaction')}</span>
       <span class="bank-tx-amt${l.a > 0 ? ' in' : ''}">${l.a > 0 ? '+' : '-'}${money(Math.abs(l.a))}</span>
     </div>`).join('');
@@ -278,8 +282,38 @@ function bankLogHtml() {
     <div class="budget-section-header">
       <span class="section-sublabel">From your bank</span>
     </div>
-    <div class="budget-bank-note">New transactions from your checking account are logged for you: today's spending under Purchases today, money in and earlier days' spending here, in your total balance.</div>
+    ${bankStatusHtml()}
     ${rows ? `<div class="bank-txs budget-bank-list">${rows}</div>` : ''}`;
+}
+const fmtDay = key => calKeyToDate(key).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+function fmtStamp(ms) {
+  const d = new Date(ms);
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return calDateKey(d) === dbdTodayKey() ? `at ${time}` : `on ${fmtDay(calDateKey(d))} at ${time}`;
+}
+/* Which accounts Budget follows, or why a bank logs nothing, and when each was
+ * last checked: new transactions reach Plaid only a few times a day, so the
+ * newest one can be hours old, and this says so. */
+function bankStatusHtml() {
+  const how = 'Today\'s spending is logged under Purchases today; money in and earlier days\' spending here, in your total balance.';
+  const banks = bankBudgetFollowing(bankBudget.items, bankSeen);
+  if (!banks.length) return `<div class="budget-bank-note">New transactions from your checking account are logged for you. ${how}</div>`;
+  const notes = banks.map(f => {
+    const bank = escAttr(f.bank);
+    const item = bankSeen.find(i => i.id === f.id) || {};
+    const fresh = item.updatedAt
+      ? ` Checked ${fmtStamp(item.updatedAt)}${item.checkedAt ? `; Plaid last heard from ${bank} ${fmtStamp(item.checkedAt)}` : ''}.` : '';
+    if (f.state === 'following') {
+      const accounts = f.accounts.map(a => `${escAttr(a.name)}${a.mask ? ` ••${escAttr(a.mask)}` : ''}`).join(', ');
+      return `Following ${accounts} at ${bank} since ${f.since === dbdTodayKey() ? 'today' : fmtDay(f.since)}.${fresh}`;
+    }
+    if (f.state === 'none') return `${bank} has no checking account connected, so nothing from it is logged: Budget follows checking accounts only, since a credit card's purchases would be counted again when you pay the card.`;
+    if (f.state === 'waiting') return `Plaid is still gathering ${bank}'s transactions. Budget starts following it once they are in.`;
+    return `${bank} needs attention: ${escAttr(f.error.code === 'ITEM_LOGIN_REQUIRED' ? 'log in to it again' : f.error.message || 'see Settings')} (Settings → Bank accounts).`;
+  });
+  const following = banks.some(f => f.state === 'following');
+  return notes.map(n => `<div class="budget-bank-note">${n}</div>`).join('') + (following ? `
+    <div class="budget-bank-note">${how} Banks send Plaid new transactions a few times a day, so a purchase can take a few hours to show up.</div>` : '');
 }
 
 /* ── cash runway (the math is in runway.js) ── */
@@ -552,8 +586,8 @@ function removePurchase(id) {
 /* ── bank transactions (the rules are in bankbudget.js) ──
  * bank.js hands over the signed-in account's connections whenever they change:
  * a refresh on this device, or the account's copy changing. Returns false when
- * it waited because something is being typed (logging redraws Budget), for
- * bank.js to hand them over again a little later. */
+ * it waited because someone is typing (logging redraws Budget), for bank.js to
+ * hand them over again a little later. */
 export function budgetFromBank(items) {
   if (!bankBudget.on || !Array.isArray(items)) return true;
   if (userTyping()) return false;
@@ -568,9 +602,26 @@ export function budgetFromBank(items) {
     bankBudget.log = [...r.log.reverse(), ...bankBudget.log].filter(l => l.d >= since).slice(0, BANK_LOG_MAX);
   }
   if (!r.changed && !rolled) return true;
-  budgetChanged();
+  keepField(budgetChanged);                            // a cursor left in a field stays, with what was typed
   if (r.logged) showToast(r.logged === 1 ? 'Logged 1 bank transaction in Budget' : `Logged ${r.logged} bank transactions in Budget`);
   return true;
+}
+/* bank.js hands over the account's connections whenever they change, for From
+ * your bank to say what it follows (not while someone types: that can wait). */
+export function budgetSeeBank(items) {
+  const view = list => JSON.stringify(list.map(i => [i.id, i.institution, i.accounts, i.updatedAt, i.checkedAt, i.error]));
+  const next = Array.isArray(items) ? items : [];
+  if (view(next) === view(bankSeen)) return;
+  bankSeen = next;
+  if (!userTyping()) keepField(renderBudget);
+}
+/* A bank was disconnected: its sync point goes (connected again, it starts a new one). */
+export function budgetForgetBank(id) {
+  if (!bankBudget.items[id]) return;
+  const items = { ...bankBudget.items };
+  delete items[id];
+  bankBudget = { ...bankBudget, items };
+  keepField(budgetChanged);
 }
 /* Settings → Bank accounts: turning it on starts a new sync point, off forgets it. */
 export function budgetFollowBank(on, items) {

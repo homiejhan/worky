@@ -98,6 +98,39 @@ const BASE = {
     ok(JSON.stringify(same) === JSON.stringify(BASE), 'nothing changed: nothing changes');
   }
 
+  console.log('\n── 6. Budget\'s balance and the bank transactions counted in it ──');
+  {
+    const B = await import(path.join(ROOT, 'js', 'bankbudget.js'));
+    const accounts = [{ id: 'chk', type: 'depository', subtype: 'checking' }];
+    const t1 = { id: 't1', account: 'chk', amount: 12, date: '2026-09-29', name: 'Lunch', pending: false };
+    const pay1 = { id: 'pay1', account: 'chk', amount: -500, date: '2026-09-30', name: 'Payroll', pending: false };
+    const bankItem = transactions => ({ id: 'item-1', accounts, transactions, updatedAt: 1, status: 'HISTORICAL_UPDATE_COMPLETE' });
+    const base = { ...clone(BASE), budget: { initial: 1000, daily: 20, todayAllowance: null, lastDate: '2026-09-29', purchases: [{ id: 1, title: 'Lunch', amount: 12, bank: 't1' }] },
+      bankBudget: { on: true, items: { 'item-1': { since: '2026-09-28', seen: { t1: { a: 12, d: '2026-09-29' } } } }, log: [] } };
+    const rolled = st => { st.budget.initial = 988; st.budget.purchases = []; st.budget.lastDate = '2026-09-30'; return st; };
+    const laptop = rolled(clone(base));                                  // rolled over at midnight, then logged the paycheck at 3 am
+    laptop.budget.initial = 1488;
+    laptop.bankBudget.items['item-1'].seen.pay1 = { a: -500, d: '2026-09-30' };
+    laptop.bankBudget.log = [{ d: '2026-09-30', n: 'Payroll', a: 500 }];
+    const phone = rolled(clone(base));                                   // woke at 7 am and rolled over before hearing of it
+    for (const preferLocal of [true, false]) {
+      const m = syncMerge(clone(base), clone(phone), clone(laptop), { preferLocal });
+      const r = B.bankBudgetStep({ tracked: m.bankBudget.items, items: [bankItem([t1, pay1])], purchases: m.budget.purchases, today: '2026-09-30', nextId: 5 });
+      const total = m.budget.initial + r.balance;
+      const lines = [...r.log, ...m.bankBudget.log].filter(l => l.n === 'Payroll').length;
+      ok(total === 1488 && lines === 1, `${preferLocal ? 'the phone\'s' : 'the laptop\'s'} balance wins: the paycheck is in it once, with one From your bank line (got ${total}, ${lines})`);
+    }
+    const coffee = clone(base);                                          // a purchase logged on the phone: the balance is untouched
+    coffee.budget.purchases.push({ id: 2, title: 'Coffee', amount: 5, bank: 'c1' });
+    coffee.bankBudget.items['item-1'].seen.c1 = { a: 5, d: '2026-09-29' };
+    const pay = clone(base);                                             // money in logged on the laptop
+    pay.budget.initial = 1500;
+    pay.bankBudget.items['item-1'].seen.pay1 = { a: -500, d: '2026-09-29' };
+    const n = syncMerge(clone(base), coffee, pay);
+    ok(n.budget.initial === 1500 && n.bankBudget.items['item-1'].seen.c1 && n.bankBudget.items['item-1'].seen.pay1 && n.budget.purchases.some(p => p.bank === 'c1'),
+      'a balance only one side changed: both sides\' counted transactions are kept, key by key');
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

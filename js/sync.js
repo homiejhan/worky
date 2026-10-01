@@ -2,7 +2,7 @@
 import {
   FIREBASE_CONFIG, GCAL_CLIENT_ID, GCAL_REDIRECT, LS_KEY, SYNC_BASE_LS_KEY, SYNC_META_LS_KEY, SYNC_STATE_TAG,
 } from './config.js';
-import { $, closeModal, showToast, userTyping } from './util.js';
+import { $, closeModal, keepField, showToast, typingPauseIn, userTyping } from './util.js';
 import {
   gatherState, loadFromLocal, renderLoadedState, saveToLocal, STATE_BUILD,
 } from './persistence.js';
@@ -30,7 +30,8 @@ import { syncMerge } from './syncmerge.js';
  *   • Push: saveToLocal() reports every save here; a fingerprint that
  *     ignores the ticking seconds of RUNNING timers decides whether a
  *     real change happened (otherwise a running timer would push every
- *     2s forever). Real changes push after a short debounce.
+ *     2s forever). Real changes push after a short debounce, and only
+ *     over the cloud copy this device last saw (syncWrite).
  *   • Pull: a realtime listener applies remote changes from other
  *     devices through the same localStorage → loadFromLocal() path
  *     used everywhere else. Own writes echo back and are ignored via
@@ -40,9 +41,10 @@ import { syncMerge } from './syncmerge.js';
  *     the two are merged against it (syncmerge.js): a task added here and
  *     a purchase logged there are both kept. Without that copy, the newer
  *     edit wins by timestamp.
- *   • Typing: while a text field has the focus, other devices' changes
- *     wait (applying one redraws the screen and would take what is being
- *     typed); they are merged in when the field is left.
+ *   • Typing: while someone types, other devices' changes wait (applying
+ *     one redraws the screen under the cursor); they are merged in when the
+ *     typing pauses or the field is left. A cursor merely left in a field
+ *     holds nothing up: the redraw puts it back (util.js → keepField).
  *   • Formats (template mode): the cloud is held in both directions
  *     while Formats is open; the Done click is the single, priority
  *     push (see syncHeld / syncCommitFormat below).
@@ -61,6 +63,7 @@ export let syncQuietSave   = false;  // true while saving a backend delivery: pu
 export function setSyncQuietSave(v) { syncQuietSave = v; }
 export let syncReconciled  = false;  // true once this connection has seen the cloud copy
 let syncDeferredRemote = null; // foreign cloud value that arrived while Formats was open
+let syncCloudSeen   = null;   // the cloud's state as this device last saw it (a hash): pushes only write over that
 let syncCommitPending  = 0;    // >0 while a Done push awaits server ack (priority window)
 const SYNC_COMMIT_MAX_REPUSH = 2;
 const syncClientId  = 'c' + Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -217,21 +220,46 @@ function syncPushNow(opts) {
     client: syncClientId,
   };
   if (priority) syncCommitPending = Math.max(1, syncCommitPending);   // open (or keep) the priority window
-  /* update(), not set(): only state / updatedAt / client are rewritten, so the
-   * backend's users/<uid>/digestInbox sibling survives every push and stays
-   * available to devices that open later (see digest.js → delivery). */
-  syncRef.update(payload)
-    .then(() => {
+  syncWrite(payload, priority)
+    .then(written => {
+      if (!written) return;                   // the cloud moved on: the listener brings that copy to merge with, then this pushes again
+      syncCloudSeen = syncHash(fp);
       syncAgree(fp, { pushedAt: Date.now() }, payload.state);
       syncCommitPending = 0;                  // server has it — priority window closes
       syncUpdateUI();
     })
     .catch(err => {
       syncCommitPending = 0;
-      /* offline is normal (RTDB retries on reconnect); permission errors are not */
+      /* permission errors are the database rules; anything else (the database
+       * gave up on a busy node, say): try again in a moment */
       if (err && /permission/i.test(String(err.message || err.code || ''))) syncRecordAuthError(err, 'database write');
+      else setTimeout(() => { if (syncUser && syncRef) syncSchedulePush(); }, 5000);
     });
   return true;
+}
+
+/* Write this device's state over the cloud's, but only over the copy it last
+ * saw. A device waking up (a phone opened from the background) can save before
+ * it has heard what another device saved meanwhile, and a plain write would put
+ * its older copy over that. So the write is a transaction on users/<uid>: if the
+ * cloud's state is no longer the one this device last saw, nothing is written,
+ * and the listener brings the newer copy to merge with. The whole node goes in
+ * one transaction, so the state and `client` (which tells an echo) change
+ * together, and the rest of it (bank, digestInbox, …) is written back as the
+ * database has it at that moment. `force` (Formats' Done, which must win) writes
+ * the three fields with update() instead. Resolves to whether it was written. */
+function syncWrite(payload, force) {
+  if (force) return syncRef.update(payload).then(() => true);
+  const seen = syncCloudSeen;
+  return syncRef.transaction(node => {
+    if (node === null) return { ...payload };                  // not cached here: the database checks it against what it has
+    const cur = typeof node.state === 'string' ? node.state : null;
+    if (cur !== null && cur !== payload.state && syncStateHash(cur) !== seen) return;   // moved on since: write nothing
+    return { ...node, ...payload };
+  }, undefined, false).then(r => !!(r && r.committed));
+}
+function syncStateHash(stateStr) {
+  try { return syncHash(syncFingerprint(JSON.parse(stateStr))); } catch(e) { return null; }
 }
 
 /* Done was clicked: release the hold and push the committed template
@@ -279,7 +307,7 @@ function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr) {
   try {
     localStorage.setItem(LS_KEY, effective);
     if (!loadFromLocal()) return;             // corrupt payload — keep local
-    renderLoadedState();
+    keepField(renderLoadedState);             // a cursor left in a field stays, with what was typed
     try { remoteFp = syncFingerprint(JSON.parse(remoteStr)); } catch(e) {}
   } finally {
     if (remoteFp) { syncLastSeenFp = remoteFp; syncAgree(remoteFp, { editAt: remoteUpdatedAt || Date.now() }, remoteStr); }
@@ -325,7 +353,7 @@ function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr) {
  * that won the reconcile (and so dropped the digest) gets it merged back in. */
 function syncOnRemoteValue(snap) {
   const v = snap.val();
-  if (userTyping() && syncForeignChange(v)) { syncTypingValue = v; return; }
+  if (userTyping() && syncForeignChange(v)) { syncTypingValue = v; syncTypingLater(); return; }
   syncTypingValue = null;
   digestInboxLatest = (v && v.digestInbox) || null;
   syncReconcileRemote(v);
@@ -334,18 +362,25 @@ function syncOnRemoteValue(snap) {
   digestGithubSeen(v ? v.digestGithub : null);     // the Run now token (Settings → Email Digest)
   bankCloudSeen(v ? v.bank : null);                // bank connections (Settings → Bank accounts)
 }
-/* While a text field has the focus, a change from another device waits:
- * applying it redraws the screen, and whatever is half typed would go. The
- * latest one is kept and taken in (merged with what was typed) when the
- * field loses the focus; meanwhile this device doesn't push either, so it
- * can't write over it. */
+/* While someone types (util.js → userTyping), a change from another device
+ * waits: applying it redraws the screen under the cursor. The latest one is
+ * kept and taken in, merged with what was typed, as soon as the typing pauses
+ * or the field is left; meanwhile this device doesn't push either, so it can't
+ * write over it. */
 let syncTypingValue = null;
+let syncTypingTimer = null;
 function syncForeignChange(v) {
   if (!v || typeof v.state !== 'string' || v.client === syncClientId) return false;
   try { return syncFingerprint(JSON.parse(v.state)) !== syncFingerprint(gatherState()); } catch(e) { return false; }
 }
+function syncTypingLater() {
+  clearTimeout(syncTypingTimer);
+  syncTypingTimer = setTimeout(syncTypingDone, typingPauseIn() + 50);
+}
 function syncTypingDone() {
-  if (!syncTypingValue || userTyping() || !syncRef) return;
+  if (!syncTypingValue || !syncRef) return;
+  if (userTyping()) { syncTypingLater(); return; }
+  clearTimeout(syncTypingTimer);
   const v = syncTypingValue;
   syncTypingValue = null;
   syncOnRemoteValue({ val: () => v });
@@ -368,6 +403,7 @@ function syncMergeRemote(remoteStr, knownHash, preferLocal) {
 function syncReconcileRemote(v) {
   const localFp = syncFingerprint(gatherState());
   syncReconciled = true;                      // from here on pushes are allowed
+  syncCloudSeen = v && typeof v.state === 'string' ? syncStateHash(v.state) : null;
 
   if (syncPendingRemote) {                    // choice not made yet — just keep the stash fresh
     if (v && typeof v.state === 'string' && v.client !== syncClientId) {
@@ -458,10 +494,12 @@ function syncStop() {
   if (syncRef) { syncRef.off(); syncRef = null; }
   syncKnownFp = null;
   syncReconciled = false;
+  syncCloudSeen = null;
   syncPendingRemote = null;
   syncDeferredRemote = null;
   syncCommitPending = 0;
   syncTypingValue = null;
+  clearTimeout(syncTypingTimer);
   digestInboxLatest = null;
   setDigestInboxPending(null);
   setDigestPromptsSaved(undefined);             // they belong to the account that just left
@@ -633,7 +671,7 @@ export function syncInit() {
     syncUpdateUI();
     return;
   }
-  document.addEventListener('focusout', () => setTimeout(syncTypingDone, 0));   // a field was left: take in what waited
+  document.addEventListener('focusout', () => setTimeout(syncTypingDone, 0));   // a field was left: take in what waited now
   firebase.auth().onAuthStateChanged(user => {
     syncUser = user;
     syncStop();

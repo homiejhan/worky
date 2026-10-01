@@ -9,6 +9,11 @@ let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; console.log('  ✓', msg); } else { fail++; console.log('  ✗', msg); } }
 function eq(a, b, msg) { ok(a === b, `${msg} (got ${JSON.stringify(a)})`); }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function until(fn, ms = 1000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { if (fn()) return true; await sleep(10); }
+  return fn();
+}
 
 /* one fake Realtime Database for every simulated device (tests/fake-firebase.js) */
 const { cloud, install } = createFakeFirebase();
@@ -24,10 +29,11 @@ async function boot(name, storage = {}) {
     },
     transform: src => src
       .replace('function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr) {', 'function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr) { window.__stats.applies++;')
-      .replace('  syncRef.update(payload)', '  window.__stats.pushes++;\n  syncRef.update(payload)'),
+      .replace('  syncWrite(payload, priority)', '  window.__stats.pushes++;\n  syncWrite(payload, priority)'),
   });
   w.document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
   w.__signIn = () => dev.signIn();
+  w.__dev = dev;
   w.__signOut = () => dev.signOut();
   return { name, w, d: w.document };
 }
@@ -357,23 +363,64 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
   {
     const { L, P } = await pair();
     P.w.eval("goTab('budget')");
+    P.w.eval('TYPING_PAUSE_MS = 1500');                  // a pause this long ends the typing (4 s in the app)
     const field = () => P.d.querySelector('#budgetContainer-m .budget-new-title');
+    const type = text => { field().value = text; field().dispatchEvent(new P.w.Event('input', { bubbles: true })); };
     field().focus();
-    field().value = 'Groceries';
+    type('G');
     addDbd(L.w, 'saved on the laptop meanwhile');
-    await sleep(2500);
-    ok(field().value === 'Groceries' && P.d.activeElement === field(), 'what is being typed on the phone stays, with the cursor');
-    ok(!dbdTexts(P.w).includes('saved on the laptop meanwhile'), 'the laptop\'s change waits');
+    for (const text of ['Gr', 'Gro', 'Groc', 'Groce', 'Grocer', 'Groceri']) { await sleep(400); type(text); }
+    ok(!dbdTexts(P.w).includes('saved on the laptop meanwhile'), 'while the phone is being typed on, the laptop\'s change waits');
+    ok(field().value === 'Groceri' && P.d.activeElement === field(), 'what is being typed stays, with the cursor');
+    type('Groceries');
+    ok(await until(() => dbdTexts(P.w).includes('saved on the laptop meanwhile'), 4000), 'a pause in the typing takes the laptop\'s change in');
+    ok(field().value === 'Groceries' && P.d.activeElement === field() && field().selectionStart === 9,
+      'and what was typed is still in the field, with the cursor where it was');
     P.d.querySelector('#budgetContainer-m .budget-new-amount').value = '23.40';
     field().dispatchEvent(new P.w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    await sleep(2000);
-    ok(P.w.eval("budget.purchases.some(p => p.title === 'Groceries')") && P.d.activeElement === field(), 'the purchase is added, the cursor back in the field');
-    ok(!L.w.eval("budget.purchases.some(p => p.title === 'Groceries')"), 'and not sent yet: it would go out over the laptop\'s change');
-    P.d.activeElement.blur();
-    await sleep(3000);
-    ok([L, P].every(d => d.w.eval("budget.purchases.some(p => p.title === 'Groceries')") && dbdTexts(d.w).includes('saved on the laptop meanwhile')),
-      'leaving the field takes the laptop\'s change in, merged with the purchase, on both');
+    ok(P.w.eval("budget.purchases.some(p => p.title === 'Groceries')") && P.d.activeElement === field(), 'the purchase is added, the cursor back in the field for the next one');
+    ok(await until(() => L.w.eval("budget.purchases.some(p => p.title === 'Groceries')"), 4000),
+      'a cursor left in the field holds nothing up: the purchase reaches the laptop');
+    addDbd(L.w, 'another from the laptop');
+    ok(await until(() => dbdTexts(P.w).includes('another from the laptop'), 4000), 'and the laptop\'s next change reaches the phone at once');
+    ok(P.d.activeElement === field() && field().value === '', 'with the cursor still in the empty field');
+    await sleep(2500);
+    ok([L, P].every(d => d.w.eval("budget.purchases.filter(p => p.title === 'Groceries').length === 1") && dbdTexts(d.w).includes('saved on the laptop meanwhile')),
+      'both devices have both changes, once');
     ok(hashOf(L.w) === hashOf(P.w), 'and they agree');
+
+    const title = () => P.d.querySelector('#budgetContainer-m .budget-purchase-row [data-pact="title"]');
+    const was = title().value;
+    title().focus();
+    title().value = `${was} at HEB`;
+    title().dispatchEvent(new P.w.Event('input', { bubbles: true }));
+    addDbd(L.w, 'a third from the laptop');
+    ok(await until(() => dbdTexts(P.w).includes('a third from the laptop'), 5000), 'renaming a purchase, a pause: the laptop\'s change comes in');
+    ok(title().value === `${was} at HEB` && P.d.activeElement === title(), 'the name being typed stays in the field');
+    title().blur();
+    ok(P.w.eval(`budget.purchases.some(p => p.title === ${JSON.stringify(was + ' at HEB')})`), 'and leaving the field saves it, like any edit');
+  }
+
+  console.log('\n── 13. A device waking up does not write its older copy over newer changes ──');
+  {
+    const { L, P } = await pair();
+    cloud.val = { ...cloud.val, other: { keep: 1 } };                             // a sibling of the state (bank, digestInbox, …)
+    const asleep = cloud.listeners.filter(l => l.device === P.w.__dev);
+    asleep.forEach(l => cloud.listeners.splice(cloud.listeners.indexOf(l), 1));   // the phone is in the background: it hears nothing
+    addDbd(L.w, 'added on the laptop overnight');
+    await sleep(1600);
+    ok(cloud.val.state.includes('added on the laptop overnight'), 'the laptop saves a change while the phone sleeps');
+    addDbd(P.w, 'added on the phone on waking');                                   // the phone wakes and saves before it has heard
+    await sleep(1600);
+    ok(cloud.val.state.includes('added on the laptop overnight'), 'the phone\'s older copy is not written over it');
+    ok(dbdTexts(L.w).includes('added on the laptop overnight'), 'so the laptop keeps its change');
+    asleep.forEach(l => cloud.listeners.push(l));                                  // connected again: the phone hears the cloud
+    cloud.emit();
+    await sleep(3000);
+    ok([L, P].every(d => dbdTexts(d.w).includes('added on the laptop overnight') && dbdTexts(d.w).includes('added on the phone on waking')),
+      'the phone merges the two and sends both: every device has both');
+    ok(hashOf(L.w) === hashOf(P.w), 'and they agree');
+    ok(cloud.val.other && cloud.val.other.keep === 1, 'the rest of the node is left as it was');
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

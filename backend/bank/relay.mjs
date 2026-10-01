@@ -15,10 +15,10 @@
  * person: Plaid knows the user by it, and a sealed token only opens for it. A
  * copied token is useless to anyone not signed in as that account.
  *
- *   GET  /health                           → { ok, env, redirect, auth, problems }   no sign-in needed
+ *   GET  /health                           → { ok, env, redirect, auth, version, problems }   no sign-in needed
  *   POST /link-token   {}                  → { link_token }         opens Plaid's window
  *   POST /exchange     { public_token }    → { token, item_id }     after the user logs in
- *   POST /accounts     { token }           → { accounts, institution_id }
+ *   POST /accounts     { token }           → { accounts, institution_id, checked_at }
  *   POST /transactions { token, cursor }   → { added, modified, removed, next_cursor, status }
  *   POST /remove       { token }           → { removed: true }      ends the connection at Plaid
  *
@@ -43,6 +43,9 @@ const PLAID_HOSTS = { sandbox: 'https://sandbox.plaid.com', production: 'https:/
 const DAYS_REQUESTED = 30;     // how far back Plaid fetches transactions: only what the app shows
 const MAX_PAGES = 20;          // /transactions/sync pages per request (500 each)
 const TOKEN_VERSION = 'v2';     // v2 seals the uid in; a v1 token (no owner) is refused
+/* What this relay does, for the app to tell an older one it should be redeployed:
+ * 3 = transactions carry pending_id, and /accounts says when Plaid last checked the bank. */
+const RELAY_VERSION = 3;
 
 export default { fetch: (request, env) => handle(request, env) };
 
@@ -78,7 +81,7 @@ export async function handle(request, env = {}, fetchImpl = fetch) {
 
 async function health(_body, env) {
   const problems = configProblems(env);
-  return { ok: problems.length === 0, env: plaidEnv(env), redirect: !!env.PLAID_REDIRECT_URI, auth: !!env.FIREBASE_PROJECT_ID, problems };
+  return { ok: problems.length === 0, env: plaidEnv(env), redirect: !!env.PLAID_REDIRECT_URI, auth: !!env.FIREBASE_PROJECT_ID, version: RELAY_VERSION, problems };
 }
 
 /* Plaid knows the user by their Focus account id, the verified uid. Anything the
@@ -103,9 +106,15 @@ async function exchange({ public_token }, env, fetchImpl, uid) {
   return { token: await seal(env, { a: data.access_token, i: data.item_id, u: uid }), item_id: data.item_id };
 }
 
+/* The accounts and their balances, and when Plaid last got transactions from the
+ * bank (checked_at): Plaid asks a bank for new ones only a few times a day, so
+ * that is how new the newest transaction can be. */
 async function accounts({ token }, env, fetchImpl, uid) {
   const { a } = await unseal(env, token, uid);
-  const data = await plaid(env, '/accounts/get', { access_token: a }, fetchImpl);
+  const [data, item] = await Promise.all([
+    plaid(env, '/accounts/get', { access_token: a }, fetchImpl),
+    plaid(env, '/item/get', { access_token: a }, fetchImpl).catch(() => null),   // only for checked_at
+  ]);
   return {
     accounts: (data.accounts || []).map(acc => ({
       id: acc.account_id,
@@ -120,6 +129,7 @@ async function accounts({ token }, env, fetchImpl, uid) {
       currency: acc.balances?.iso_currency_code || acc.balances?.unofficial_currency_code || null,
     })),
     institution_id: data.item?.institution_id ?? null,
+    checked_at: item?.status?.transactions?.last_successful_update ?? null,
   };
 }
 

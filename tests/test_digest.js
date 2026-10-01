@@ -362,7 +362,7 @@ async function legacyTokenTests() {
   const signIn = async ({ legacy = 'github_pat_OLD', inbox = true, fail = false } = {}) => {
     const b = await boot({ storage: legacy ? { 'focus-digest-github': JSON.stringify({ token: legacy }) } : {} });
     const writes = [];
-    b.w.__fakeRef = { child: k => ({ set: v => { writes.push([k, JSON.parse(JSON.stringify(v))]); return fail ? DENIED() : Promise.resolve(); } }), update: () => Promise.resolve(), off() {} };
+    b.w.__fakeRef = { child: k => ({ set: v => { writes.push([k, JSON.parse(JSON.stringify(v))]); return fail ? DENIED() : Promise.resolve(); } }), update: () => Promise.resolve(), transaction: () => Promise.resolve({ committed: true, snapshot: null }), off() {} };
     b.w.eval(`syncUser = { uid: 'u1', email: 'me@example.com' }; syncRef = window.__fakeRef;`);
     if (inbox) b.w.eval(`digestInboxLatest = ${JSON.stringify(INBOX)}`);
     return { ...b, writes, legacy: () => b.w.localStorage.getItem('focus-digest-github'), status: () => b.d.getElementById('digestGithubStatus').textContent };
@@ -476,7 +476,7 @@ async function promptTests() {
   const writes = []; let reject = null;
   w.__fakeRef = {
     child: k => ({ set: v => { writes.push([k, v === null ? null : JSON.parse(JSON.stringify(v))]); return reject ? Promise.reject(reject) : Promise.resolve(); } }),
-    update: () => Promise.resolve(), off() {},
+    update: () => Promise.resolve(), transaction: () => Promise.resolve({ committed: true, snapshot: null }), off() {},
   };
   w.eval(`syncUser = { uid: 'u1', email: 'me@example.com' }; syncRef = window.__fakeRef;`);
   w.digestRenderSettings();
@@ -661,7 +661,7 @@ console.log('\n── 9. Run now: token gate, dispatch, watch the run, delivery 
 
   /* signed in: the token is saved to the account (users/<uid>/digestGithub) */
   const writes = [];
-  w.__fakeRef = { child: k => ({ set: v => { writes.push([k, v === null ? null : JSON.parse(JSON.stringify(v))]); return Promise.resolve(); } }), update: () => Promise.resolve(), off() {} };
+  w.__fakeRef = { child: k => ({ set: v => { writes.push([k, v === null ? null : JSON.parse(JSON.stringify(v))]); return Promise.resolve(); } }), update: () => Promise.resolve(), transaction: () => Promise.resolve({ committed: true, snapshot: null }), off() {} };
   w.eval(`syncUser = { uid: 'u1', email: 'me@example.com' }; syncRef = window.__fakeRef;`);
   w.digestRenderSettings();
   ok(saveBtn.disabled && status().startsWith('Checking your account'), 'waits for the listener before saving');

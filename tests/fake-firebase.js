@@ -12,6 +12,7 @@
  *
  * Writes keep what the database keeps: set() replaces a node (null deletes it),
  * update() replaces only the children it names (a name may be a path),
+ * transaction() replaces the node with what its function returns (or nothing),
  * remove() deletes, nulls and empty objects or arrays are not stored (an empty
  * array comes back missing), and undefined is refused like the SDK refuses it. */
 
@@ -108,6 +109,15 @@ function createFakeFirebase({ uid = 'u1', email = 'me@example.com' } = {}) {
         Object.keys(payload).forEach(k => stored(payload[k], k));   // refuse the whole update, like the SDK
         Object.entries(payload).forEach(([k, v]) => put([...parts, ...split(k)], v));
       }, true),
+      /* The update function gets what the "server" has now (a device here is never
+       * behind it); returning undefined aborts. Resolves to { committed, snapshot }. */
+      transaction(fn) {
+        const now = get(parts);
+        const next = fn(now === null ? null : JSON.parse(JSON.stringify(now)));
+        if (next === undefined) return Promise.resolve({ committed: false, snapshot: snapshot(parts) });
+        stored(next, parts.join('/'));
+        return write(parts, () => put(parts, next), true).then(() => ({ committed: true, snapshot: snapshot(parts) }));
+      },
     });
     const auth = {
       onAuthStateChanged(cb) { authCb = cb; },

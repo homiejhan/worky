@@ -165,9 +165,11 @@ const item = (transactions, more = {}) => ({ id: 'item-1', accounts: ACCOUNTS, t
     w.pass([item(history), { ...item([tx('b1', 5, TODAY, 'Other bank')]), id: 'item-2' }]);
     ok(w.tracked['item-1'] && w.tracked['item-2'], 'each connection has its own sync point');
     let r = w.pass([item(history)]);
-    ok(r.changed && !w.tracked['item-2'], 'a disconnected bank loses its sync point');
+    ok(!r.changed && w.tracked['item-2'], 'a bank missing from a pass keeps its sync point (a copy of the list can lag; Disconnect drops it in budget.js)');
     r = w.pass([]);
-    ok(r.changed && Object.keys(w.tracked).length === 0 && w.balance === 0, 'with none left, nothing is tracked and nothing moves');
+    ok(!r.changed && Object.keys(w.tracked).length === 2 && w.balance === 0, 'even with none listed: nothing is dropped and nothing moves');
+    r = w.pass([item(history), { ...item([tx('b1', 5, TODAY, 'Other bank'), tx('b2', 3, TODAY, 'Snack')]), id: 'item-2' }]);
+    ok(r.logged === 1 && w.purchases.some(p => p.bank === 'b2'), 'back again, what came meanwhile is logged, not taken into a new sync point');
 
     const full = Array.from({ length: 50 }, (_, i) => tx(`f${i}`, 1, `2026-09-${String(29 - Math.floor(i / 5)).padStart(2, '0')}`, 'x'));
     const old = tx('old', 7, '2026-09-20', 'Old pending', { pending: true });
@@ -175,6 +177,52 @@ const item = (transactions, more = {}) => ({ id: 'item-1', accounts: ACCOUNTS, t
     v.pass([item([...full.slice(0, 49), old])]);
     v.pass([item(full)]);
     ok(v.balance === 0 && !v.tracked['item-1'].seen.old, 'a pending row that aged out of a full list (newest 50) is not given back');
+  }
+
+  console.log('\n── 6. Copies that lag, merges, banks that post in place ──');
+  {
+    const w = budgetWorld();
+    w.pass([item(history)]);
+    w.pass([item([...history, tx('x1', 30, '2026-09-28', 'Target')])]);
+    eq(w.balance, -30, 'a new transaction dated yesterday is logged');
+    w.pass([item(history)]);
+    ok(w.balance === -30 && w.tracked['item-1'].seen.x1, 'a copy of the list saved before it came: it stays counted');
+    w.pass([item([...history, tx('x1', 30, '2026-09-28', 'Target')])]);
+    ok(w.balance === -30 && w.last.logged === 0, 'and is not counted again when the newer copy comes back');
+
+    const m = budgetWorld([{ id: 7, title: 'Chipotle', amount: 12.5, bank: 'p1', pending: true }]);
+    m.pass([item(history)]);
+    const r = m.pass([item([...history, tx('p1', 12.5, TODAY, 'Chipotle', { pending: true })])]);
+    ok(r.logged === 0 && m.purchases.length === 1 && m.balance === 0 && m.tracked['item-1'].seen.p1,
+      'a purchase another device already logged (its count lost a merge) is taken as counted, not logged twice');
+    m.pass([item([...history, tx('p1', 12.5, TODAY, 'Chipotle')])]);
+    ok(m.purchases.length === 1 && !m.purchases[0].pending, 'a bank that posts a charge under the same id: the purchase is no longer pending');
+
+    const t = budgetWorld([{ id: 8, title: 'Chipotle', amount: 14, bank: 'q2' }]);
+    t.pass([item(history)]);
+    t.tracked['item-1'].seen.q1 = { a: 12.5, d: TODAY, p: 1, n: 'Chipotle' };    // counted here as pending; another device moved the purchase on
+    t.pass([item([...history, tx('q2', 14, TODAY, 'Chipotle', { pending_id: 'q1' })])]);
+    ok(t.purchases.length === 1 && t.purchases[0].amount === 14 && t.balance === 0 && t.last.logged === 0,
+      'a posted charge another device already moved the purchase to (with its tip): the tip is not added again');
+
+    const z = budgetWorld();
+    z.pass([item(history)]);
+    z.pass([item([...history, tx('z1', 6, '2026-09-30', 'Late-night tacos', { pending: true })])]);
+    ok(z.purchases.some(p => p.bank === 'z1') && z.balance === 0, 'a bank a time zone ahead dates it tomorrow: still today\'s purchase');
+  }
+
+  console.log('\n── 7. What Budget says it follows ──');
+  {
+    const tracked = { 'item-1': { since: TODAY, seen: {} }, 'item-2': { since: TODAY, seen: {} } };
+    const banks = B.bankBudgetFollowing(tracked, [
+      item(history, { institution: { name: 'Chase' }, accounts: [{ id: 'chk', type: 'depository', subtype: 'checking', name: 'Total Checking', mask: '1234' }, ACCOUNTS[2]] }),
+      item([], { id: 'item-2', institution: { name: 'Discover' }, accounts: [ACCOUNTS[2]] }),
+      item([], { id: 'item-3', institution: { name: 'UFCU' }, status: 'NOT_READY' }),
+      item([], { id: 'item-4', institution: { name: 'Wells Fargo' }, error: { code: 'ITEM_LOGIN_REQUIRED', message: 'log in' } }),
+    ]);
+    eq(banks.map(b => b.state).join(), 'following,none,waiting,error', 'following a checking account, a bank with none, one Plaid is still gathering, one needing a login');
+    ok(banks[0].accounts.length === 1 && banks[0].accounts[0].name === 'Total Checking' && banks[0].accounts[0].mask === '1234' && banks[0].since === TODAY,
+      'naming the checking account and since when');
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

@@ -1,5 +1,5 @@
 /* main.js — Entry point: exposes the inline-handler functions and starts the app. */
-import { $ } from './util.js';
+import { $, watchTyping } from './util.js';
 import { gatherState, loadFromLocal, saveToLocal } from './persistence.js';
 import {
   changeTimerColor, commitEditTimer, renderTimers, resetTimer, setTimerLabel, startEditTimer,
@@ -65,6 +65,7 @@ Object.assign(window, {
   calPruneDays();
 
   bindStatic();
+  watchTyping();
   initSwipe();
   initViewportGuard();
 
