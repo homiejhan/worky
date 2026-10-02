@@ -28,7 +28,7 @@ async function boot(name, storage = {}) {
       w.__stats = { applies: 0, pushes: 0 };
     },
     transform: src => src
-      .replace('function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr) {', 'function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr) { window.__stats.applies++;')
+      .replace('function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr, by) {', 'function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr, by) { window.__stats.applies++;')
       .replace('  syncWrite(payload, priority)', '  window.__stats.pushes++;\n  syncWrite(payload, priority)'),
   });
   w.document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));

@@ -188,13 +188,14 @@ function liveTimerRecord(t) {
 
 /* Build number of the state schema. Bumped whenever gatherState() learns a
  * new top-level key (digest was build 2, digest tasks build 3, shiftCals
- * build 4, runway build 5, timerLog build 6, bankBudget build 7). Lets a newer device recognise
- * a cloud copy written by an older build, which cannot have carried the
- * newer fields. timerLog (days a timer ran past zero) went away again when
+ * build 4, runway build 5, timerLog build 6, bankBudget build 7), or a new
+ * build writes the cloud differently (build 8 stamps revisions, syncRev and
+ * syncBase, see sync.js). Lets a newer device recognise a cloud copy written
+ * by an older build, which cannot have carried the newer fields. timerLog (days a timer ran past zero) went away again when
  * timers went back to stopping at zero; a copy from a build-6 device is not
  * in the known keys below, so it passes through untouched instead of being
  * stripped and written back. */
-export const STATE_BUILD = 7;
+export const STATE_BUILD = 8;
 const STATE_KNOWN_KEYS = new Set(['version', 'build', 'wokenUp', 'timerDefaults', 'timers', 'todoIdCounter',
   'taskIdCounter', 'todoLists', 'dbdTasks', 'dbdIdCounter', 'budget', 'purchaseIdCounter', 'views', 'theme',
   'digest', 'shiftCals', 'runway', 'bankBudget', 'calendar']);

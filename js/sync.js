@@ -1,6 +1,7 @@
 /* sync.js — Cloud sync of the whole state through Firebase. */
 import {
-  FIREBASE_CONFIG, GCAL_CLIENT_ID, GCAL_REDIRECT, LS_KEY, SYNC_BASE_LS_KEY, SYNC_META_LS_KEY, SYNC_STATE_TAG,
+  FIREBASE_CONFIG, GCAL_CLIENT_ID, GCAL_REDIRECT, LS_KEY, SYNC_BASE_LS_KEY, SYNC_HISTORY_LS_KEY, SYNC_META_LS_KEY,
+  SYNC_STATE_TAG,
 } from './config.js';
 import { $, closeModal, keepField, showToast, typingPauseIn, userTyping } from './util.js';
 import {
@@ -41,6 +42,14 @@ import { syncMerge } from './syncmerge.js';
  *     the two are merged against it (syncmerge.js): a task added here and
  *     a purchase logged there are both kept. Without that copy, the newer
  *     edit wins by timestamp.
+ *   • Revisions: every push stamps the state with a revision (syncRev), and
+ *     the revision and fingerprint hash of the copy it was built on (syncBase,
+ *     syncBaseHash). An older version of Focus carries fields it doesn't know
+ *     through untouched, so a copy it writes still names the last revision it
+ *     took in. A copy built on an older one than this device has (that
+ *     version was offline, then wrote over the cloud without looking) would
+ *     undo what came after: its changes are put on top instead, merged from
+ *     the copy it started from (syncStaleFrom).
  *   • Typing: while someone types, other devices' changes wait (applying
  *     one redraws the screen under the cursor); they are merged in when the
  *     typing pauses or the field is left. A cursor merely left in a field
@@ -64,6 +73,10 @@ export function setSyncQuietSave(v) { syncQuietSave = v; }
 export let syncReconciled  = false;  // true once this connection has seen the cloud copy
 let syncDeferredRemote = null; // foreign cloud value that arrived while Formats was open
 let syncCloudSeen   = null;   // the cloud's state as this device last saw it (a hash): pushes only write over that
+let syncKnownRev    = null;   // the revision (syncRev) of the copy this device and the cloud last agreed on
+let syncPushing     = false;  // a push is on its way: the next one waits for it
+let syncPushAgain   = false;  // … and was asked for meanwhile
+let syncOlderSeen   = false;  // a device on an older version of Focus wrote to the cloud this session
 let syncCommitPending  = 0;    // >0 while a Done push awaits server ack (priority window)
 const SYNC_COMMIT_MAX_REPUSH = 2;
 const syncClientId  = 'c' + Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -96,9 +109,12 @@ export function syncConfigured() {
  * determine the remaining time — so mask `seconds` on running timers
  * to keep the fingerprint stable while a timer runs. */
 export function syncFingerprint(state) {
+  const content = { ...state };
+  /* which build wrote it, and the revision stamps, are not content */
+  delete content.build; delete content.syncRev; delete content.syncBase; delete content.syncBaseHash;
   return JSON.stringify(syncCanon({
-    ...state,
-    timers: (state.timers || []).map(t => t.running ? { ...t, seconds: -1 } : t),
+    ...content,
+    timers: (content.timers || []).map(t => t.running ? { ...t, seconds: -1 } : t),
   }));
 }
 /* Key order is not identity: a device that re-normalises a record on load
@@ -126,23 +142,105 @@ function syncHash(str) {
 
 /* Record that cloud and this device now hold `fp` (post-push, echo,
  * apply, or an identical-on-connect check), and keep that copy of the state
- * (`stateStr`): the base a later conflict is merged against. */
-function syncAgree(fp, extra, stateStr) {
+ * (`stateStr`): the base a later conflict is merged against, and, by its
+ * revision, where a late writer may have started from. */
+function syncAgree(fp, extra, stateStr, by) {
   syncKnownFp = fp;
   syncLastSyncAt = Date.now();
   const meta = syncLoadMeta();
   meta.knownHash = syncHash(fp);
   Object.assign(meta, extra || {});
-  syncSaveMeta(meta);
   if (typeof stateStr === 'string') {
+    syncKnownRev = syncRevOf(stateStr);
+    meta.knownRev = syncKnownRev;
+    syncRemember(syncKnownRev, meta.knownHash, stateStr, by);
     try { localStorage.setItem(SYNC_BASE_LS_KEY, JSON.stringify({ hash: meta.knownHash, state: stateStr })); } catch(e) {}
   }
+  syncSaveMeta(meta);
 }
 /* The copy both sides last agreed on, if this device still has it. */
 function syncBase(hash) {
   try {
     const b = JSON.parse(localStorage.getItem(SYNC_BASE_LS_KEY));
     return b && b.hash === hash && typeof b.state === 'string' ? JSON.parse(b.state) : null;
+  } catch(e) { return null; }
+}
+
+/* ── Revisions ──
+ * A revision is a time-ordered random id, stamped by the device that pushes.
+ * History: the copies this device and the cloud agreed on, newest last, each
+ * with its revision, fingerprint hash and writer (`by`, the client id). A
+ * revision's own copy is the one this version stamped (canon); an older
+ * version's writes carry the revision through with other content, kept beside
+ * it. The last few stay on the device, for a late writer after a reload. */
+const SYNC_HISTORY_MAX = 24, SYNC_HISTORY_KEEP = 8;
+let syncHistory = null;       // [{ rev, hash, canon, by, state }]
+let syncHistoryTimer = null;
+function syncNewRev() { return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8); }
+function syncRevOf(stateStr) {
+  try { const st = JSON.parse(stateStr); return st && typeof st.syncRev === 'string' ? st.syncRev : null; }
+  catch(e) { return null; }
+}
+function syncHistoryList() {
+  if (!syncHistory) {
+    syncHistory = [];
+    try {
+      (JSON.parse(localStorage.getItem(SYNC_HISTORY_LS_KEY)) || []).forEach(e => {
+        if (e && typeof e.hash === 'string' && typeof e.state === 'string') syncHistory.push(e);
+      });
+    } catch(e) {}
+  }
+  return syncHistory;
+}
+function syncRemember(rev, hash, stateStr, by) {
+  let canon = false;
+  try { canon = !!rev && (Number(JSON.parse(stateStr).build) || 1) >= STATE_BUILD; } catch(e) {}
+  const list = syncHistoryList();
+  const was = list.find(e => e.hash === hash && e.rev === rev);
+  const entry = was && was.canon ? was : { rev, hash, canon, by: by || null, state: stateStr };   // an older version's echo of a copy keeps its writer
+  syncHistory = [...list.filter(e => e !== was), entry].slice(-SYNC_HISTORY_MAX);
+  clearTimeout(syncHistoryTimer);
+  syncHistoryTimer = setTimeout(syncKeepHistory, 3000);
+}
+function syncKeepHistory() {
+  clearTimeout(syncHistoryTimer);
+  if (!syncHistory) return;
+  let entries = syncHistory.slice(-SYNC_HISTORY_KEEP);
+  while (entries.length) {
+    try { localStorage.setItem(SYNC_HISTORY_LS_KEY, JSON.stringify(entries)); return; }
+    catch(e) { entries = entries.slice(1); }  // storage full: keep fewer
+  }
+}
+/* A revision's own copy, or failing that the earliest kept under it. */
+function syncHistoryRev(rev) {
+  if (typeof rev !== 'string' || !rev) return null;
+  const h = syncHistoryList().filter(e => e.rev === rev);
+  return h.find(e => e.canon) || h[0] || null;
+}
+/* The copy a cloud copy was built on, when this device has it and it isn't
+ * the one this device has now (`knownHash`): the writer missed what came
+ * after it. This version names it (syncBaseHash, syncBase). An older version
+ * carries the revision it last took in through, in syncRev: its copy was
+ * built on its own last write under that revision, if it made one, else on
+ * the revision's own copy. `by` is the writer's client id. */
+function syncStaleFrom(remote, knownHash, by) {
+  let base = null;
+  if ((Number(remote.build) || 1) >= STATE_BUILD) {
+    if (typeof remote.syncBaseHash !== 'string' || remote.syncBaseHash === knownHash) return null;
+    base = syncHistoryList().filter(e => e.hash === remote.syncBaseHash).pop() || syncHistoryRev(remote.syncBase);
+  } else if (typeof remote.syncRev === 'string' && remote.syncRev) {
+    const under = syncHistoryList().filter(e => e.rev === remote.syncRev);
+    base = under.filter(e => by && e.by === by && !e.canon).pop() || syncHistoryRev(remote.syncRev);
+  }
+  return base && base.hash !== knownHash ? base.state : null;
+}
+/* That writer's changes, put on top of what this device has. */
+function syncRebase(baseStr, remote, preferLocal) {
+  try {
+    const base = JSON.parse(baseStr);
+    const r = { ...remote };
+    if ((Number(r.build) || 1) < STATE_BUILD) Object.keys(base).forEach(k => { if (!(k in r)) r[k] = base[k]; });
+    return JSON.stringify(syncMerge(base, gatherState(), r, { preferLocal }));
   } catch(e) { return null; }
 }
 
@@ -209,31 +307,43 @@ function syncPushNow(opts) {
   if (syncTypingValue) return false;           // another device's change is waiting to be merged in: don't write over it
   if (!syncReconciled) return false;          // never write blind over an unseen cloud copy
   if (syncHeld() && !priority) return false;  // Formats open — only Done may push
+  /* One push at a time: a second one started now would see the first one's
+   * copy, not yet the cloud's, and give up. It goes once the first is done. */
+  if (syncPushing && !priority) { syncPushAgain = true; return false; }
   clearTimeout(syncPushTimer);
   syncPushTimer = null;
   const state = gatherState();
   const fp = syncFingerprint(state);
   if (fp === syncKnownFp) return false;       // cloud already has this
+  const fresh = !!(opts && opts.fresh);         // Export: this copy replaces the cloud's, built on nothing
+  const meta = syncLoadMeta();
   const payload = {
-    state: JSON.stringify(state),
+    state: JSON.stringify({ ...state, syncRev: syncNewRev(),
+      syncBase: fresh ? null : (syncKnownFp !== null ? syncKnownRev : (meta.knownRev || null)),
+      syncBaseHash: fresh ? null : (syncKnownFp !== null ? syncHash(syncKnownFp) : (meta.knownHash || null)) }),
     updatedAt: Date.now(),
     client: syncClientId,
   };
   if (priority) syncCommitPending = Math.max(1, syncCommitPending);   // open (or keep) the priority window
+  syncPushing = true;
   syncWrite(payload, priority)
     .then(written => {
       if (!written) return;                   // the cloud moved on: the listener brings that copy to merge with, then this pushes again
       syncCloudSeen = syncHash(fp);
-      syncAgree(fp, { pushedAt: Date.now() }, payload.state);
+      syncAgree(fp, { pushedAt: Date.now() }, payload.state, syncClientId);
       syncCommitPending = 0;                  // server has it — priority window closes
       syncUpdateUI();
     })
     .catch(err => {
       syncCommitPending = 0;
-      /* permission errors are the database rules; anything else (the database
-       * gave up on a busy node, say): try again in a moment */
+      /* permission errors are the database rules; anything else (another write
+       * to the account cut in, the database gave up on a busy node): again soon */
       if (err && /permission/i.test(String(err.message || err.code || ''))) syncRecordAuthError(err, 'database write');
-      else setTimeout(() => { if (syncUser && syncRef) syncSchedulePush(); }, 5000);
+      else syncPushAgain = true;
+    })
+    .then(() => {
+      syncPushing = false;
+      if (syncPushAgain) { syncPushAgain = false; if (syncUser && syncRef) syncSchedulePush(); }
     });
   return true;
 }
@@ -284,7 +394,7 @@ let syncBouncing   = false;     // true once we've decided another device is fig
 const SYNC_BOUNCE_N  = 4;       // answers …
 const SYNC_BOUNCE_MS = 90000;   // … within this window = a loop, not a person editing
 
-function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr) {
+function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr, by) {
   let remoteFp = null;
   /* A cloud copy written by an older build cannot carry fields it never knew
    * about (digest, suggested tasks, …). Missing there does not mean "the user
@@ -310,7 +420,7 @@ function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr) {
     keepField(renderLoadedState);             // a cursor left in a field stays, with what was typed
     try { remoteFp = syncFingerprint(JSON.parse(remoteStr)); } catch(e) {}
   } finally {
-    if (remoteFp) { syncLastSeenFp = remoteFp; syncAgree(remoteFp, { editAt: remoteUpdatedAt || Date.now() }, remoteStr); }
+    if (remoteFp) { syncLastSeenFp = remoteFp; syncAgree(remoteFp, { editAt: remoteUpdatedAt || Date.now() }, remoteStr, by); }
     else syncLastSyncAt = Date.now();
     syncApplying = false;
   }
@@ -402,12 +512,13 @@ function syncMergeRemote(remoteStr, knownHash, preferLocal) {
 
 function syncReconcileRemote(v) {
   const localFp = syncFingerprint(gatherState());
+  const connected = syncReconciled;           // this connection had seen the cloud before this copy
   syncReconciled = true;                      // from here on pushes are allowed
   syncCloudSeen = v && typeof v.state === 'string' ? syncStateHash(v.state) : null;
 
   if (syncPendingRemote) {                    // choice not made yet — just keep the stash fresh
     if (v && typeof v.state === 'string' && v.client !== syncClientId) {
-      syncPendingRemote = { state: v.state, updatedAt: v.updatedAt || 0 };
+      syncPendingRemote = { state: v.state, updatedAt: v.updatedAt || 0, client: v.client };
       syncRenderChoiceInfo();
     }
     return;
@@ -419,12 +530,13 @@ function syncReconcileRemote(v) {
     return;
   }
   if (v.client === syncClientId) {            // echo of our own write
-    try { syncAgree(syncFingerprint(JSON.parse(v.state)), undefined, v.state); } catch(e) {}
+    try { syncAgree(syncFingerprint(JSON.parse(v.state)), undefined, v.state, v.client); } catch(e) {}
     syncUpdateUI();
     return;
   }
-  let remoteFp = null;
-  try { remoteFp = syncFingerprint(JSON.parse(v.state)); } catch(e) { return; }
+  let remote = null, remoteFp = null;
+  try { remote = JSON.parse(v.state); remoteFp = syncFingerprint(remote); } catch(e) { return; }
+  if (connected && (Number(remote.build) || 1) < STATE_BUILD) syncOlderDevice();
   if (syncHeld()) {                           // Formats open — stash, never apply
     if (remoteFp !== localFp) {
       syncDeferredRemote = { state: v.state, updatedAt: v.updatedAt || 0 };
@@ -441,7 +553,7 @@ function syncReconcileRemote(v) {
   }
   if (remoteFp === localFp) {                 // already identical
     syncLastSeenFp = remoteFp;
-    syncAgree(remoteFp, undefined, v.state);
+    syncAgree(remoteFp, undefined, v.state, v.client);
     syncUpdateUI();
     return;
   }
@@ -453,7 +565,7 @@ function syncReconcileRemote(v) {
   const noBaseline = syncKnownFp === null && (syncJustSignedIn || !meta.pushedAt);
   if (noBaseline) {
     syncJustSignedIn = false;
-    syncPendingRemote = { state: v.state, updatedAt: v.updatedAt || 0 };
+    syncPendingRemote = { state: v.state, updatedAt: v.updatedAt || 0, client: v.client };
     clearTimeout(syncPushTimer);
     syncOpenChoiceModal();
     syncUpdateUI();
@@ -470,16 +582,22 @@ function syncReconcileRemote(v) {
   const knownHash = syncKnownFp !== null ? syncHash(syncKnownFp) : (meta.knownHash || null);
   const localDirty  = knownHash ? syncHash(localFp)  !== knownHash : true;
   const remoteDirty = knownHash ? syncHash(remoteFp) !== knownHash : true;
-  if (!localDirty) {
-    syncApplyRemote(v.state, v.updatedAt);
+  /* built on an older copy than this device has: applying it as it is would
+   * undo what came after, so its changes go on top of this device's instead */
+  const from = remoteDirty ? syncStaleFrom(remote, knownHash, v.client) : null;
+  const rebased = from ? syncRebase(from, remote, (meta.editAt || 0) > (v.updatedAt || 0)) : null;
+  if (rebased) {
+    syncApplyRemote(v.state, v.updatedAt, rebased, v.client);
+  } else if (!localDirty) {
+    syncApplyRemote(v.state, v.updatedAt, undefined, v.client);
   } else if (!remoteDirty) {
     syncPushNow();
   } else {
     const preferLocal = (meta.editAt || 0) > (v.updatedAt || 0);
     const merged = syncMergeRemote(v.state, knownHash, preferLocal);
-    if (merged) syncApplyRemote(v.state, v.updatedAt, merged);
+    if (merged) syncApplyRemote(v.state, v.updatedAt, merged, v.client);
     else if (preferLocal) syncPushNow();
-    else syncApplyRemote(v.state, v.updatedAt);
+    else syncApplyRemote(v.state, v.updatedAt, undefined, v.client);
   }
 }
 
@@ -495,6 +613,8 @@ function syncStop() {
   syncKnownFp = null;
   syncReconciled = false;
   syncCloudSeen = null;
+  syncPushing = false;
+  syncPushAgain = false;
   syncPendingRemote = null;
   syncDeferredRemote = null;
   syncCommitPending = 0;
@@ -507,6 +627,17 @@ function syncStop() {
   digestGithubForget();                         // and so does the Run now token
   bankCloudForget();                            // and its bank connections, unless it's the same account again
   $('syncChoiceModal')?.classList.remove('show');
+}
+
+/* A copy written by an older version of Focus arrived while connected: that
+ * device keeps writing without looking at the cloud first, so a change made
+ * there while it was offline can arrive late. Say so, once a session. */
+function syncOlderDevice() {
+  if (syncOlderSeen) return;
+  syncOlderSeen = true;
+  console.warn('[sync] a device on an older version of Focus wrote to the cloud');
+  showToast('A device on an older Focus is syncing: fully close and reopen Focus there');
+  syncUpdateUI();
 }
 
 /* ── Import/Export choice (shown when sign-in finds divergent data) ── */
@@ -530,7 +661,7 @@ export function syncChooseImport() {
   const pending = syncPendingRemote;
   syncPendingRemote = null;
   $('syncChoiceModal')?.classList.remove('show');
-  if (pending) syncApplyRemote(pending.state, pending.updatedAt);
+  if (pending) syncApplyRemote(pending.state, pending.updatedAt, undefined, pending.client);
   digestInboxSeen(digestInboxLatest);          // the imported copy may predate the delivered digest
   syncUpdateUI();
   if (tourReoffer) { setTourReoffer(false); tourMarkSeen(); }   // cloud data → returning user
@@ -539,7 +670,7 @@ export function syncChooseExport() {
   syncPendingRemote = null;
   $('syncChoiceModal')?.classList.remove('show');
   digestInboxSeen(digestInboxLatest);          // this device's copy may predate the delivered digest
-  syncPushNow();
+  syncPushNow({ fresh: true });
   showToast('Exported to cloud ✓');
   syncUpdateUI();
   if (tourReoffer) tourOffer();
@@ -614,7 +745,9 @@ export function syncUpdateUI() {
       : '';
     line.textContent = syncBouncing
       ? `Syncing as ${syncUser.email || 'Google account'}${when} — changes keep bouncing with another device. It is probably running an older version of Worky: fully close and reopen the app there.`
-      : `Syncing as ${syncUser.email || 'Google account'}${when}`;
+      : syncOlderSeen
+        ? `Syncing as ${syncUser.email || 'Google account'}${when} — another device is on an older version of Focus. Fully close and reopen Focus there (on a phone, swipe it away), so a change it makes offline can't arrive late over newer ones.`
+        : `Syncing as ${syncUser.email || 'Google account'}${when}`;
     btn.textContent = 'Sign out';
   } else {
     const meta = syncLoadMeta();
@@ -672,6 +805,8 @@ export function syncInit() {
     return;
   }
   document.addEventListener('focusout', () => setTimeout(syncTypingDone, 0));   // a field was left: take in what waited now
+  window.addEventListener('pagehide', syncKeepHistory);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') syncKeepHistory(); });
   firebase.auth().onAuthStateChanged(user => {
     syncUser = user;
     syncStop();
