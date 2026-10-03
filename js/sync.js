@@ -177,7 +177,7 @@ function syncAgree(fp, extra, stateStr, by) {
       canon: !!st.rev && st.build >= SYNC_STAMPS_BUILD, state: stateStr });   // an older version's echo of a copy keeps its writer
     try { localStorage.setItem(SYNC_BASE_LS_KEY, JSON.stringify({ hash: meta.knownHash, state: stateStr })); } catch(e) {}
   }
-  setStateMark({ rev: syncKnownRev, hash: meta.knownHash, seq: syncTopSeq }, syncKnownLog);   // this device's copy is built on it (saved with it)
+  setStateMark({ rev: syncKnownRev, hash: meta.knownHash, seq: syncTopSeq, at: Date.now() }, syncKnownLog);   // this device's copy is built on it (saved with it)
   syncSaveMeta(meta);
 }
 /* The copy both sides last agreed on, if this device still has it. */

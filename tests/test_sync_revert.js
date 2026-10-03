@@ -353,6 +353,46 @@ const used = w => { let n = 0; for (let i = 0; i < w.localStorage.length; i++) {
     ok(gone(dbdTexts(T2)) && gone(cloudTexts(W)) && gone(dbdTexts(P)), `the task stays deleted, everywhere (other tab: ${!gone(dbdTexts(T2)) ? 'back' : 'gone'}, cloud: ${!gone(cloudTexts(W)) ? 'back' : 'gone'})`);
   }
 
+  console.log('\n── 15. Two tabs and an older version: the other tab takes over, built on the copy the tab agreed on last ──');
+  {
+    /* the rule: what another tab saved is built on the copy agreed on later, even under the same number
+     * (a merged copy, or an older version's, keeps the number of the copy before it) */
+    const S = await world().boot('a tab', {}, { store: memoryStorage() });
+    const takeIn = async (mine, theirs) => {
+      S.w.eval(`setStateMark(${JSON.stringify(mine)}); saveToLocal();`);
+      S.w.localStorage.setItem('focus-app-state', JSON.stringify({ ...stateOf(S), syncLocal: theirs }));
+      S.w.eval('saveToLocal()'); await sleep(50);
+      return stateOf(S).syncLocal.hash;
+    };
+    ok(await takeIn({ rev: 'a', hash: 'earlier', seq: 2, at: 1000 }, { rev: 'b', hash: 'later', seq: 2, at: 2000 }) === 'later'
+      && await takeIn({ rev: 'b', hash: 'later', seq: 2, at: 2000 }, { rev: 'a', hash: 'earlier', seq: 2, at: 1000 }) === 'later',
+      'a tab takes in the copy agreed on later, under the same number, and keeps its own when that is the later one');
+    const W = world();
+    const [, P] = await W.devicesOnline(['first', 'phone']);
+    const store = memoryStorage();
+    const T1 = await W.boot('tab', { 'focus-app-state': W.net.at('users/u1/state'), 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: W.fp(P) }) }, { store });
+    const T2 = await W.boot('other tab', {}, { store, idb: T1.idb });
+    T1.dev.signIn(); T2.dev.signIn();
+    const O = W.olderVersion();
+    await W.net.idle(); await sleep(500);
+    const settle = async () => { await W.net.idle(); await sleep(300); };
+    O.toggle(1, 6); await settle();                                        // the older phone checks a task
+    addDbd(T1, 'added in the tab'); T1.w.eval('syncPushNow()'); await settle();
+    T2.w.eval('saveToLocal()'); await sleep(50);                           // the other tab takes in the tab's copy, built on that push
+    O.toggle(1, 6); await settle();                                        // the older phone unchecks it: the tab takes that copy as agreed (its number unchanged)
+    T2.w.eval('saveToLocal()'); await sleep(50);                           // the other tab takes in what the tab saved
+    const markOf = app => (stateOf(app).syncLocal || {}).hash;
+    ok(markOf(T2) && markOf(T2) === markOf(T1), 'the other tab takes in which copy the tab agreed on last, though its number is the same');
+    T1.dev.sleep();                                                        // the tab's connection drops; the other tab only listens
+    addDbd(P, 'added on the phone'); P.w.eval('syncPushNow()'); await settle();
+    O.toggle(1, 6); await settle();                                        // the older phone checks it again, over the phone's copy
+    addDbd(T2, 'added in the other tab');
+    W.close(T1);                                                           // the other tab takes over, with the older phone's copy last heard
+    await W.net.idle(); await sleep(2500); await W.net.idle();
+    ok(/1:6/.test(done(T2)) && /1:6/.test(doneOf(W.cloud())) && has(cloudTexts(W), ['added in the tab', 'added on the phone', 'added in the other tab']),
+      `the older phone's last check stays, with everything added (other tab: ${done(T2)})`);
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

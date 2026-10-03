@@ -211,7 +211,7 @@ function stateCaptureExtra(state) {
   Object.keys(state).forEach(k => { if (!STATE_KNOWN_KEYS.has(k)) stateExtra[k] = state[k]; });
 }
 /* Which copy agreed with the cloud this device's copy is built on (sync.js),
- * saved with it: { rev, hash, seq }, and the revisions that copy comes after
+ * saved with it: { rev, hash, seq, at (when it was agreed on) }, and the revisions that copy comes after
  * (syncLog). */
 export function setStateMark(mark, log) {
   stateExtra.syncLocal = mark;
@@ -385,9 +385,11 @@ function stateTakeInOtherTab() {
     const base = stateStored === null ? null : JSON.parse(stateStored), theirs = JSON.parse(cur);
     if (theirs && theirs.version === 1) {
       const local = gatherState();
-      /* built on the newer of the two copies agreed with the cloud (what the tab syncing says), even with nothing else new */
-      const seqOf = st => (st && st.syncLocal && Number(st.syncLocal.seq)) || 0;
-      const newer = seqOf(theirs) > seqOf(local) ? theirs : local;
+      /* built on the newer of the two copies agreed with the cloud (what the tab syncing says), even with nothing else new:
+       * the one agreed on later (a merged copy keeps the number of the one before it, so the number can be the same) */
+      const markOf = st => { const m = st && st.syncLocal; return m ? [Number(m.at) || 0, Number(m.seq) || 0] : [0, 0]; };
+      const [ta, ts] = markOf(theirs), [la, ls] = markOf(local);
+      const newer = ta > la || (ta === la && ts > ls) ? theirs : local;
       if (!base || syncFingerprint(theirs) !== syncFingerprint(base)) {
         /* (a page that hadn't saved yet takes the other tab's as it is) */
         const merged = base ? syncMerge(base, local, theirs, { preferLocal: true }) : theirs;
