@@ -5,100 +5,10 @@
  * older version of Focus) edit at random times: every edit must survive, and
  * every device must end up with the cloud's copy.
  * Run: npm test -- sync_net (or node --experimental-vm-modules tests/test_sync_net.js) */
-const { loadApp } = require('./load-app');
-const { createNetFirebase } = require('./fake-firebase-net');
+const { world, sleep, until, doneOf, done } = require('./sync-world');
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; console.log('  ✓', msg); } else { fail++; console.log('  ✗', msg); } }
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-async function until(fn, ms = 1000) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) { if (fn()) return true; await sleep(20); }
-  return fn();
-}
-
-/* One account, its devices. `delay` is each link's delay in ms (a function, for jitter). */
-function world({ delay = () => 30 + Math.random() * 50 } = {}) {
-  const net = createNetFirebase({ delay: () => delay() });
-  const devices = [];
-  async function boot(name, storage = {}) {
-    let dev = null;
-    const { w } = await loadApp({
-      storage: { 'focus-tour-done': '1', ...storage },
-      before: w => {
-        w.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} });
-        w.HTMLElement.prototype.scrollIntoView = function () {};
-        dev = net.install(w);
-        w.__applies = [];
-        w.__toasts = [];
-      },
-      transform: src => src
-        .replace('function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr, by) {',
-          'function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr, by) { window.__applies.push(Date.now());')
-        .replace('export function showToast(msg) {', 'export function showToast(msg) { window.__toasts.push(msg);'),
-    });
-    w.document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
-    const app = { name, w, d: w.document, dev };
-    devices.push(app);
-    return app;
-  }
-  const fp = app => app.w.eval('syncHash(syncFingerprint(gatherState()))');
-  const cloud = () => { const s = net.at('users/u1/state'); return s ? JSON.parse(s) : null; };
-  /* the first device starts the account; the others open it with a copy, like devices that synced before */
-  async function devicesOnline(names) {
-    const first = await boot(names[0], { 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: 'x' }) });
-    first.dev.signIn();
-    await until(() => cloud(), 3000);
-    const rest = [];
-    for (const name of names.slice(1)) {
-      const d = await boot(name, { 'focus-app-state': net.at('users/u1/state'), 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: fp(first) }) });
-      d.dev.signIn();
-      rest.push(d);
-    }
-    await net.idle();
-    await sleep(300);
-    return [first, ...rest];
-  }
-  /* What an older version of Focus does (before these devices stamped revisions):
-   * it takes in every copy it hears, and on an edit changes its copy and writes it
-   * with update(), without looking at the cloud first. It writes its own build and
-   * carries fields it doesn't know (syncRev, syncBase) through untouched. */
-  function olderVersion(name = 'older-phone') {
-    const w = {};
-    const dev = net.install(w);
-    dev.signIn();
-    const ref = w.firebase.database().ref('users/u1');
-    let heard = null;
-    ref.on('value', snap => { const v = snap.val(); if (v && typeof v.state === 'string') heard = v.state; });
-    const mine = { done: {}, adds: [] };          // what it changed: it keeps those in memory, so every copy it writes has them
-    function write() {
-      const st = JSON.parse(heard);
-      Object.entries(mine.done).forEach(([key, d]) => {
-        const [lid, tid] = key.split(':').map(Number);
-        const t = st.todoLists.find(l => l.id === lid).tasks.find(x => x.id === tid);
-        if (t) t.done = d;
-      });
-      mine.adds.forEach(a => { if (!st.dbdTasks.some(t => t.text === a.text)) st.dbdTasks.push({ ...a }); });
-      st.dbdIdCounter = Math.max(st.dbdIdCounter || 1, ...st.dbdTasks.map(t => t.id + 1));
-      st.build = 7;
-      heard = JSON.stringify(st);
-      return ref.update({ state: heard, updatedAt: Date.now(), client: name });
-    }
-    return {
-      name, dev,
-      toggle(listId, taskId) {
-        const key = `${listId}:${taskId}`;
-        const now = JSON.parse(heard).todoLists.find(l => l.id === listId).tasks.find(x => x.id === taskId);
-        mine.done[key] = key in mine.done ? !mine.done[key] : !(now && now.done);
-        return write();
-      },
-      add(text, id) { mine.adds.push({ id, text, due: '2026-10-02', done: false }); return write(); },
-    };
-  }
-  return { net, boot, devicesOnline, olderVersion, fp, cloud, devices };
-}
-const doneOf = st => st.todoLists.flatMap(l => l.tasks.filter(t => t.done).map(t => `${l.id}:${t.id}`)).sort().join(' ');
-const done = app => doneOf(JSON.parse(app.w.eval('JSON.stringify(gatherState())')));
 
 (async () => {
   console.log('\n── 1. Checking off tasks with another device open ──');

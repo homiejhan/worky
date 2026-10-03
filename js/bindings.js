@@ -23,7 +23,7 @@ import {
   gcalSyncToApp,
 } from './gcal.js';
 import { budgetToggleDesktop } from './budget.js';
-import { syncBtnClick, syncChooseExport, syncChooseImport } from './sync.js';
+import { syncBtnClick, syncChooseExport, syncChooseImport, syncCopiesOpen } from './sync.js';
 import { bindTheme } from './theme.js';
 import { bindDigest } from './digest.js';
 import { bindTour } from './onboarding.js';
@@ -93,6 +93,7 @@ export function bindStatic() {
   $('syncConnectBtn')?.addEventListener('click', syncBtnClick);
   $('syncImportBtn')?.addEventListener('click', syncChooseImport);
   $('syncExportBtn')?.addEventListener('click', syncChooseExport);
+  $('syncCopiesBtn')?.addEventListener('click', syncCopiesOpen);
 
   /* confirm */
   $('confirmCancelBtn')?.addEventListener('click', () => closeModal('confirmOverlay'));

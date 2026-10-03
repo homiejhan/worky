@@ -468,6 +468,7 @@
       <section class="settings-section" data-settings-section="sync">
         <div class="modal-sub" id="syncStatusLine">Not configured.</div>
         <button class="gcal-connect-btn" id="syncConnectBtn" style="display:none">Sign in with Google</button>
+        <button class="gcal-connect-btn" id="syncCopiesBtn">Earlier copies…</button>
         <a class="settings-help-link" href="help/#cloud" target="_blank" rel="noopener">How cloud sync works</a>
       </section>
 
@@ -676,6 +677,17 @@
     <div class="modal-sub" id="syncChoiceInfo">This device's data differs from your cloud copy. Which one should Focus keep?</div>
     <button class="modal-file-btn choice-btn" id="syncImportBtn"><strong>Import from cloud</strong><span>Replace this device's data with the cloud copy</span></button>
     <button class="modal-file-btn choice-btn" id="syncExportBtn"><strong>Export to cloud</strong><span>Replace the cloud copy with this device's data</span></button>
+  </div>
+</div>
+
+<!-- ════════ EARLIER COPIES MODAL (Settings → Cloud sync) ════════ -->
+<div class="modal-overlay" id="syncCopiesModal">
+  <div class="modal-box gcal-modal-box">
+    <button class="modal-x" data-close="syncCopiesModal" title="Close">×</button>
+    <div class="modal-title">Earlier copies</div>
+    <div class="modal-sub">Copies of everything in Focus that this device kept. Restore one to put it back, here and on your other devices; what you have now stays in this list.</div>
+    <div class="sync-copy-now" id="syncCopiesNow"></div>
+    <div class="gcal-cal-list sync-copy-list" id="syncCopiesList"></div>
   </div>
 </div>
 

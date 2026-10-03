@@ -27,9 +27,13 @@ async function boot(name, storage = {}) {
       dev = install(w);
       w.__stats = { applies: 0, pushes: 0 };
     },
-    transform: src => src
-      .replace('function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr, by) {', 'function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr, by) { window.__stats.applies++;')
-      .replace('  syncWrite(payload, priority)', '  window.__stats.pushes++;\n  syncWrite(payload, priority)'),
+    transform: (src, file) => {
+      const hook = 'function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr, by, agreedStr) {';
+      if (file === 'js/sync.js' && !(src.includes(hook) && src.includes('  syncWrite(payload, priority)'))) throw new Error('js/sync.js changed: update the test hooks');
+      return src
+        .replace(hook, hook + ' window.__stats.applies++;')
+        .replace('  syncWrite(payload, priority)', '  window.__stats.pushes++;\n  syncWrite(payload, priority)');
+    },
   });
   w.document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
   w.__signIn = () => dev.signIn();

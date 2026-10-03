@@ -1,6 +1,6 @@
 /* persistence.js — Saving and loading: the state record, its compressed Export form,
  * localStorage. */
-import { LS_KEY } from './config.js';
+import { LS_KEY, SYNC_BASE_LS_KEY } from './config.js';
 import { cloneTask, getRemaining, showToast } from './util.js';
 import {
   renderTimers, setTimerDefaults, setTimers, setWokenUp, syncWakeupUI, TIMER_DEFAULTS, timers,
@@ -191,11 +191,13 @@ function liveTimerRecord(t) {
  * build 4, runway build 5, timerLog build 6, bankBudget build 7), or a new
  * build writes the cloud differently (build 8 stamps revisions, syncRev and
  * syncBase, see sync.js). Lets a newer device recognise a cloud copy written
- * by an older build, which cannot have carried the newer fields. timerLog (days a timer ran past zero) went away again when
+ * by an older build, which cannot have carried the newer fields; build 9
+ * numbers the revisions (syncSeq) and saves where this device's copy stands
+ * (syncLocal). timerLog (days a timer ran past zero) went away again when
  * timers went back to stopping at zero; a copy from a build-6 device is not
  * in the known keys below, so it passes through untouched instead of being
  * stripped and written back. */
-export const STATE_BUILD = 8;
+export const STATE_BUILD = 9;
 const STATE_KNOWN_KEYS = new Set(['version', 'build', 'wokenUp', 'timerDefaults', 'timers', 'todoIdCounter',
   'taskIdCounter', 'todoLists', 'dbdTasks', 'dbdIdCounter', 'budget', 'purchaseIdCounter', 'views', 'theme',
   'digest', 'shiftCals', 'runway', 'bankBudget', 'calendar']);
@@ -207,6 +209,9 @@ function stateCaptureExtra(state) {
   if (!state || typeof state !== 'object') return;
   Object.keys(state).forEach(k => { if (!STATE_KNOWN_KEYS.has(k)) stateExtra[k] = state[k]; });
 }
+/* Which copy agreed with the cloud this device's copy is built on (sync.js),
+ * saved with it: { rev, hash, seq }. */
+export function setStateMark(mark) { stateExtra.syncLocal = mark; }
 
 export function gatherState() {
   return {
@@ -308,13 +313,50 @@ export function applyState(state) {
   showToast('State restored ✓');
 }
 
-export function saveToLocal() {
-  try {
-    const state = gatherState();
-    localStorage.setItem(LS_KEY, JSON.stringify(state));
-    syncOnLocalSave(state);
-  } catch(e) {}
+/* Put an earlier copy back (Settings → Cloud sync → Earlier copies), as an edit
+ * on top of what this device has: it keeps saying which agreed copy it is built
+ * on, so sync sends it to the other devices like any change. */
+export function restoreState(st) {
+  if (!st || st.version !== 1) return false;
+  const mark = stateExtra.syncLocal;
+  hydrateState(st);
+  if (mark) stateExtra.syncLocal = mark; else delete stateExtra.syncLocal;
+  renderLoadedState();
+  saveToLocal();
+  return true;
 }
+
+/* Save the state, and hand it to sync. When the device's storage is full, the
+ * copy the last merge started from goes (sync keeps it among its copies too) to
+ * make room; if it still doesn't fit, the change goes to the cloud all the same,
+ * and Focus says so once. */
+let saveFullSaid = false;
+export function saveToLocal() {
+  let state;
+  try { state = gatherState(); } catch(e) { return; }
+  const str = JSON.stringify(state);
+  let saved = false;
+  try { localStorage.setItem(LS_KEY, str); saved = true; } catch(e) {
+    try { localStorage.removeItem(SYNC_BASE_LS_KEY); localStorage.setItem(LS_KEY, str); saved = true; } catch(e2) {}
+  }
+  if (!saved && !saveFullSaid) {
+    saveFullSaid = true;
+    console.warn('[save] storage on this device is full');
+    showToast('Storage on this device is full: changes still sync to the cloud. An uploaded background (Settings → Theme) takes the most room.');
+  }
+  try { syncOnLocalSave(state); } catch(e) {}
+}
+/* A state record (JSON) into the live variables, without localStorage: a copy
+ * from the cloud still loads when this device's storage is full. */
+export function loadStateString(str) {
+  try {
+    const state = JSON.parse(str);
+    if (!state || state.version !== 1) return false;
+    hydrateState(state);
+    return true;
+  } catch(e) { return false; }
+}
+export let bootStateStr = null;   // the copy saved on this device, as Focus opened (sync.js → syncKeepBootCopy)
 export function loadFromLocal() {
   try {
     const raw = localStorage.getItem(LS_KEY);
@@ -322,6 +364,7 @@ export function loadFromLocal() {
     const state = JSON.parse(raw);
     if (!state || state.version !== 1) return false;
     hydrateState(state);
+    bootStateStr = raw;
     return true;
   } catch(e) {
     try { localStorage.removeItem(LS_KEY); } catch(_) {}
