@@ -4,7 +4,7 @@
  * slept through a day of edits, an older version of Focus, a device whose
  * storage is full, a second tab of Focus in the same browser, Formats left open.
  * Run: npm test -- sync_revert (or node --experimental-vm-modules tests/test_sync_revert.js) */
-const { world, sleep, until, doneOf, done, stateOf } = require('./sync-world');
+const { world, memoryStorage, sleep, until, doneOf, done, stateOf } = require('./sync-world');
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; console.log('  ✓', msg); } else { fail++; console.log('  ✗', msg); } }
@@ -192,8 +192,165 @@ const used = w => { let n = 0; for (let i = 0; i < w.localStorage.length; i++) {
     L.w.copiesSave();
     await sleep(500);
     const after = W.devices[0].idb.dump('focus-copies', 'copies');
-    ok(after.length <= 140 && after.length > 60, `200 more copies: ${after.length} stay (the newest 40, then one an hour, then one a day)`);
+    ok(after.length <= 220 && after.length > 60, `200 more copies: ${after.length} stay (the newest 40, then the first and last of each hour, then of each day)`);
     ok(L.w.copiesRecent().length <= 40 && L.w.copiesRecent().every(e => typeof e.state === 'string'), 'and only the newest stay in memory');
+  }
+
+  console.log('\n── 8. A push that arrived without the device hearing back ──');
+  for (const restart of [false, true]) {
+    /* the laptop checks a task; its push reaches the cloud, but it goes offline before the answer comes back */
+    const W = world();
+    const [L, P] = await W.devicesOnline(['laptop', 'phone']);
+    L.w.toggleTask(0, 0);
+    await until(() => L.w.eval('syncPushing'), 3000);
+    L.dev.sleep();
+    ok(await until(() => doneOf(W.cloud()) === '0:0', 3000), `${restart ? 'restart' : 'same session'}: the check reached the cloud without the laptop hearing back`);
+    await until(() => done(P) === '0:0', 3000);
+    addDbd(P, 'the phone builds on it');                                   // the cloud moves on from the laptop's push
+    await until(() => cloudTexts(W).includes('the phone builds on it'), 4000);
+    L.w.toggleTask(0, 0);                                                  // offline, the laptop unchecks it again
+    await sleep(300);
+    const L2 = restart ? await W.reload(L) : L;
+    if (!restart) L.dev.wake();
+    await W.net.idle(); await sleep(3000); await W.net.idle();
+    ok(done(L2) === '' && doneOf(W.cloud()) === '' && done(P) === '', `the uncheck made after it stays, everywhere (laptop ${done(L2) || 'none'}, cloud ${doneOf(W.cloud()) || 'none'})`);
+    ok(dbdTexts(L2).includes('the phone builds on it') && W.fp(L2) === W.fp(P), 'with the phone\'s change, and the two agree');
+  }
+
+  console.log('\n── 9. Two tabs: one changes things offline, the other keeps saving ──');
+  {
+    const W = world();
+    const [, P] = await W.devicesOnline(['first', 'phone']);
+    const store = memoryStorage();
+    const T1 = await W.boot('tab', { 'focus-app-state': W.net.at('users/u1/state'), 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: W.fp(P) }) }, { store });
+    const T2 = await W.boot('other tab', {}, { store, idb: T1.idb });
+    T1.dev.signIn(); T2.dev.signIn();
+    await W.net.idle(); await sleep(500);
+    ok(T1.w.eval('syncLeader') && !T2.w.eval('syncLeader') && /through the other tab/.test(T2.d.getElementById('syncStatusLine').textContent),
+      'one tab syncs with the cloud, the other through it (and says so in Settings)');
+    T1.dev.sleep();                                                        // the tab's connection drops
+    T1.w.toggleTask(0, 1);
+    addDbd(T1, 'added in the tab offline');
+    await sleep(2500);                                                     // the other tab saves, as it does every 2 s
+    ok(dbdTexts(T2).includes('added in the tab offline'), 'the other tab takes in what the tab saved, instead of saving over it');
+    const T3 = await W.reload(T1);                                         // the tab is closed and opened again, online
+    await W.net.idle(); await sleep(3000); await W.net.idle();
+    ok(/0:1/.test(done(T3)) && dbdTexts(T3).includes('added in the tab offline'), `the tab opened again has its offline changes (${done(T3)})`);
+    ok(/0:1/.test(doneOf(W.cloud())) && cloudTexts(W).includes('added in the tab offline') && dbdTexts(P).includes('added in the tab offline'),
+      'and so do the cloud and the phone');
+    ok(T2.w.eval('syncLeader') && !T3.w.eval('syncLeader'), 'the other tab took over syncing when the first one closed');
+  }
+
+  console.log('\n── 10. An older copy whose starting point is only in this device\'s database ──');
+  {
+    const W = world();
+    const [L, P] = await W.devicesOnline(['laptop', 'phone']);
+    const O = W.olderVersion();
+    await until(() => O.heard(), 3000);
+    O.dev.sleep();                                                         // the older phone, in a drawer, while the laptop gets a lot done
+    const day = [];
+    for (let i = 0; i < 45; i++) {
+      day.push(`laptop task ${i}`);
+      addDbd(L, day[i]);
+      L.w.eval('syncPushNow()');
+      await until(() => !L.w.eval('syncPushing'), 3000);
+    }
+    await sleep(2500);                                                     // (the copies are written to the database)
+    const heardRev = O.heard().syncRev;
+    ok(!L.w.copiesRecent().some(e => e.rev === heardRev) && L.w.copiesIndex().some(e => e.rev === heardRev),
+      'the copy the older phone last took in is no longer in the laptop\'s memory, only in its database');
+    O.toggle(1, 6);
+    O.dev.wake();
+    await W.net.idle(); await sleep(3000); await W.net.idle();
+    ok(has(dbdTexts(L), day) && has(cloudTexts(W), day) && has(dbdTexts(P), day), 'the laptop\'s 45 changes stay, everywhere');
+    ok(/1:6/.test(done(L)) && /1:6/.test(doneOf(W.cloud())), `and the older phone's change is taken in on top (${done(L)})`);
+  }
+
+  console.log('\n── 11. An older version checks a task, unchecks it (back to the cloud\'s copy), and checks it again ──');
+  {
+    const W = world();
+    const [L] = await W.devicesOnline(['laptop']);
+    const O = W.olderVersion();
+    await until(() => O.heard(), 3000);
+    const seen = [];
+    for (let i = 0; i < 3; i++) {
+      O.toggle(1, 6);                                                      // each write carries the revision it took in, the same each time
+      await W.net.idle(); await sleep(300);
+      seen.push(/1:6/.test(done(L)) ? 'checked' : 'unchecked');
+    }
+    ok(seen.join() === 'checked,unchecked,checked', `the laptop follows each of its writes (${seen.join(', ')})`);
+    await sleep(2500); await W.net.idle();
+    ok(/1:6/.test(done(L)) && /1:6/.test(doneOf(W.cloud())), 'and it stays checked, on the laptop and in the cloud');
+  }
+
+  console.log('\n── 12. Two tabs: a task added in one gets a new id in the other\'s merge, and is deleted under its old id ──');
+  for (const savedFirst of [false, true]) {
+    const W = world();
+    const [, P] = await W.devicesOnline(['first', 'phone']);
+    const store = memoryStorage();
+    const T1 = await W.boot('tab', { 'focus-app-state': W.net.at('users/u1/state'), 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: W.fp(P) }) }, { store });
+    const T2 = await W.boot('other tab', {}, { store, idb: T1.idb });
+    T1.dev.signIn(); T2.dev.signIn();
+    await W.net.idle(); await sleep(500);
+    T1.dev.sleep();                                                        // the tab that syncs is offline a moment
+    addDbd(P, 'typed on the phone');                                       // the phone and the other tab each add a task: the same id
+    P.w.eval('syncPushNow()');
+    await until(() => cloudTexts(W).includes('typed on the phone'), 3000);
+    addDbd(T2, 'typed in the other tab');
+    T1.w.eval('saveToLocal()'); await sleep(50);                           // the tab that syncs takes it in
+    const idOf = (app, text) => (stateOf(app).dbdTasks.find(t => t.text === text) || {}).id;
+    const clash = idOf(T1, 'typed in the other tab') === idOf(P, 'typed on the phone');
+    T2.w.eval("dbdTasks.splice(dbdTasks.findIndex(t => t.text === 'typed in the other tab'), 1); renderDbd();");   // a typo: deleted again
+    if (savedFirst) T2.w.eval('saveToLocal()');
+    T1.dev.wake();                                                         // back online: its merge moves the other tab's task to a new id
+    T2.w.eval('saveToLocal()');
+    await W.net.idle(); await sleep(2500); await W.net.idle();
+    const gone = app => dbdTexts(app).includes('typed on the phone') && !dbdTexts(app).includes('typed in the other tab');
+    ok(clash && gone(T1) && gone(T2) && gone(P) && cloudTexts(W).includes('typed on the phone') && !cloudTexts(W).includes('typed in the other tab'),
+      `${savedFirst ? 'the delete saved before the merge' : 'the merge saved before the delete'}: the task stays deleted, and the phone's stays, everywhere`);
+  }
+
+  console.log('\n── 13. Two tabs: the tab that syncs sends a change and closes; the other takes over ──');
+  {
+    const W = world();
+    const [, P] = await W.devicesOnline(['first', 'phone']);
+    const store = memoryStorage();
+    const T1 = await W.boot('tab', { 'focus-app-state': W.net.at('users/u1/state'), 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: W.fp(P) }) }, { store });
+    const T2 = await W.boot('other tab', {}, { store, idb: T1.idb });
+    T1.dev.signIn(); T2.dev.signIn();
+    await W.net.idle(); await sleep(500);
+    addDbd(T1, 'added in the tab');
+    T2.w.eval('saveToLocal()'); await sleep(50);                           // the other tab takes it in
+    T1.w.eval("dbdTasks.find(t => t.text === 'added in the tab').text = 'added in the tab, renamed'; renderDbd(); saveToLocal(); syncPushNow();");
+    const sent = T1.w.eval('syncPushing');
+    W.close(T1);                                                           // closed as soon as it sent it
+    await W.net.idle(); await sleep(2500); await W.net.idle();
+    const ours = texts => texts.filter(t => /^added in the tab/.test(t)).join(' | ');
+    ok(sent && ours(dbdTexts(T2)) === 'added in the tab, renamed' && ours(dbdTexts(P)) === 'added in the tab, renamed' && ours(cloudTexts(W)) === 'added in the tab, renamed',
+      `the other tab takes over from what the tab saved last: the task once, renamed (${ours(dbdTexts(T2))})`);
+  }
+
+  console.log('\n── 14. Two tabs, both offline: the tab that syncs sent a task and never heard back; the other deletes it ──');
+  {
+    const W = world();
+    const [, P] = await W.devicesOnline(['first', 'phone']);
+    const store = memoryStorage();
+    const T1 = await W.boot('tab', { 'focus-app-state': W.net.at('users/u1/state'), 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: W.fp(P) }) }, { store });
+    const T2 = await W.boot('other tab', {}, { store, idb: T1.idb });
+    T1.dev.signIn(); T2.dev.signIn();
+    await W.net.idle(); await sleep(500);
+    T2.dev.sleep();                                                        // the other tab's connection drops
+    addDbd(T1, 'added in the tab');
+    T1.w.eval('syncPushNow()');
+    T1.dev.sleep();                                                        // and the tab's, just after it sent the task: it never hears back
+    await until(() => cloudTexts(W).includes('added in the tab'), 3000);
+    W.close(T1);                                                           // then it is closed: the other tab syncs now, offline
+    await sleep(500);
+    T2.w.eval("dbdTasks.splice(dbdTasks.findIndex(t => t.text === 'added in the tab'), 1); renderDbd(); saveToLocal();");
+    T2.dev.wake();
+    await W.net.idle(); await sleep(2500); await W.net.idle();
+    const gone = texts => !texts.includes('added in the tab');
+    ok(gone(dbdTexts(T2)) && gone(cloudTexts(W)) && gone(dbdTexts(P)), `the task stays deleted, everywhere (other tab: ${!gone(dbdTexts(T2)) ? 'back' : 'gone'}, cloud: ${!gone(cloudTexts(W)) ? 'back' : 'gone'})`);
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

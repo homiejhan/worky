@@ -35,6 +35,7 @@ export const FIREBASE_CONFIG = {
 export const SYNC_STATE_TAG   = 'worky-sync';
 export const SYNC_META_LS_KEY = 'focus-sync-meta';
 export const SYNC_BASE_LS_KEY = 'focus-sync-base';   // the last copy this device and the cloud agreed on (merges start from it)
+export const SYNC_SENT_LS_KEY = 'focus-sync-sent';   // the last push this device sent and hasn't heard back about (sync.js → syncTakeSent)
 export const SYNC_HISTORY_LS_KEY = 'focus-sync-history';   // where the previous version kept its last agreed copies (moved to IndexedDB, synccopies.js)
 
 /* ── Email Digest ──

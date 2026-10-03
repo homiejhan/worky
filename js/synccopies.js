@@ -13,7 +13,7 @@
  * fail). The previous version kept its last 8 agreed copies in localStorage
  * (focus-sync-history); they move here on the first start, and that room is freed.
  *
- * Entry: { id, at, kind, rev, seq, hash, by, canon, summary, state }. The newest
+ * Entry: { id, at, kind, rev, seq, build, hash, by, canon, summary, state }. The newest
  * ones are kept in memory with their state (copiesRecent); older ones are read
  * back when one is restored (copiesState). */
 import { SYNC_HISTORY_LS_KEY } from './config.js';
@@ -22,7 +22,7 @@ const DB_NAME = 'focus-copies';
 const STORE = 'copies';
 const MEMORY_MAX = 40;          // newest copies kept in memory, with their state
 const KEEP_RECENT = 40;         // newest copies always kept
-const KEEP_MAX = 140;           // and never more than this many in all
+const KEEP_MAX = 220;           // and never more than this many in all
 const HOUR = 3600e3, DAY = 24 * HOUR;
 
 let memory = [];                // newest last; older ones have state === null (it is in the database)
@@ -100,8 +100,20 @@ export function copiesStart() {
   return started;
 }
 
+/* Read the database again for copies another tab of Focus kept meanwhile (a tab
+ * taking over syncing, see sync.js → syncLead). */
+export async function copiesRefresh() {
+  if (started) await started;
+  if (!db) return;
+  const kept = await readAll(db);
+  kept.forEach(e => { if (e && typeof e.id === 'string' && typeof e.hash === 'string' && !index.has(e.id)) index.set(e.id, e); });
+  trimMemory();
+}
+
 /* The newest copies, oldest first, each with its state. */
 export function copiesRecent() { return memory; }
+/* Every copy kept; the older ones without their state here (copiesState reads it back). */
+export function copiesIndex() { return [...index.values()]; }
 
 /* memory: the newest copies. The others' states are in the database (once written). */
 function trimMemory() {
@@ -126,25 +138,29 @@ export function copiesKeep(e, { quiet = false } = {}) {
   pending.add(entry.id);
   if (!quiet) {
     trimMemory();
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(copiesSave, 2000);
+    if (!saveTimer) saveTimer = setTimeout(copiesSave, 0);      // in the next turn, not seconds later: an app killed soon after still has them
   }
   return entry;
 }
 
-/* Which copies stay: the newest ones, then fewer as they get older (one an hour
- * for three days, one a day for a month); the ones kept for a reason ('local',
- * 'older', 'restore') for two weeks. */
+/* Which copies stay: the newest ones, then fewer as they get older: for three
+ * days the first and last of each hour, then the first and last of each day for
+ * a month (the last: what that hour or day ended with; the first: a starting
+ * point to merge a late copy from, see sync.js → syncAncestor). The ones kept
+ * for a reason ('local', 'older', 'restore') stay two weeks. */
 function survivors(all, now = Date.now()) {
   const byNewest = [...all].sort((a, b) => b.at - a.at);
   const keep = new Set(byNewest.slice(0, KEEP_RECENT).map(e => e.id));
-  const buckets = new Set();
+  const first = new Map();                              // bucket → its oldest copy so far
   for (const e of byNewest.slice(KEEP_RECENT)) {
     const age = now - e.at;
     if (e.kind !== 'agreed') { if (age < 14 * DAY) keep.add(e.id); continue; }
     const bucket = age < 3 * DAY ? 'h' + Math.floor(e.at / HOUR) : age < 30 * DAY ? 'd' + Math.floor(e.at / DAY) : null;
-    if (bucket && !buckets.has(bucket)) { buckets.add(bucket); keep.add(e.id); }
+    if (!bucket) continue;
+    if (!first.has(bucket)) keep.add(e.id);             // the last of it
+    first.set(bucket, e);
   }
+  first.forEach(e => keep.add(e.id));
   return new Set(byNewest.filter(e => keep.has(e.id)).slice(0, KEEP_MAX).map(e => e.id));
 }
 

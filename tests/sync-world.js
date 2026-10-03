@@ -18,21 +18,71 @@ async function until(fn, ms = 1000) {
   return fn();
 }
 
+/* One browser's localStorage, kept outside any page: tabs of Focus share it,
+ * and it outlives a page that is closed and opened again. */
+function memoryStorage() {
+  const m = new Map();
+  return {
+    getItem: k => (m.has(String(k)) ? m.get(String(k)) : null),
+    setItem: (k, v) => { m.set(String(k), String(v)); },
+    removeItem: k => { m.delete(String(k)); },
+    clear: () => m.clear(),
+    key: i => [...m.keys()][i] ?? null,
+    get length() { return m.size; },
+  };
+}
+
+/* One browser's lock manager (navigator.locks): a lock goes to the first tab that
+ * asks, and to the next one when that tab closes. */
+function createLocks() {
+  const queues = new Map(), held = new Map();
+  function grant(name) {
+    if (held.has(name)) return;
+    const q = queues.get(name) || [];
+    const next = q.shift();
+    if (!next) return;
+    held.set(name, next.w);
+    Promise.resolve().then(() => next.cb({ name, mode: 'exclusive' }));
+  }
+  return {
+    for: w => ({
+      request(name, a, b) {
+        const cb = typeof a === 'function' ? a : b;
+        if (!queues.has(name)) queues.set(name, []);
+        queues.get(name).push({ w, cb });
+        grant(name);
+        return new Promise(() => {});
+      },
+    }),
+    release(w) {
+      queues.forEach(q => { for (let i = q.length - 1; i >= 0; i--) if (q[i].w === w) q.splice(i, 1); });
+      [...held].forEach(([name, holder]) => { if (holder === w) { held.delete(name); grant(name); } });
+    },
+  };
+}
+
 /* `delay` is each link's delay in ms (a function, for jitter). `transform`
  * instruments the app's modules further (source, file) → source, to debug a run. */
 function world({ delay = () => 30 + Math.random() * 50, transform = src => src } = {}) {
   const net = createNetFirebase({ delay: () => delay() });
   const devices = [];
+  const browserLocks = new Map();       // a browser's storage → its lock manager
   /* storage: localStorage to start with. share: another device whose browser
    * this one is a second tab of (the same localStorage and IndexedDB). idb: the
-   * browser's IndexedDB (a device that reloads keeps its own). */
-  async function boot(name, storage = {}, { share, idb = share ? share.idb : createFakeIndexedDB() } = {}) {
+   * browser's IndexedDB (a device that reloads keeps its own). store: the
+   * browser's localStorage as a memoryStorage(), for tabs that come and go. */
+  async function boot(name, storage = {}, { share, idb = share ? share.idb : createFakeIndexedDB(), store = null,
+    locks = share ? share.locks : store ? (browserLocks.get(store) || browserLocks.set(store, createLocks()).get(store)) : null } = {}) {
     let dev = null;
     const { w } = await loadApp({
-      storage: share ? undefined : { 'focus-tour-done': '1', ...storage },
+      storage: share || store ? undefined : { 'focus-tour-done': '1', ...storage },
       before: w => {
-        if (share) Object.defineProperty(w, 'localStorage', { value: share.w.localStorage, configurable: true });
+        if (store) {
+          Object.entries({ 'focus-tour-done': '1', ...storage }).forEach(([k, v]) => store.setItem(k, v));
+          Object.defineProperty(w, 'localStorage', { value: store, configurable: true });
+        } else if (share) Object.defineProperty(w, 'localStorage', { value: share.w.localStorage, configurable: true });
         w.indexedDB = idb.indexedDB;
+        if (locks) Object.defineProperty(w.navigator, 'locks', { value: locks.for(w), configurable: true });
         w.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} });
         w.HTMLElement.prototype.scrollIntoView = function () {};
         dev = net.install(w);
@@ -45,22 +95,29 @@ function world({ delay = () => 30 + Math.random() * 50, transform = src => src }
         .replace('export function showToast(msg) {', 'export function showToast(msg) { window.__toasts.push(msg);'),
     });
     w.document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
-    const app = { name, w, d: w.document, dev, idb };
+    const app = { name, w, d: w.document, dev, idb, store, locks };
     devices.push(app);
     return app;
   }
-  /* the app is closed (swiped away, the tab shut): nothing runs there any more */
+  /* the app is closed (swiped away, the tab shut): hidden, then the page goes, as
+   * a browser tells it (it saves then); after that nothing runs there any more */
   function close(app) {
+    try {
+      Object.defineProperty(app.w.document, 'visibilityState', { value: 'hidden', configurable: true });
+      app.w.document.dispatchEvent(new app.w.Event('visibilitychange'));
+      app.w.dispatchEvent(new app.w.Event('pagehide'));
+    } catch (e) {}
     app.dev.sleep();
+    if (app.locks) app.locks.release(app.w);
     app.w.close();
     app.closed = true;
   }
   /* closed and opened again, with what it had saved on the device */
   async function reload(app, { signIn = true } = {}) {
     const storage = {};
-    for (let i = 0; i < app.w.localStorage.length; i++) { const k = app.w.localStorage.key(i); storage[k] = app.w.localStorage.getItem(k); }
+    if (!app.store) for (let i = 0; i < app.w.localStorage.length; i++) { const k = app.w.localStorage.key(i); storage[k] = app.w.localStorage.getItem(k); }
     close(app);
-    const next = await boot(app.name, storage, { idb: app.idb });
+    const next = await boot(app.name, storage, { idb: app.idb, store: app.store });
     if (signIn) next.dev.signIn();
     return next;
   }
@@ -130,4 +187,4 @@ const doneOf = st => st.todoLists.flatMap(l => l.tasks.filter(t => t.done).map(t
 const stateOf = app => JSON.parse(app.w.eval('JSON.stringify(gatherState())'));
 const done = app => doneOf(stateOf(app));
 
-module.exports = { world, sleep, until, doneOf, done, stateOf };
+module.exports = { world, memoryStorage, sleep, until, doneOf, done, stateOf };

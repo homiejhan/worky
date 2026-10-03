@@ -57,7 +57,28 @@ function createNetFirebase({ uid = 'u1', email = 'me@example.com', delay = () =>
   }
   const overlaps = (a, b) => a.slice(0, b.length).join('/') === b.slice(0, a.length).join('/');
   let inFlight = 0;
-  const link = (fn, d = delay()) => { inFlight++; return setTimeout(() => { inFlight--; fn(); }, d); };
+  /* One direction of a link: each message arrives one delay after it was sent and
+   * never ahead of one sent before it, each in its own turn of the event loop, as
+   * over a socket. (A timer per message isn't enough: under load Node can fire a
+   * later timer first.) */
+  function lane() {
+    const queue = [];
+    let last = 0, timer = null;
+    function arm() {
+      if (timer || !queue.length) return;
+      timer = setTimeout(() => {
+        timer = null;
+        try { if (queue[0].at <= Date.now()) { const m = queue.shift(); inFlight--; m.fn(); } } finally { arm(); }
+      }, Math.max(0, queue[0].at - Date.now()));
+    }
+    return fn => {
+      const at = Math.max(Date.now() + delay(), last + 1);
+      last = at;
+      inFlight++;
+      queue.push({ at, fn });
+      arm();
+    };
+  }
 
   /* the server */
   function serverReceive(dev, msg) {
@@ -76,7 +97,8 @@ function createNetFirebase({ uid = 'u1', email = 'me@example.com', delay = () =>
   }
 
   function install(w) {
-    const dev = { user: null, asleep: false, cache: null, has: false, pending: [], listeners: [], toServer: [], toDevice: [], sentAt: 0, gotAt: 0 };
+    const dev = { user: null, asleep: false, cache: null, has: false, pending: [], listeners: [], toServer: [], toDevice: [] };
+    const up = lane(), down = lane();
     devices.push(dev);
     let authCb = null, writeId = 0;
     /* the device's view: the server data it has, with its own visible writes on top */
@@ -103,16 +125,10 @@ function createNetFirebase({ uid = 'u1', email = 'me@example.com', delay = () =>
     function flushOut() {
       while (dev.toServer.length) {
         const msg = dev.toServer.shift();
-        const at = Math.max(Date.now() + delay(), dev.sentAt + 1);
-        dev.sentAt = at;
-        link(() => serverReceive(dev, msg), at - Date.now());
+        up(() => serverReceive(dev, msg));
       }
     }
-    dev.deliver = msg => {
-      const at = Math.max(Date.now() + delay(), dev.gotAt + 1);
-      dev.gotAt = at;
-      link(() => { dev.toDevice.push(msg); if (!dev.asleep) flushIn(); }, at - Date.now());
-    };
+    dev.deliver = msg => down(() => { dev.toDevice.push(msg); if (!dev.asleep) flushIn(); });
     function flushIn() {
       while (dev.toDevice.length) receive(dev.toDevice.shift());
     }

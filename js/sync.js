@@ -1,10 +1,12 @@
 /* sync.js — Cloud sync of the whole state through Firebase. */
 import {
-  FIREBASE_CONFIG, GCAL_CLIENT_ID, GCAL_REDIRECT, LS_KEY, SYNC_BASE_LS_KEY, SYNC_META_LS_KEY, SYNC_STATE_TAG,
+  FIREBASE_CONFIG, GCAL_CLIENT_ID, GCAL_REDIRECT, SYNC_BASE_LS_KEY, SYNC_META_LS_KEY, SYNC_SENT_LS_KEY,
+  SYNC_STATE_TAG,
 } from './config.js';
 import { $, closeModal, keepField, showToast, typingPauseIn, userTyping } from './util.js';
 import {
   bootStateStr, gatherState, loadStateString, renderLoadedState, restoreState, saveToLocal, setStateMark, STATE_BUILD,
+  takeInOtherTab,
 } from './persistence.js';
 import { formatMode } from './formats.js';
 import {
@@ -17,7 +19,8 @@ import { setTourReoffer, tourMarkSeen, tourOffer, tourReoffer } from './onboardi
 import { bankCloudForget, bankCloudSeen } from './bank.js';
 import { syncMerge } from './syncmerge.js';
 import {
-  copiesKeep, copiesList, copiesRecent, copiesSave, copiesStart, copiesState, copySummary as copySummaryOf,
+  copiesIndex, copiesKeep, copiesList, copiesRecent, copiesRefresh, copiesSave, copiesStart, copiesState,
+  copySummary as copySummaryOf,
 } from './synccopies.js';
 
 /* ───────────────────────── CLOUD SYNC ─────────────────────────
@@ -36,8 +39,8 @@ import {
  *     2s forever). Real changes push after a short debounce, and only
  *     over the cloud copy this device last saw (syncWrite).
  *   • Pull: a realtime listener applies remote changes from other
- *     devices through the same localStorage → loadFromLocal() path
- *     used everywhere else. Own writes echo back and are ignored via
+ *     devices through the same load path as a saved copy (loadStateString),
+ *     then saves them like any change (saveToLocal). Own writes echo back and are ignored via
  *     the per-session client id.
  *   • Conflicts: when both this device and the cloud changed since the
  *     copy they last agreed on (SYNC_BASE_LS_KEY, or among the kept copies),
@@ -85,6 +88,8 @@ let syncKnownRev    = null;   // the revision (syncRev) of the copy this device 
 let syncCloudSeq    = 0;      // … and its revision number
 let syncTopSeq      = 0;      // the highest revision number this device's copy takes in
 let syncOverStale   = null;   // the hash of an older copy that took the cloud's place: this device's goes back over it
+let syncKnownLog    = [];     // the revisions the agreed copy comes after (syncLog), newest last
+let syncSent        = null;   // the last push sent and not heard back about yet: { rev, hash, seq, state, base, baseRev, at }
 let syncPushing     = false;  // a push is on its way: the next one waits for it
 let syncPushAgain   = false;  // … and was asked for meanwhile
 let syncOlderSeen   = false;  // a device on an older version of Focus wrote to the cloud this session
@@ -123,7 +128,7 @@ export function syncFingerprint(state) {
   const content = { ...state };
   /* which build wrote it, the revision stamps, and where this device's copy stands are not content */
   delete content.build; delete content.syncRev; delete content.syncBase; delete content.syncBaseHash;
-  delete content.syncSeq; delete content.syncBaseSeq; delete content.syncLocal;
+  delete content.syncSeq; delete content.syncBaseSeq; delete content.syncLocal; delete content.syncLog;
   return JSON.stringify(syncCanon({
     ...content,
     timers: (content.timers || []).map(t => t.running ? { ...t, seconds: -1 } : t),
@@ -165,13 +170,14 @@ function syncAgree(fp, extra, stateStr, by) {
   if (typeof stateStr === 'string') {
     const st = syncStampsOf(stateStr);
     syncKnownRev = st.rev;
+    syncKnownLog = st.log;
     meta.knownRev = syncKnownRev;
     syncTopSeq = Math.max(syncTopSeq, st.seq);
-    copiesKeep({ kind: 'agreed', rev: st.rev, seq: st.seq, hash: meta.knownHash, by: by || null,
+    copiesKeep({ kind: 'agreed', rev: st.rev, seq: st.seq, build: st.build, hash: meta.knownHash, by: by || null,
       canon: !!st.rev && st.build >= SYNC_STAMPS_BUILD, state: stateStr });   // an older version's echo of a copy keeps its writer
     try { localStorage.setItem(SYNC_BASE_LS_KEY, JSON.stringify({ hash: meta.knownHash, state: stateStr })); } catch(e) {}
   }
-  setStateMark({ rev: syncKnownRev, hash: meta.knownHash, seq: syncTopSeq });   // this device's copy is built on it (saved with it)
+  setStateMark({ rev: syncKnownRev, hash: meta.knownHash, seq: syncTopSeq }, syncKnownLog);   // this device's copy is built on it (saved with it)
   syncSaveMeta(meta);
 }
 /* The copy both sides last agreed on, if this device still has it. */
@@ -199,11 +205,13 @@ function syncBase(hash) {
 const SYNC_STAMPS_BUILD = 8;    // the first build that stamps revisions
 const SYNC_SEQ_BUILD = 9;       // the first that numbers them
 function syncNewRev() { return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8); }
+const SYNC_LOG_MAX = 60;        // revisions a copy lists it comes after
+function syncLogOf(st) { return Array.isArray(st && st.syncLog) ? st.syncLog.filter(r => typeof r === 'string') : []; }
 function syncStampsOf(stateStr) {
   try {
     const st = JSON.parse(stateStr);
-    return { rev: typeof st.syncRev === 'string' ? st.syncRev : null, seq: Number(st.syncSeq) || 0, build: Number(st.build) || 1 };
-  } catch(e) { return { rev: null, seq: 0, build: 1 }; }
+    return { rev: typeof st.syncRev === 'string' ? st.syncRev : null, seq: Number(st.syncSeq) || 0, build: Number(st.build) || 1, log: syncLogOf(st) };
+  } catch(e) { return { rev: null, seq: 0, build: 1, log: [] }; }
 }
 /* The number of the copy a copy was built on: the one it names, or for an older
  * version (it carries the number of the last copy it took in), that one. */
@@ -216,30 +224,37 @@ function syncMarkOf(st) {
   return m && typeof m.hash === 'string' ? { rev: typeof m.rev === 'string' ? m.rev : null, hash: m.hash, seq: Number(m.seq) || 0 } : null;
 }
 function syncAgreed() { return copiesRecent().filter(e => e.kind === 'agreed' && typeof e.state === 'string'); }
-/* A revision's own copy, or failing that the earliest kept under it. */
-function syncHistoryRev(rev) {
-  if (typeof rev !== 'string' || !rev) return null;
-  const h = syncAgreed().filter(e => e.rev === rev);
-  return h.find(e => e.canon) || h[0] || null;
-}
 /* The agreed copy a cloud copy was built on, if this device kept it ({ hash,
  * state }; just { hash } when it is the one this device has, `knownHash`). A
  * stamping version names it (syncBaseHash, syncBase). An older version carries
- * the revision it last took in through, in syncRev: its copy was built on its own
- * last write under that revision, if it made one, else on the revision's own
- * copy. `by` is the writer's client id. One other than `knownHash` means the
- * writer missed what came after it (see syncReconcileRemote). */
+ * the revision it last took in through, in syncRev: its copy was built on the
+ * last copy under that revision the cloud had, the revision's own or a write of
+ * its own since (one that put back what that copy had is kept as that copy, so
+ * the newest of either kind). `by` is the writer's client id. One other than
+ * `knownHash` means the writer missed what came after it (see syncReconcileRemote). */
 function syncBuiltOn(remote, knownHash, by) {
   const build = Number(remote.build) || 1;
+  /* every agreed copy kept, oldest first (an older one's state may be in the database only: syncLoadCopy) */
+  const agreed = copiesIndex().filter(e => e.kind === 'agreed').sort((a, b) => a.at - b.at);
+  const revCopy = rev => {                     // a revision's own copy, or failing that the earliest kept under it
+    const h = typeof rev === 'string' && rev ? agreed.filter(e => e.rev === rev) : [];
+    return h.find(e => e.canon) || h[0] || null;
+  };
   if (build >= SYNC_STAMPS_BUILD) {
     if (typeof remote.syncBaseHash !== 'string') return null;
     if (remote.syncBaseHash === knownHash) return { hash: knownHash };
     /* (the previous version hashed its stamps with the content: by revision for its copies) */
-    return syncAgreed().filter(e => e.hash === remote.syncBaseHash).pop() || (build < SYNC_SEQ_BUILD ? syncHistoryRev(remote.syncBase) : null);
+    return agreed.filter(e => e.hash === remote.syncBaseHash).pop() || (build < SYNC_SEQ_BUILD ? revCopy(remote.syncBase) : null);
   }
   if (typeof remote.syncRev !== 'string' || !remote.syncRev) return null;
-  const under = syncAgreed().filter(e => e.rev === remote.syncRev);
-  return under.filter(e => by && e.by === by && !e.canon).pop() || syncHistoryRev(remote.syncRev);
+  return agreed.filter(e => e.rev === remote.syncRev && (e.canon || (by && e.by === by))).pop() || revCopy(remote.syncRev);
+}
+/* A copy that the one this device and the cloud agreed on comes after: its own
+ * revision is in that one's syncLog (a stamping version's copies only). */
+function syncHadIt(remote) {
+  const rev = remote && remote.syncRev;
+  return (Number(remote.build) || 1) >= SYNC_STAMPS_BUILD && typeof rev === 'string' && !!rev
+    && (rev === syncKnownRev || syncKnownLog.includes(rev));
 }
 /* Built on an older copy than the newest this device's copy takes in: the writer
  * missed what came after (it was offline, or an older version that wrote over
@@ -266,12 +281,12 @@ function syncKeepBootCopy() {
   const hash = syncStateHash(bootStateStr);
   if (!hash || hash !== (mark ? mark.hash : syncLoadMeta().knownHash) || syncAgreed().some(e => e.hash === hash)) return;
   const stamps = syncStampsOf(bootStateStr);
-  copiesKeep({ kind: 'agreed', rev: stamps.rev, seq: stamps.seq, hash, state: bootStateStr });
+  copiesKeep({ kind: 'agreed', rev: stamps.rev, seq: stamps.seq, build: stamps.build, hash, state: bootStateStr });
 }
 /* Keep a copy to restore: this device's own ('local') or another's ('older'). */
 function syncKeepCopy(kind, stateStr, by) {
   const st = syncStampsOf(stateStr);
-  copiesKeep({ kind, rev: st.rev, seq: st.seq, hash: syncStateHash(stateStr) || '', by: by || null, state: stateStr });
+  copiesKeep({ kind, rev: st.rev, seq: st.seq, build: st.build, hash: syncStateHash(stateStr) || '', by: by || null, state: stateStr });
 }
 /* That writer's changes, put on top of what this device has. */
 function syncRebase(baseStr, remote, onto) {
@@ -346,6 +361,7 @@ function syncPushNow(opts) {
   if (!syncUser || !syncRef || syncPendingRemote) return false;
   if (syncTypingValue) return false;           // another device's change is waiting to be merged in: don't write over it
   if (!syncReconciled) return false;          // never write blind over an unseen cloud copy
+  if (syncLoading) return false;              // a kept copy is being read back to merge the cloud's with: then
   if (syncHeld() && !priority) return false;  // Formats open — only Done may push
   /* One push at a time: a second one started now would see the first one's
    * copy, not yet the cloud's, and give up. It goes once the first is done. */
@@ -362,19 +378,29 @@ function syncPushNow(opts) {
   const seq = fresh ? Math.max(syncTopSeq, syncCloudSeq) : syncTopSeq;
   const content = { ...state };
   delete content.syncLocal;                     // where this device's copy stands is its own
+  const rev = syncNewRev();
+  const baseHash = fresh ? null : (syncKnownFp !== null ? syncHash(syncKnownFp) : mark ? mark.hash : (meta.knownHash || null));
   const payload = {
-    state: JSON.stringify({ ...content, syncRev: syncNewRev(),
+    state: JSON.stringify({ ...content, syncRev: rev,
       syncBase: fresh ? null : (syncKnownFp !== null ? syncKnownRev : mark ? mark.rev : (meta.knownRev || null)),
-      syncBaseHash: fresh ? null : (syncKnownFp !== null ? syncHash(syncKnownFp) : mark ? mark.hash : (meta.knownHash || null)),
-      syncSeq: seq + 1, syncBaseSeq: seq }),
+      syncBaseHash: baseHash, syncSeq: seq + 1, syncBaseSeq: seq,
+      syncLog: [...(fresh ? [] : syncKnownLog), rev].slice(-SYNC_LOG_MAX) }),
     updatedAt: Date.now(),
     client: syncClientId,
   };
+  /* Kept until it is heard back about: if this device goes offline or is closed
+   * before the answer, a later copy built on it says it arrived (syncTakeSent). */
+  const sent = { rev, hash: syncHash(fp), seq: seq + 1, state: payload.state, base: baseHash,
+    baseRev: fresh ? null : (syncKnownFp !== null ? syncKnownRev : mark ? mark.rev : (meta.knownRev || null)), at: Date.now() };
+  syncSent = sent;
+  syncSentSave([...syncSentList(), sent]);
   if (priority) syncCommitPending = Math.max(1, syncCommitPending);   // open (or keep) the priority window
   syncPushing = true;
   syncWrite(payload, priority)
     .then(written => {
-      if (!written) return;                   // the cloud moved on: the listener brings that copy to merge with, then this pushes again
+      const mine = syncSent === sent;         // (else a later copy built on it was taken in already)
+      syncForgetSent(sent);
+      if (!written || !mine) return;          // the cloud moved on: the listener brings that copy to merge with, then this pushes again
       syncCloudSeen = syncHash(fp);
       syncCloudSeq = seq + 1;
       syncOverStale = null;
@@ -383,6 +409,7 @@ function syncPushNow(opts) {
       syncUpdateUI();
     })
     .catch(err => {
+      syncForgetSent(sent);                   // (not written)
       syncCommitPending = 0;
       /* permission errors are the database rules; anything else (another write
        * to the account cut in, the database gave up on a busy node): again soon */
@@ -394,6 +421,57 @@ function syncPushNow(opts) {
       if (syncPushAgain) { syncPushAgain = false; if (syncUser && syncRef) syncSchedulePush(); }
     });
   return true;
+}
+
+/* The pushes sent and not heard back about yet, with the state each sent: this
+ * tab's (syncSent), and any another tab of Focus sent before it closed, or this
+ * device before it restarted (kept in localStorage, a few at most). */
+const SYNC_SENT_MAX = 3;
+function syncSentList() {
+  try {
+    const v = JSON.parse(localStorage.getItem(SYNC_SENT_LS_KEY));
+    return (Array.isArray(v) ? v : v ? [v] : []).filter(x => x && typeof x.rev === 'string' && typeof x.state === 'string');
+  } catch(e) { return []; }
+}
+function syncSentSave(list) {
+  for (let l = list.slice(-SYNC_SENT_MAX); ; l = l.slice(1)) {
+    try {
+      if (l.length) localStorage.setItem(SYNC_SENT_LS_KEY, JSON.stringify(l)); else localStorage.removeItem(SYNC_SENT_LS_KEY);
+      return;
+    } catch(e) { if (!l.length) return; }       // storage full: fewer of them
+  }
+}
+function syncForgetSent(sent) {
+  if (syncSent === sent) syncSent = null;
+  const list = syncSentList();
+  if (list.some(x => x.rev === sent.rev)) syncSentSave(list.filter(x => x.rev !== sent.rev));
+}
+/* A push may have reached the cloud without the device hearing back (it went
+ * offline, or was closed, right after sending). When the cloud's copy is that
+ * push or comes after it (its revision is in syncLog), and the push was built on
+ * the copy this device's copy is built on, the push is what it is built on now:
+ * taken as agreed, so what was changed here after it (unchecking what it
+ * checked, deleting what it added) counts as a change, not as no change. A push
+ * is done with once the cloud's copy comes after it, or after the copy it was
+ * built on without it (another took its place); not before: a copy older than
+ * it, heard first, says nothing about it. */
+function syncTakeSent(remote, local) {
+  const list = syncSentList();
+  if (syncSent && !list.some(x => x.rev === syncSent.rev)) list.push(syncSent);   // (not saved: storage full)
+  if (!list.length) return;
+  const mark = syncKnownFp === null ? syncMarkOf(local) : null;
+  const known = syncKnownFp !== null ? syncHash(syncKnownFp) : mark ? mark.hash : null;
+  const log = syncLogOf(remote);
+  const after = x => remote.syncRev === x.rev || log.includes(x.rev);
+  const passed = x => !!x.baseRev && remote.syncRev !== x.baseRev && log.includes(x.baseRev);
+  const hit = list.filter(x => after(x) && x.base === known).sort((a, b) => a.seq - b.seq).pop();
+  if (hit) {
+    try { syncAgree(syncFingerprint(JSON.parse(hit.state)), { pushedAt: Date.now() }, hit.state, syncClientId); } catch(e) {}
+  }
+  const left = list.filter(x => !after(x) && !passed(x) && Date.now() - (Number(x.at) || 0) < 7 * 864e5);
+  if (left.length === list.length) return;
+  if (syncSent && !left.includes(syncSent)) syncSent = null;
+  syncSentSave(left);
 }
 
 /* Write this device's state over the cloud's, but only over the copy it last
@@ -473,10 +551,7 @@ function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr, by, agreedStr) {
   }
   syncApplying = true;
   try {
-    try { localStorage.setItem(LS_KEY, effective); } catch(e) {
-      try { localStorage.removeItem(SYNC_BASE_LS_KEY); localStorage.setItem(LS_KEY, effective); } catch(e2) {}   // full: it still loads
-    }
-    if (!loadStateString(effective)) return;  // corrupt payload — keep local
+    if (!loadStateString(effective)) return;  // corrupt payload — keep local (saved below, like any change: saveToLocal)
     keepField(renderLoadedState);             // a cursor left in a field stays, with what was typed
     try { remoteFp = syncFingerprint(JSON.parse(agreedStr || remoteStr)); } catch(e) {}
   } finally {
@@ -525,7 +600,16 @@ let syncCopiesReady = true;     // the kept copies are loaded (once sync starts,
 let syncCopiesWaiting = null;   // … the cloud copy that came first
 function syncOnRemoteValue(snap) {
   if (!syncCopiesReady) { syncCopiesWaiting = snap; return; }
+  if (syncLoading) { syncLoadingValue = snap.val(); return; }
   const v = snap.val();
+  if (!syncLeader) {                          // another tab of Focus syncs the state (syncLead): just what sits beside it
+    syncLastValue = v;
+    digestInboxLatest = (v && v.digestInbox) || null;
+    digestPromptsSeen(v ? v.digestPrompts : null);
+    digestGithubSeen(v ? v.digestGithub : null);
+    bankCloudSeen(v ? v.bank : null);
+    return;
+  }
   if (userTyping() && syncForeignChange(v)) { syncTypingValue = v; syncTypingLater(); return; }
   syncTypingValue = null;
   digestInboxLatest = (v && v.digestInbox) || null;
@@ -560,9 +644,10 @@ function syncTypingDone() {
 }
 
 /* Both this device and the cloud changed since the copy they last agreed on:
- * the state with both sets of changes, or null without that copy. */
-function syncMergeRemote(remoteStr, knownHash, preferLocal) {
-  const base = syncBaseCopy(knownHash);
+ * the state with both sets of changes, or null without that copy (`baseCopy`: an
+ * earlier one to merge from instead). */
+function syncMergeRemote(remoteStr, knownHash, preferLocal, baseCopy) {
+  const base = baseCopy || syncBaseCopy(knownHash);
   if (!base) return null;
   try {
     const remote = JSON.parse(remoteStr);
@@ -584,7 +669,11 @@ function syncReconcileRemote(v, { doneWins = false } = {}) {
   syncCloudSeen = v && typeof v.state === 'string' ? syncStateHash(v.state) : null;
   syncCloudSeq = v && typeof v.state === 'string' ? syncStampsOf(v.state).seq : 0;
   if (syncOverStale && syncOverStale !== syncCloudSeen) syncOverStale = null;   // that older copy is no longer the cloud's
-  if (!connected) { const mark = syncMarkOf(local); syncTopSeq = mark ? mark.seq : 0; }   // what the copy on this device takes in
+  if (!connected) {                           // what the copy on this device takes in
+    const mark = syncMarkOf(local);
+    syncTopSeq = mark ? mark.seq : 0;
+    syncKnownLog = mark ? syncLogOf(local) : [];
+  }
 
   if (syncPendingRemote) {                    // choice not made yet — just keep the stash fresh
     if (v && typeof v.state === 'string' && v.client !== syncClientId) {
@@ -606,6 +695,7 @@ function syncReconcileRemote(v, { doneWins = false } = {}) {
   }
   let remote = null, remoteFp = null;
   try { remote = JSON.parse(v.state); remoteFp = syncFingerprint(remote); } catch(e) { return; }
+  syncTakeSent(remote, local);
   if (connected && (Number(remote.build) || 1) < STATE_BUILD) syncOlderDevice();
   if (syncHeld()) {                           // Formats open — stash, never apply
     if (remoteFp !== localFp) {
@@ -657,37 +747,51 @@ function syncReconcileRemote(v, { doneWins = false } = {}) {
   const localDirty  = knownHash ? syncHash(localFp)  !== knownHash : true;
   const remoteDirty = knownHash ? syncHash(remoteFp) !== knownHash : true;
   const preferLocal = doneWins || (meta.editAt || 0) > (v.updatedAt || 0);
+  /* a copy the one this device has comes after (an older one delivered late, as a
+   * phone back from the background gets what it missed in order): nothing in it
+   * is new here, and merging it again would bring back what was since deleted */
+  if (remoteDirty && syncHadIt(remote)) {
+    syncOverStale = syncCloudSeen;            // (if the cloud really holds it now, this device's goes back over it)
+    syncSchedulePush();
+    return true;
+  }
   if (remoteDirty) {
     /* built on an older copy than this device has: applying it as it is would
      * undo what came after, so its changes go on top of this device's instead … */
     const base = syncBuiltOn(remote, knownHash, v.client);
-    const rebased = base && base.hash !== knownHash ? syncRebase(base.state, remote, local) : null;
-    if (rebased) {
-      /* What the cloud's copy should have been: the copy this device last agreed
-       * on with the writer's changes on top. It, not the older copy, is what this
-       * device and the cloud agree on now (every device up to date works it out
-       * the same), so a later merge doesn't take what that copy lacked for new
-       * changes here. It goes over the older copy even with nothing new here. */
-      const known = syncBaseCopy(knownHash);
-      const fixed = known ? syncRebase(base.state, remote, known) : null;
-      const agreed = fixed ? JSON.stringify({ ...fixed, build: STATE_BUILD, syncRev: null, syncBase: null, syncBaseHash: null, syncSeq: syncTopSeq, syncBaseSeq: null }) : undefined;
-      if (agreed) {                           // the writer's own copy stays findable: its next one is built on it
-        const st = syncStampsOf(v.state);
-        copiesKeep({ kind: 'agreed', rev: st.rev, seq: st.seq, hash: syncHash(remoteFp), by: v.client || null, state: v.state });
-      }
-      syncApplyRemote(v.state, v.updatedAt, JSON.stringify(rebased), v.client, agreed);
-      if (agreed) { syncOverStale = syncCloudSeen; syncSchedulePush(); }
+    if (base && base.hash !== knownHash) {
+      const state = typeof base.state === 'string' ? base.state : syncLoaded.get(base.id);
+      if (state === undefined) { syncLoadCopy(base.id, v); return true; }   // read back from the database first
+      if (state && syncOnTop(state, v, remote, remoteFp, local, knownHash)) return true;
+    }
+    if (!(base && base.hash === knownHash) && syncIsStale(remote)) {
+      /* … from the nearest copy before it this device kept, when it no longer has
+       * that one (read back from the database first, if need be) … */
+      const before = syncAncestor(remote);
+      const state = before ? (typeof before.state === 'string' ? before.state : syncLoaded.get(before.id)) : null;
+      if (before && state === undefined) { syncLoadCopy(before.id, v); return true; }
+      if (state && syncOnTop(state, v, remote, remoteFp, local, knownHash)) return true;
+      /* … and with no copy from before it at all, what this device has stays */
+      syncKeepOurs(v);
       return true;
     }
-    /* … and when this device doesn't have that copy, what it has stays */
-    if (!base && syncIsStale(remote)) { syncKeepOurs(v); return true; }
   }
   if (!localDirty) {
     syncApplyRemote(v.state, v.updatedAt, undefined, v.client);
   } else if (!remoteDirty) {
+    /* the cloud has what this device last agreed on, under its own revision (another
+     * device sent the same): taken as agreed, so this push comes after it */
+    syncAgree(remoteFp, undefined, v.state, v.client);
     syncPushNow();
   } else {
-    const merged = syncMergeRemote(v.state, knownHash, preferLocal);
+    let merged = syncMergeRemote(v.state, knownHash, preferLocal);
+    if (!merged && !doneWins) {
+      /* without the copy both started from, the nearest one before it this device kept will do (read back first, if need be) */
+      const before = syncAncestorAt(syncTopSeq);
+      const state = before ? (typeof before.state === 'string' ? before.state : syncLoaded.get(before.id)) : null;
+      if (before && state === undefined) { syncLoadCopy(before.id, v); return true; }
+      try { if (state) merged = syncMergeRemote(v.state, null, preferLocal, JSON.parse(state)); } catch(e) {}
+    }
     if (merged) syncApplyRemote(v.state, v.updatedAt, merged, v.client);
     else if (doneWins) return false;
     else {
@@ -697,6 +801,60 @@ function syncReconcileRemote(v, { doneWins = false } = {}) {
     }
   }
   return true;
+}
+
+/* A cloud copy built on `baseStr`, an older copy than this device's: its changes,
+ * put on top of what this device has. What the cloud's copy should have been
+ * (the copy this device last agreed on, with the writer's changes on top) is
+ * what this device and the cloud agree on now, not the older copy (every device
+ * up to date works it out the same), so a later merge doesn't take what that
+ * copy lacked for new changes here; it goes over the older copy even with
+ * nothing new here. */
+function syncOnTop(baseStr, v, remote, remoteFp, local, knownHash) {
+  const rebased = syncRebase(baseStr, remote, local);
+  if (!rebased) return false;
+  const known = syncBaseCopy(knownHash);
+  const fixed = known ? syncRebase(baseStr, remote, known) : null;
+  const agreed = fixed ? JSON.stringify({ ...fixed, build: STATE_BUILD, syncRev: null, syncBase: null, syncBaseHash: null,
+    syncSeq: syncTopSeq, syncBaseSeq: null, syncLog: syncKnownLog }) : undefined;
+  if (agreed) {                               // the writer's own copy stays findable: its next one is built on it
+    const st = syncStampsOf(v.state);
+    copiesKeep({ kind: 'agreed', rev: st.rev, seq: st.seq, build: st.build, hash: syncHash(remoteFp), by: v.client || null, state: v.state });
+  }
+  syncApplyRemote(v.state, v.updatedAt, JSON.stringify(rebased), v.client, agreed);
+  if (agreed) { syncOverStale = syncCloudSeen; syncSchedulePush(); }
+  return true;
+}
+/* The nearest copy before a cloud copy's own starting point that this device
+ * kept: agreed, written by a version that numbers its copies, numbered below the
+ * one it was built on (one numbered the same, that isn't it, went another way).
+ * What changed between the two is on both sides alike. */
+function syncAncestor(remote) { return syncAncestorAt(syncBaseSeqOf(remote)); }
+function syncAncestorAt(seq) {
+  if (!(seq > 1)) return null;
+  let best = null;
+  copiesIndex().forEach(e => {
+    if (e.kind !== 'agreed' || !e.canon || !((Number(e.build) || 0) >= SYNC_SEQ_BUILD) || !(e.seq < seq)) return;
+    if (!best || e.seq > best.seq || (e.seq === best.seq && e.at > best.at)) best = e;
+  });
+  return best;
+}
+/* A kept copy read back from the database for a merge; meanwhile cloud copies
+ * wait (the newest is taken in after it), and so do pushes. */
+const syncLoaded = new Map();     // id → its state, or null when it couldn't be read
+let syncLoading = false;
+let syncLoadingValue = null;
+function syncLoadCopy(id, v) {
+  syncLoading = true;
+  syncLoadingValue = v;
+  copiesState(id).then(state => state, () => null).then(state => {
+    syncLoaded.set(id, typeof state === 'string' ? state : null);
+    if (syncLoaded.size > 4) syncLoaded.delete(syncLoaded.keys().next().value);
+    syncLoading = false;
+    const next = syncLoadingValue;
+    syncLoadingValue = null;
+    if (next && syncRef) { syncOnRemoteValue({ val: () => next }); syncSchedulePush(); }
+  });
 }
 
 /* A copy built on an older one than this device has, without that one here to
@@ -713,8 +871,36 @@ function syncKeepOurs(v) {
 
 function syncStart() {
   if (!syncUser || !syncConfigured()) return;
+  syncLead();
   syncRef = firebase.database().ref('users/' + syncUser.uid);
   syncRef.on('value', syncOnRemoteValue);
+}
+
+/* ── One tab per browser ──
+ * Tabs of Focus in one browser share its saved state (persistence.js takes each
+ * one's saves into the others). If each also synced with the cloud on its own,
+ * each would count the other's changes as its own: sent twice, renumbered
+ * twice, and an undo in one could lose to a copy the other sent. So one tab at a
+ * time syncs the state with the cloud: it holds a browser lock while it is open,
+ * and when it closes the next tab takes over, from the last copy it heard. The
+ * others send their changes, and get the cloud's, through the saved state.
+ * Without locks (an older browser), every tab syncs. */
+let syncLeader = !(typeof navigator !== 'undefined' && navigator.locks && typeof navigator.locks.request === 'function');
+let syncLeaderAsked = false;
+let syncLastValue;              // the cloud copy last heard while another tab synced
+function syncLead() {
+  if (syncLeader || syncLeaderAsked) return;
+  syncLeaderAsked = true;
+  try {
+    navigator.locks.request('focus-cloud-sync', () => new Promise(() => {   // held until this page closes
+      copiesRefresh().catch(() => {}).then(() => {          // with the copies the other tab kept meanwhile
+        takeInOtherTab();                                   // and what it saved last, before the cloud's copy is merged
+        syncLeader = true;
+        syncUpdateUI();
+        if (syncRef && syncLastValue !== undefined) { const v = syncLastValue; syncLastValue = undefined; syncOnRemoteValue({ val: () => v }); }
+      });
+    })).catch(() => { syncLeader = true; });
+  } catch(e) { syncLeader = true; }
 }
 function syncStop() {
   clearTimeout(syncPushTimer);
@@ -725,6 +911,10 @@ function syncStop() {
   syncCloudSeen = null;
   syncCloudSeq = 0;
   syncOverStale = null;
+  syncSent = null;                              // (the saved one is checked against the next cloud copy)
+  syncLastValue = undefined;
+  syncLoading = false;
+  syncLoadingValue = null;
   syncCopiesWaiting = null;
   syncPushing = false;
   syncPushAgain = false;
@@ -933,7 +1123,9 @@ export function syncUpdateUI() {
     const when = syncLastSyncAt
       ? ` · last sync ${new Date(syncLastSyncAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
       : '';
-    line.textContent = syncBouncing
+    line.textContent = !syncLeader
+      ? `Syncing as ${syncUser.email || 'Google account'}, through the other tab of Focus open in this browser`
+      : syncBouncing
       ? `Syncing as ${syncUser.email || 'Google account'}${when} — changes keep bouncing with another device. It is probably running an older version of Worky: fully close and reopen the app there.`
       : syncOlderSeen
         ? `Syncing as ${syncUser.email || 'Google account'}${when} — another device is on an older version of Focus. Fully close and reopen Focus there (on a phone, swipe it away), so a change it makes offline can't arrive late over newer ones.`

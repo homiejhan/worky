@@ -1,6 +1,6 @@
 /* main.js — Entry point: exposes the inline-handler functions and starts the app. */
 import { $, watchTyping } from './util.js';
-import { gatherState, loadFromLocal, saveToLocal } from './persistence.js';
+import { gatherState, loadFromLocal, saveToLocal, watchOtherTabs } from './persistence.js';
 import {
   changeTimerColor, commitEditTimer, renderTimers, resetTimer, setTimerLabel, startEditTimer,
   syncWakeupUI, tickAll, toggleTimer, updateTimerSummary,
@@ -93,6 +93,7 @@ Object.assign(window, {
    * reconcile against a newer cloud copy. */
   setSyncLastSeenFp(syncFingerprint(gatherState()));
   setSyncBooting(false);
+  saveToLocal();             // saved from the start (another tab of Focus opened now finds it)
 
   /* autosave */
   setInterval(saveToLocal, 2000);
@@ -105,6 +106,7 @@ Object.assign(window, {
     if (document.visibilityState === 'hidden') saveToLocal();
   });
   window.addEventListener('pagehide', saveToLocal);
+  watchOtherTabs();          // another tab of Focus saving: its changes come in here too
 
   /* cloud sync */
   syncInit();

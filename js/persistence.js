@@ -1,7 +1,7 @@
 /* persistence.js — Saving and loading: the state record, its compressed Export form,
  * localStorage. */
 import { LS_KEY, SYNC_BASE_LS_KEY } from './config.js';
-import { cloneTask, getRemaining, showToast } from './util.js';
+import { cloneTask, getRemaining, keepField, showToast } from './util.js';
 import {
   renderTimers, setTimerDefaults, setTimers, setWokenUp, syncWakeupUI, TIMER_DEFAULTS, timers,
   updateTimerSummary, wokenUp,
@@ -22,7 +22,8 @@ import {
   bankBudget, budget, budgetRollover, normalizeBankBudget, normalizeBudget, normalizeRunway, purchaseIdCounter,
   purchaseRecord, renderBudget, runway, setBankBudget, setBudget, setPurchaseIdCounter, setRunway,
 } from './budget.js';
-import { syncOnLocalSave } from './sync.js';
+import { syncFingerprint, syncOnLocalSave } from './sync.js';
+import { syncMerge } from './syncmerge.js';
 import {
   applyTheme, compressTheme, decompressTheme, normalizeTheme, renderThemeUI, setTheme, themeGet,
 } from './theme.js';
@@ -210,8 +211,12 @@ function stateCaptureExtra(state) {
   Object.keys(state).forEach(k => { if (!STATE_KNOWN_KEYS.has(k)) stateExtra[k] = state[k]; });
 }
 /* Which copy agreed with the cloud this device's copy is built on (sync.js),
- * saved with it: { rev, hash, seq }. */
-export function setStateMark(mark) { stateExtra.syncLocal = mark; }
+ * saved with it: { rev, hash, seq }, and the revisions that copy comes after
+ * (syncLog). */
+export function setStateMark(mark, log) {
+  stateExtra.syncLocal = mark;
+  if (Array.isArray(log)) stateExtra.syncLog = log;
+}
 
 export function gatherState() {
   return {
@@ -329,17 +334,29 @@ export function restoreState(st) {
 /* Save the state, and hand it to sync. When the device's storage is full, the
  * copy the last merge started from goes (sync keeps it among its copies too) to
  * make room; if it still doesn't fit, the change goes to the cloud all the same,
- * and Focus says so once. */
+ * and Focus says so once.
+ * Another tab of Focus in the same browser saves to the same place. When it has
+ * saved since this page did, this page takes its changes in first (just after:
+ * stateTakeInOtherTab), instead of writing over them: a change made in one tab
+ * while offline isn't lost to the other's saving. */
 let saveFullSaid = false;
+let stateStored = null;         // the state as this page last wrote or read it
+let stateOtherTabTimer = null;
 export function saveToLocal() {
   let state;
   try { state = gatherState(); } catch(e) { return; }
   const str = JSON.stringify(state);
-  let saved = false;
-  try { localStorage.setItem(LS_KEY, str); saved = true; } catch(e) {
-    try { localStorage.removeItem(SYNC_BASE_LS_KEY); localStorage.setItem(LS_KEY, str); saved = true; } catch(e2) {}
+  let saved = false, other = false;
+  try { other = localStorage.getItem(LS_KEY) !== stateStored; } catch(e) {}
+  if (other) {
+    if (!stateOtherTabTimer) stateOtherTabTimer = setTimeout(stateTakeInOtherTab, 0);
+  } else {
+    try { localStorage.setItem(LS_KEY, str); saved = true; } catch(e) {
+      try { localStorage.removeItem(SYNC_BASE_LS_KEY); localStorage.setItem(LS_KEY, str); saved = true; } catch(e2) {}
+    }
+    if (saved) stateStored = str;
   }
-  if (!saved && !saveFullSaid) {
+  if (!saved && !other && !saveFullSaid) {
     saveFullSaid = true;
     console.warn('[save] storage on this device is full');
     showToast('Storage on this device is full: changes still sync to the cloud. An uploaded background (Settings → Theme) takes the most room.');
@@ -356,6 +373,50 @@ export function loadStateString(str) {
     return true;
   } catch(e) { return false; }
 }
+/* What another tab saved, merged into this page's state against what this page
+ * last saved (both changed from there), then saved with both. */
+function stateTakeInOtherTab() {
+  stateOtherTabTimer = null;
+  let cur = null;
+  try { cur = localStorage.getItem(LS_KEY); } catch(e) { return; }
+  if (cur === stateStored) return;
+  if (cur === null) { stateStored = null; saveToLocal(); return; }   // (cleared: this page's goes back)
+  try {
+    const base = stateStored === null ? null : JSON.parse(stateStored), theirs = JSON.parse(cur);
+    if (theirs && theirs.version === 1) {
+      const local = gatherState();
+      /* built on the newer of the two copies agreed with the cloud (what the tab syncing says), even with nothing else new */
+      const seqOf = st => (st && st.syncLocal && Number(st.syncLocal.seq)) || 0;
+      const newer = seqOf(theirs) > seqOf(local) ? theirs : local;
+      if (!base || syncFingerprint(theirs) !== syncFingerprint(base)) {
+        /* (a page that hadn't saved yet takes the other tab's as it is) */
+        const merged = base ? syncMerge(base, local, theirs, { preferLocal: true }) : theirs;
+        hydrateState({ ...merged, syncLocal: newer.syncLocal, syncLog: newer.syncLog });
+        keepField(renderLoadedState);
+      } else if (newer === theirs) setStateMark(theirs.syncLocal, theirs.syncLog);
+    }
+  } catch(e) {}
+  stateStored = cur;
+  saveToLocal();
+}
+/* Take in now what another tab saved since this page last saved or read it (a
+ * tab taking over syncing does, before the cloud's copy: sync.js → syncLead). */
+export function takeInOtherTab() {
+  let cur = null;
+  try { cur = localStorage.getItem(LS_KEY); } catch(e) { return; }
+  if (cur === stateStored) return;
+  clearTimeout(stateOtherTabTimer);
+  stateTakeInOtherTab();
+}
+/* In a browser, another tab's save comes as a storage event: taken in now, not at this page's next save. */
+export function watchOtherTabs() {
+  window.addEventListener('storage', e => {
+    if (e.key === LS_KEY && e.newValue !== null && e.newValue !== stateStored && !stateOtherTabTimer) {
+      stateOtherTabTimer = setTimeout(stateTakeInOtherTab, 0);
+    }
+  });
+}
+
 export let bootStateStr = null;   // the copy saved on this device, as Focus opened (sync.js → syncKeepBootCopy)
 export function loadFromLocal() {
   try {
@@ -365,6 +426,7 @@ export function loadFromLocal() {
     if (!state || state.version !== 1) return false;
     hydrateState(state);
     bootStateStr = raw;
+    stateStored = raw;
     return true;
   } catch(e) {
     try { localStorage.removeItem(LS_KEY); } catch(_) {}

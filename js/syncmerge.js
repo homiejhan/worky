@@ -13,7 +13,8 @@
  *     other stays;
  *   • a record both sides added under the same id (each device numbers new
  *     records on its own) is two records: the other side's keeps the id, this
- *     side's gets the next free one;
+ *     side's gets the next free one; where one side moved a record like that,
+ *     a change the other side made to it meanwhile goes with it (see movesBy);
  *   • a plain value both sides changed goes to the newer edit (`preferLocal`),
  *     except an id counter, which takes the higher of the two;
  *   • any other list (a list's active days, …) is one value.
@@ -42,8 +43,47 @@ function recordLists(...lists) {
   return all.length === lists.filter(l => l !== undefined).length && all.some(l => l.length) && all.every(l => l.every(isRecord));
 }
 
-function mergeRecords(base, local, remote, opts) {
-  const b = new Map((Array.isArray(base) ? base : []).map(x => [x.id, x]));
+/* A record one side moved to a new id (it merged two records added under one
+ * id, see mergeRecords) is there as an exact copy of the base's record under an
+ * id the base doesn't have, with a different record in its old place. On the
+ * other side it may still be under its old id: a tab of Focus that hasn't taken
+ * in the other tab's merge yet, or a device that hadn't heard the other device's.
+ * What was done to it there meanwhile (deleted, checked off, renamed) goes to its
+ * new id, not to the record now in its old place: movesBy finds the moves `side`
+ * made, and the base and the other side then use the new ids. Not when the other
+ * side moved the same record too, or holds the new id already. */
+function movesBy(base, side, other) {
+  const moves = new Map();                             // old id → new id
+  if (!base.length) return moves;
+  const b = new Map(base.map(x => [x.id, x]));
+  const added = side.filter(x => typeof x.id === 'number' && !b.has(x.id));
+  if (!added.length) return moves;
+  const s = new Map(side.map(x => [x.id, x]));
+  const content = x => JSON.stringify(sorted({ ...x, id: null }));
+  const replaced = new Map();                          // a base record's content → its id, where `side` has another record now
+  base.forEach(z => {
+    if (typeof z.id !== 'number' || !s.has(z.id) || same(s.get(z.id), z)) return;
+    const c = content(z);
+    if (!replaced.has(c)) replaced.set(c, z.id);
+  });
+  if (!replaced.size) return moves;
+  const o = new Set(other.map(y => y.id));
+  const otherNew = new Set(other.filter(y => !b.has(y.id)).map(content));
+  added.forEach(x => {
+    const c = content(x), from = replaced.get(c);
+    if (from !== undefined && !moves.has(from) && !o.has(x.id) && !otherNew.has(c)) moves.set(from, x.id);
+  });
+  return moves;
+}
+const renumber = (list, moves) => (moves.size ? list.map(x => (moves.has(x.id) ? { ...x, id: moves.get(x.id) } : x)) : list);
+
+function mergeRecords(base0, local0, remote0, opts) {
+  let base = Array.isArray(base0) ? base0 : [], local = local0, remote = remote0;
+  const there = movesBy(base, remote, local);          // what the other side moved, this side's changes follow …
+  base = renumber(base, there); local = renumber(local, there);
+  const here = movesBy(base, local, remote);           // … and the other way round
+  base = renumber(base, here); remote = renumber(remote, here);
+  const b = new Map(base.map(x => [x.id, x]));
   const l = new Map(local.map(x => [x.id, x]));
   const r = new Map(remote.map(x => [x.id, x]));
   let top = [...b.keys(), ...l.keys(), ...r.keys()].reduce((m, id) => (typeof id === 'number' && id > m ? id : m), 0);

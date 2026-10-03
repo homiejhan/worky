@@ -131,6 +131,39 @@ const BASE = {
       'a balance only one side changed: both sides\' counted transactions are kept, key by key');
   }
 
+  console.log('\n── 7. A record the other side moved to a new id (both had added one under its id) ──');
+  {
+    /* this side added "typed in this tab" as 2; the other side merged it with the phone's 2 and moved it to 3 */
+    const base = clone(BASE);
+    base.dbdTasks.push({ id: 2, text: 'typed in this tab', done: false }); base.dbdIdCounter = 3;
+    const moved = clone(BASE);
+    moved.dbdTasks.push({ id: 2, text: 'typed on the phone', done: false }, { id: 3, text: 'typed in this tab', done: false }); moved.dbdIdCounter = 4;
+    const tasks = st => [...st.dbdTasks].sort((a, b) => a.id - b.id).map(t => `${t.id}:${t.text}${t.done ? ' ✓' : ''}`).join(', ');
+    const deleted = clone(base); deleted.dbdTasks = deleted.dbdTasks.filter(t => t.id !== 2);
+    eq(tasks(syncMerge(clone(base), deleted, clone(moved))), '1:Laundry, 2:typed on the phone',
+      'deleted here under its old id: it stays deleted, and the record now in its place stays');
+    const checked = clone(base); checked.dbdTasks[1].done = true;
+    eq(tasks(syncMerge(clone(base), checked, clone(moved))), '1:Laundry, 2:typed on the phone, 3:typed in this tab ✓',
+      'checked off here under its old id: the check goes to it, at its new id');
+    eq(tasks(syncMerge(clone(base), clone(base), clone(moved))), '1:Laundry, 2:typed on the phone, 3:typed in this tab',
+      'untouched here: both, as the other side has them');
+    const inList = st => st.todoLists[0].tasks;
+    const lb = clone(BASE); inList(lb).push({ id: 1, text: 'Read ch. 4', done: false });
+    const lr = clone(BASE); inList(lr).push({ id: 1, text: 'Lab report', done: false }, { id: 2, text: 'Read ch. 4', done: false });
+    const ll = clone(lb); inList(ll)[1].text = 'Read ch. 4 and 5';
+    eq(inList(syncMerge(clone(lb), ll, lr)).map(t => `${t.id}:${t.text}`).join(', '), '0:Essay, 1:Lab report, 2:Read ch. 4 and 5',
+      'inside a list: renamed here under its old id, the new name goes to its new id');
+    /* the other way round: this side moved it (the tab that syncs), the other deleted or checked it under its old id */
+    eq(tasks(syncMerge(clone(base), clone(moved), clone(deleted))), '1:Laundry, 2:typed on the phone',
+      'moved here, deleted there under its old id: it goes, and the record now in its place stays');
+    eq(tasks(syncMerge(clone(base), clone(moved), clone(checked))), '1:Laundry, 2:typed on the phone, 3:typed in this tab ✓',
+      'moved here, checked off there under its old id: the check goes to it');
+    /* not a move: the other side changed the record and added a different one */
+    const nr = clone(base); nr.dbdTasks[1].text = 'typed in this tab, edited'; nr.dbdTasks.push({ id: 3, text: 'something else', done: false });
+    eq(tasks(syncMerge(clone(base), clone(deleted), nr)), '1:Laundry, 2:typed in this tab, edited, 3:something else',
+      'a record changed there (and another added) is not a move: deleted here, changed there, the change stays');
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
