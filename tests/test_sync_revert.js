@@ -571,6 +571,27 @@ const used = w => { let n = 0; for (let i = 0; i < w.localStorage.length; i++) {
       `what the phone did stays, on the laptop and in the cloud (cloud: ${cloudTexts(W).includes('added on the phone') ? 'has the task' : 'lost the task'}, laptop: ${dbdTexts(L).includes('added on the phone') ? 'has it' : 'lost it'})`);
   }
 
+  console.log('\n── 24. An older version writes again and again over a copy it never heard: the device whose copy it was puts it back at once ──');
+  {
+    const W = world();
+    const [L0, P] = await W.devicesOnline(['laptop', 'phone']);
+    const O = W.olderVersion();
+    await until(() => O.heard(), 3000);
+    O.dev.sleep();
+    O.toggle(1, 6);                                                        // the older phone checks a task offline …
+    addDbd(L0, 'added on the laptop'); L0.w.eval('syncPushNow()');         // … while the laptop sends a task
+    await until(() => cloudTexts(W).includes('added on the laptop'), 3000);
+    O.dev.wake();                                                          // its copy goes over the laptop's, and it writes again every 0.6 s
+    let back = 0;
+    for (let i = 0; i < 5; i++) { await sleep(600); if (cloudTexts(W).includes('added on the laptop')) back++; O.toggle(1, 7); }
+    ok(back > 0 && O.heard().dbdTasks.some(t => t.text === 'added on the laptop'),
+      `the laptop's task is back in the cloud while the older phone keeps writing, and its copies take it in (back ${back} of 5 times)`);
+    const L = await W.reload(L0);                                          // the laptop restarts just after
+    await W.net.idle(); await sleep(3000); await W.net.idle();
+    ok([dbdTexts(L), dbdTexts(P), cloudTexts(W)].every(t => t.includes('added on the laptop')) && /1:6 1:7/.test(doneOf(W.cloud())),
+      `and it stays, everywhere, with the older phone's checks (cloud: ${doneOf(W.cloud())})`);
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

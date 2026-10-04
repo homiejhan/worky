@@ -858,7 +858,11 @@ function syncOnTop(baseStr, v, remote, remoteFp, local, knownHash) {
     copiesKeep({ kind: 'agreed', rev: st.rev, seq: st.seq, build: st.build, hash: syncHash(remoteFp), by: v.client || null, state: v.state });
   }
   syncApplyRemote(v.state, v.updatedAt, JSON.stringify(rebased), v.client, agreed);
-  if (agreed) { syncOverStale = syncCloudSeen; syncSchedulePush(); }
+  /* sent at once, not after a pause like a change typed here: until it is in the
+   * cloud, the devices that never had what the older copy lacks take that copy
+   * in, and an older version writing again and again would put this off for as
+   * long as it went on (and a device closed meanwhile never sends it) */
+  if (agreed) { syncOverStale = syncCloudSeen; if (!syncPushNow()) syncSchedulePush(); }
   return true;
 }
 /* The nearest copy before the one numbered `seq` that this device kept: agreed,
