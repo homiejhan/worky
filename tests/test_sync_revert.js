@@ -25,8 +25,7 @@ const used = w => { let n = 0; for (let i = 0; i < w.localStorage.length; i++) {
     O.dev.sleep();                                                         // into a drawer
     for (const tid of [0, 1, 2, 3]) { L.w.toggleTask(0, tid); await sleep(400); }
     addDbd(P, 'added on the phone today');
-    await sleep(2500);
-    ok(doneOf(W.cloud()) === '0:0 0:1 0:2 0:3' && cloudTexts(W).includes('added on the phone today'), 'a day of changes reaches the cloud');
+    ok(await until(() => doneOf(W.cloud()) === '0:0 0:1 0:2 0:3' && cloudTexts(W).includes('added on the phone today'), 8000), 'a day of changes reaches the cloud');
     O.toggle(1, 6);                                                        // taken out again: a change to its old copy, written over the cloud's
     O.dev.wake();
     await W.net.idle(); await sleep(3000); await W.net.idle();
@@ -304,10 +303,12 @@ const used = w => { let n = 0; for (let i = 0; i < w.localStorage.length; i++) {
     if (savedFirst) T2.w.eval('saveToLocal()');
     T1.dev.wake();                                                         // back online: its merge moves the other tab's task to a new id
     T2.w.eval('saveToLocal()');
-    await W.net.idle(); await sleep(2500); await W.net.idle();
-    const gone = app => dbdTexts(app).includes('typed on the phone') && !dbdTexts(app).includes('typed in the other tab');
-    ok(clash && gone(T1) && gone(T2) && gone(P) && cloudTexts(W).includes('typed on the phone') && !cloudTexts(W).includes('typed in the other tab'),
-      `${savedFirst ? 'the delete saved before the merge' : 'the merge saved before the delete'}: the task stays deleted, and the phone's stays, everywhere`);
+    const gone = texts => texts.includes('typed on the phone') && !texts.includes('typed in the other tab');
+    const all = () => [dbdTexts(T1), dbdTexts(T2), dbdTexts(P), cloudTexts(W)];
+    await W.net.idle(); await until(() => all().every(gone), 10000);
+    ok(clash && all().every(gone),
+      `${savedFirst ? 'the delete saved before the merge' : 'the merge saved before the delete'}: the task stays deleted, and the phone's stays, everywhere`
+      + (clash ? '' : ' (the ids did not clash)') + ['tab', 'other tab', 'phone', 'cloud'].map((n, i) => (gone(all()[i]) ? '' : ` [${n}: ${all()[i].filter(t => /typed/.test(t)).join(' | ')}]`)).join(''));
   }
 
   console.log('\n── 13. Two tabs: the tab that syncs sends a change and closes; the other takes over ──');
@@ -391,6 +392,183 @@ const used = w => { let n = 0; for (let i = 0; i < w.localStorage.length; i++) {
     await W.net.idle(); await sleep(2500); await W.net.idle();
     ok(/1:6/.test(done(T2)) && /1:6/.test(doneOf(W.cloud())) && has(cloudTexts(W), ['added in the tab', 'added on the phone', 'added in the other tab']),
       `the older phone's last check stays, with everything added (other tab: ${done(T2)})`);
+  }
+
+  console.log('\n── 16. An older version writes late, over a copy one device never had ──');
+  {
+    const W = world();
+    const [L, , T] = await W.devicesOnline(['laptop', 'phone', 'tablet']);
+    const O = W.olderVersion();
+    await until(() => O.heard(), 3000);
+    T.dev.sleep();                                                         // the tablet is shut (it keeps the copies it had)
+    addDbd(L, 'added, then deleted'); L.w.eval('syncPushNow()');
+    await until(() => O.heard().dbdTasks.some(t => t.text === 'added, then deleted'), 3000);
+    O.dev.sleep();                                                         // the older phone goes offline with that copy
+    await W.net.idle(); await sleep(300);
+    L.w.eval("removeDbdTask(dbdTasks.find(t => t.text === 'added, then deleted').id); syncPushNow();");
+    await W.net.idle(); await sleep(300);
+    T.dev.wake();                                                          // the tablet never had the copy the older phone took in
+    await W.net.idle(); await sleep(500);
+    O.toggle(1, 6);                                                        // the older phone checks a task offline, and comes back
+    O.dev.wake();
+    await W.net.idle(); await sleep(3000); await W.net.idle();
+    const gone = texts => !texts.includes('added, then deleted');
+    ok(gone(dbdTexts(T)) && gone(dbdTexts(L)) && gone(cloudTexts(W)), `the deleted task stays deleted (tablet: ${gone(dbdTexts(T)) ? 'gone' : 'back'}, cloud: ${gone(cloudTexts(W)) ? 'gone' : 'back'})`);
+    ok(/1:6/.test(doneOf(W.cloud())) && /1:6/.test(done(T)), "and the older phone's check is taken in, from a device that had its copy");
+  }
+
+  console.log('\n── 17. A copy from an older version, the same as this device\'s by chance ──');
+  {
+    const W = world();
+    const [L, P] = await W.devicesOnline(['laptop', 'phone']);
+    const O = W.olderVersion();
+    await until(() => O.heard(), 3000);
+    P.w.toggleTask(1, 5); P.w.eval('syncPushNow()');                       // checked on the phone, and in the cloud
+    await until(() => /1:5/.test(doneOf(O.heard())), 3000);
+    O.dev.sleep();                                                         // the older phone goes offline with that copy
+    P.w.toggleTask(1, 5); P.w.eval('syncPushNow()');                       // unchecked on the phone
+    await until(() => !/1:5/.test(doneOf(W.cloud())), 3000); await W.net.idle(); await sleep(300);
+    O.toggle(1, 6);                                                        // the older phone checks another task, offline
+    P.dev.sleep();
+    P.w.toggleTask(1, 5); P.w.toggleTask(1, 6);                            // the phone, offline, checks the first again, and the other too
+    O.dev.wake();                                                          // the older phone's copy goes over the cloud's: the same as the phone's
+    await until(() => /1:6/.test(doneOf(W.cloud())), 3000);
+    P.dev.wake();
+    await W.net.idle(); await sleep(3000); await W.net.idle();
+    ok(/1:5/.test(doneOf(W.cloud())) && /1:5/.test(done(L)) && /1:5/.test(done(P)), `the phone's check is kept, everywhere (cloud: ${doneOf(W.cloud())})`);
+  }
+
+  console.log('\n── 18. A copy put on top of this device\'s: what it sends next is numbered after it ──');
+  {
+    const W = world();
+    const [L] = await W.devicesOnline(['laptop']);
+    for (let i = 0; i < 3; i++) { addDbd(L, `task ${i}`); L.w.eval('syncPushNow()'); await W.net.idle(); await sleep(200); }
+    /* another device's copy, built on one of the laptop's earlier ones, numbered past the laptop's (it kept its own over one it couldn't merge) */
+    const early = L.w.copiesRecent().filter(e => e.kind === 'agreed' && e.canon && e.seq === 2)[0];
+    const st = JSON.parse(early.state);
+    st.dbdTasks.push({ id: 900, text: 'added elsewhere', due: '2026-10-02', done: false });
+    Object.assign(st, { syncRev: 'zzz-other', syncBase: early.rev, syncBaseHash: early.hash, syncSeq: 40, syncBaseSeq: 39, syncLog: [early.rev, 'zzz-other'] });
+    W.net.set('users/u1', { ...W.net.at('users/u1'), state: JSON.stringify(st), updatedAt: Date.now(), client: 'another device' });
+    await W.net.idle(); await sleep(2500); await W.net.idle();
+    ok(dbdTexts(L).includes('added elsewhere') && has(dbdTexts(L), ['task 0', 'task 1', 'task 2']), 'its change is put on top of the laptop\'s');
+    ok(W.cloud().syncSeq > 40, `and the laptop's copy goes back numbered after it (${W.cloud().syncSeq})`);
+  }
+
+  console.log('\n── 19. An older version\'s copy heard again, late ──');
+  {
+    const W = world();
+    const [L] = await W.devicesOnline(['laptop']);
+    const O = W.olderVersion();
+    await until(() => O.heard(), 3000);
+    O.toggle(1, 6); await W.net.idle(); await sleep(300);                  // the older phone checks a task
+    const first = W.net.at('users/u1');
+    O.toggle(1, 6); await W.net.idle(); await sleep(300);                  // and unchecks it
+    ok(!/1:6/.test(done(L)), 'the laptop takes in both');
+    W.net.set('users/u1', { ...W.net.at('users/u1'), state: first.state, updatedAt: first.updatedAt, client: first.client });   // the first arrives again, late
+    await W.net.idle(); await sleep(2500); await W.net.idle();
+    ok(!/1:6/.test(done(L)) && !/1:6/.test(doneOf(W.cloud())), `the check taken back stays taken back (laptop: ${done(L) || 'none'})`);
+  }
+
+  console.log('\n── 20. A device\'s copy numbered lower than another\'s, after an older version wrote over the cloud ──');
+  {
+    const W = world();
+    const [L0, P] = await W.devicesOnline(['laptop', 'phone']);
+    const O = W.olderVersion();
+    addDbd(L0, 'first'); L0.w.eval('syncPushNow()'); await W.net.idle(); await sleep(200);
+    await until(() => O.heard().dbdTasks.some(t => t.text === 'first'), 3000);
+    O.dev.sleep();                                                         // the older phone goes offline with that copy
+    addDbd(L0, 'second'); L0.w.eval('syncPushNow()'); await W.net.idle(); await sleep(200);
+    L0.dev.sleep();                                                        // the laptop, with the one after it
+    for (const t of ['on the phone', 'on the phone again']) { addDbd(P, t); P.w.eval('syncPushNow()'); await W.net.idle(); await sleep(200); }
+    addDbd(L0, 'on the laptop, offline');
+    P.dev.sleep();
+    O.toggle(1, 6); O.dev.wake();                                          // the older phone writes over the cloud's copy
+    await W.net.idle(); await sleep(300);
+    const L = await W.reload(L0);                                          // the laptop opens again: it takes that copy in, and sends its own
+    await W.net.idle(); await sleep(1500); await W.net.idle();
+    P.dev.wake();                                                          // the phone, numbered past the laptop, hears both
+    await W.net.idle(); await sleep(3000); await W.net.idle();
+    const want = ['first', 'second', 'on the phone', 'on the phone again', 'on the laptop, offline'];
+    ok(has(cloudTexts(W), want) && has(dbdTexts(L), want) && has(dbdTexts(P), want), `everything stays, everywhere (cloud: ${cloudTexts(W).filter(t => want.includes(t)).length}/5)`);
+    ok(/1:6/.test(doneOf(W.cloud())), "with the older phone's check");
+  }
+
+  console.log('\n── 21. A device that stops just after the cloud confirms its change, with no time to save ──');
+  {
+    const W = world();
+    const [L, P0] = await W.devicesOnline(['laptop', 'phone']);
+    P0.w.toggleTask(1, 5); P0.w.eval('syncPushNow()'); await W.net.idle(); await sleep(300);   // checked, in the cloud
+    P0.w.toggleTask(1, 5); P0.w.eval('syncPushNow()');                     // unchecked …
+    await until(() => !/1:5/.test(doneOf(W.cloud())) && !P0.w.eval('syncPushing'), 3000);     // … and confirmed
+    const P = await W.reload(P0, { crash: true });                         // the phone stops at once, and opens again
+    P.w.toggleTask(1, 5);                                                  // checked again, before it has heard the cloud
+    await W.net.idle(); await sleep(2500); await W.net.idle();
+    ok(/1:5/.test(done(P)) && /1:5/.test(doneOf(W.cloud())) && /1:5/.test(done(L)), `the check made after it stays (cloud: ${doneOf(W.cloud()) || 'none'})`);
+  }
+
+  console.log('\n── 22. Two tabs: the tab that syncs is gone before it saves what it has, with the other tab\'s save not taken in yet ──');
+  {
+    const twoTabs = async W => {
+      const [, P] = await W.devicesOnline(['first', 'phone']);
+      const store = memoryStorage();
+      const T1 = await W.boot('tab', { 'focus-app-state': W.net.at('users/u1/state'), 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: W.fp(P) }) }, { store });
+      const T2 = await W.boot('other tab', {}, { store, idb: T1.idb });
+      T1.dev.signIn(); T2.dev.signIn();
+      await W.net.idle(); await sleep(500);
+      return [T1, T2, P];
+    };
+    const discard = (W, app) => { app.hidden = true; W.close(app); };     // the browser drops the page: nothing more runs there
+    {
+      const W = world();
+      const [T1, T2, P] = await twoTabs(W);
+      const O = W.olderVersion();
+      await until(() => O.heard(), 3000);
+      T2.dev.sleep();                                                      // the other tab's connection drops (it only listens)
+      T2.w.toggleTask(3, 13);                                              // a check in the other tab, saved; the tab takes it in at its next save …
+      T1.w.eval('stateOtherTabTimer = -1');                                // … which waits (a page in the background: its timers wait)
+      O.add('added on the older phone', 5000);                             // the tab takes in the older phone's copy …
+      await until(() => dbdTexts(T1).includes('added on the older phone'), 3000);
+      P.w.toggleTask(1, 5); P.w.eval('syncPushNow()');                     // … and the phone's, built on it
+      await until(() => /1:5/.test(done(T1)), 3000); await W.net.idle();
+      discard(W, T1);                                                      // then the tab is gone: the other tab takes over, offline
+      await sleep(500);
+      T2.dev.wake();
+      await W.net.idle(); await sleep(3000); await W.net.idle();
+      const all = [dbdTexts(T2), cloudTexts(W), dbdTexts(P)];
+      ok(all.every(t => t.includes('added on the older phone')) && [done(T2), doneOf(W.cloud()), done(P)].every(d => /1:5/.test(d) && /3:13/.test(d)),
+        `a copy from the cloud the tab took in last stays, with the other tab's check (cloud: ${cloudTexts(W).includes('added on the older phone') ? 'has the task' : 'lost the task'}, ${doneOf(W.cloud())})`);
+    }
+    {
+      const W = world();
+      const [T1, T2, P] = await twoTabs(W);
+      T2.w.toggleTask(3, 13);                                              // a check in the other tab, saved
+      T1.w.eval('stateOtherTabTimer = -1');                                // the tab takes it in at its next save, which waits
+      addDbd(T1, 'added in the tab');                                      // a task added in the tab, and the tab closed at once
+      W.close(T1);
+      await W.net.idle(); await sleep(3000); await W.net.idle();
+      ok([dbdTexts(T2), cloudTexts(W), dbdTexts(P)].every(t => t.includes('added in the tab')) && /3:13/.test(doneOf(W.cloud())),
+        `a task added in the tab just before it closed stays (cloud: ${cloudTexts(W).includes('added in the tab') ? 'has it' : 'lost it'})`);
+    }
+  }
+
+  console.log('\n── 23. A device whose storage is full, restarted: what it took in from the cloud since was never saved there ──');
+  {
+    const W = world();
+    const [P] = await W.devicesOnline(['phone']);
+    const store = memoryStorage();
+    const L0 = await W.boot('laptop', { 'focus-app-state': W.net.at('users/u1/state'), 'focus-sync-meta': JSON.stringify({ pushedAt: 1, knownHash: W.fp(P) }) }, { store });
+    L0.dev.signIn();
+    await W.net.idle(); await sleep(2500);                                 // (saved, built on the cloud's copy)
+    const setItem = store.setItem;
+    store.setItem = (k, v) => { if (k === 'focus-app-state') throw new Error('QuotaExceededError'); setItem(k, v); };   // the state no longer fits
+    addDbd(P, 'added on the phone'); P.w.eval('syncPushNow()');
+    await until(() => dbdTexts(L0).includes('added on the phone'), 3000); await W.net.idle(); await sleep(300);
+    P.w.toggleTask(1, 5); P.w.eval('syncPushNow()');
+    await until(() => /1:5/.test(done(L0)), 3000); await W.net.idle(); await sleep(300);
+    const L = await W.reload(L0);                                          // it opens with the copy saved before
+    await W.net.idle(); await sleep(3000); await W.net.idle();
+    ok([dbdTexts(L), cloudTexts(W), dbdTexts(P)].every(t => t.includes('added on the phone')) && [done(L), doneOf(W.cloud())].every(d => /1:5/.test(d)),
+      `what the phone did stays, on the laptop and in the cloud (cloud: ${cloudTexts(W).includes('added on the phone') ? 'has the task' : 'lost the task'}, laptop: ${dbdTexts(L).includes('added on the phone') ? 'has it' : 'lost it'})`);
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

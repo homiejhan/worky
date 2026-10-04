@@ -146,8 +146,9 @@ export function copiesKeep(e, { quiet = false } = {}) {
 /* Which copies stay: the newest ones, then fewer as they get older: for three
  * days the first and last of each hour, then the first and last of each day for
  * a month (the last: what that hour or day ended with; the first: a starting
- * point to merge a late copy from, see sync.js → syncAncestor). The ones kept
- * for a reason ('local', 'older', 'restore') stay two weeks. */
+ * point to merge from when the copy a merge needs is gone, see sync.js →
+ * syncAncestorAt). The ones kept for a reason ('local', 'older', 'restore')
+ * stay two weeks. */
 function survivors(all, now = Date.now()) {
   const byNewest = [...all].sort((a, b) => b.at - a.at);
   const keep = new Set(byNewest.slice(0, KEEP_RECENT).map(e => e.id));

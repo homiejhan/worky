@@ -24,7 +24,7 @@ const BASE = {
 };
 
 (async () => {
-  const { syncMerge } = await import(path.join(ROOT, 'js', 'syncmerge.js'));
+  const { syncMerge, syncRecordsIn } = await import(path.join(ROOT, 'js', 'syncmerge.js'));
   const run = (edit, editRemote, opts) => {
     const local = clone(BASE), remote = clone(BASE);
     edit(local); editRemote(remote);
@@ -158,6 +158,31 @@ const BASE = {
       'moved here, deleted there under its old id: it goes, and the record now in its place stays');
     eq(tasks(syncMerge(clone(base), clone(moved), clone(checked))), '1:Laundry, 2:typed on the phone, 3:typed in this tab ✓',
       'moved here, checked off there under its old id: the check goes to it');
+    /* both moved it: the copy both started from had it under an id each side has given to a new task of its own */
+    const sb = clone(BASE); sb.dbdTasks.push({ id: 2, text: 'moved on both', done: false });
+    const sl = clone(BASE); sl.dbdTasks.push({ id: 2, text: 'new on the laptop', done: false }, { id: 3, text: 'moved on both', done: false });
+    const sr = clone(BASE); sr.dbdTasks.push({ id: 2, text: 'new on the phone', done: false }, { id: 3, text: 'moved on both', done: false });
+    const texts = st => st.dbdTasks.map(t => t.text).sort().join(', ');
+    eq(texts(syncMerge(clone(sb), sl, sr)), 'Laundry, moved on both, new on the laptop, new on the phone',
+      'moved on both sides to the same id: both new tasks in its old place stay, and it stays once');
+    const sr2 = clone(BASE); sr2.dbdTasks.push({ id: 2, text: 'new on the phone', done: false }, { id: 4, text: 'moved on both', done: false });
+    eq(texts(syncMerge(clone(sb), clone(sl), sr2)), 'Laundry, moved on both, new on the laptop, new on the phone',
+      'moved on both sides to different ids: the same, once');
+    /* moved there to an id this side has since given a new task of its own */
+    const tb = clone(BASE); tb.dbdTasks.push({ id: 2, text: 'added on the tablet', done: false });
+    const tr = clone(BASE); tr.dbdTasks.push({ id: 2, text: 'added in the other tab', done: false }, { id: 3, text: 'added on the tablet', done: false });
+    const tl = clone(tb); tl.dbdTasks[1].done = true; tl.dbdTasks.push({ id: 3, text: 'added on the tablet, offline', done: false });
+    const tm = syncMerge(clone(tb), tl, tr);
+    const doneOf = (st, text) => st.dbdTasks.filter(t => t.text === text).map(t => t.done).join();
+    ok(doneOf(tm, 'added on the tablet') === 'true' && doneOf(tm, 'added in the other tab') === 'false' && doneOf(tm, 'added on the tablet, offline') === 'false'
+      && new Set(tm.dbdTasks.map(t => t.id)).size === tm.dbdTasks.length,
+      `moved there to an id this side has given a new task since: the tick follows it, and the new task moves aside (${tm.dbdTasks.map(t => t.id + ':' + t.text + (t.done ? ' ✓' : '')).join(', ')})`);
+    /* two tabs: one took in a task from the cloud, the other added one, both under id 2: the cloud's keeps it */
+    const cloudCopy = clone(BASE); cloudCopy.dbdTasks.push({ id: 2, text: 'from the cloud', done: false });
+    const tab = clone(BASE); tab.dbdTasks.push({ id: 2, text: 'added in the other tab', done: false });
+    const byId = st => [...st.dbdTasks].sort((a, b) => a.id - b.id).map(t => `${t.id}:${t.text}`).join(', ');
+    eq(byId(syncMerge(clone(BASE), clone(cloudCopy), tab, { preferLocal: true, settled: syncRecordsIn(cloudCopy) })),
+      '1:Laundry, 2:from the cloud, 3:added in the other tab', "added under one id in two tabs: the task the cloud has keeps its id, the other tab's moves");
     /* not a move: the other side changed the record and added a different one */
     const nr = clone(base); nr.dbdTasks[1].text = 'typed in this tab, edited'; nr.dbdTasks.push({ id: 3, text: 'something else', done: false });
     eq(tasks(syncMerge(clone(base), clone(deleted), nr)), '1:Laundry, 2:typed in this tab, edited, 3:something else',

@@ -14,7 +14,8 @@
  *   • a record both sides added under the same id (each device numbers new
  *     records on its own) is two records: the other side's keeps the id, this
  *     side's gets the next free one; where one side moved a record like that,
- *     a change the other side made to it meanwhile goes with it (see movesBy);
+ *     a change the other side made to it meanwhile goes with it (see movesBy),
+ *     and where both did, its old id is free on both (see movedBoth);
  *   • a plain value both sides changed goes to the newer edit (`preferLocal`),
  *     except an id counter, which takes the higher of the two;
  *   • any other list (a list's active days, …) is one value.
@@ -43,6 +44,7 @@ function recordLists(...lists) {
   return all.length === lists.filter(l => l !== undefined).length && all.some(l => l.length) && all.every(l => l.every(isRecord));
 }
 
+const content = x => JSON.stringify(sorted({ ...x, id: null }));   // a record, whatever its id
 /* A record one side moved to a new id (it merged two records added under one
  * id, see mergeRecords) is there as an exact copy of the base's record under an
  * id the base doesn't have, with a different record in its old place. On the
@@ -51,38 +53,76 @@ function recordLists(...lists) {
  * What was done to it there meanwhile (deleted, checked off, renamed) goes to its
  * new id, not to the record now in its old place: movesBy finds the moves `side`
  * made, and the base and the other side then use the new ids. Not when the other
- * side moved the same record too, or holds the new id already. */
-function movesBy(base, side, other) {
-  const moves = new Map();                             // old id → new id
-  if (!base.length) return moves;
+ * side moved the same record too. A record of the other side's own under the new
+ * id (added there since, so no one else has it) moves out of the way first, to
+ * an id no one uses (`fresh`). */
+function movesBy(base, side, other, fresh) {
+  const moves = new Map(), aside = new Map();          // old id → new id; the other side's own record in the way → a free id
+  if (!base.length) return { moves, aside };
   const b = new Map(base.map(x => [x.id, x]));
   const added = side.filter(x => typeof x.id === 'number' && !b.has(x.id));
-  if (!added.length) return moves;
+  if (!added.length) return { moves, aside };
   const s = new Map(side.map(x => [x.id, x]));
-  const content = x => JSON.stringify(sorted({ ...x, id: null }));
   const replaced = new Map();                          // a base record's content → its id, where `side` has another record now
   base.forEach(z => {
     if (typeof z.id !== 'number' || !s.has(z.id) || same(s.get(z.id), z)) return;
     const c = content(z);
     if (!replaced.has(c)) replaced.set(c, z.id);
   });
-  if (!replaced.size) return moves;
+  if (!replaced.size) return { moves, aside };
   const o = new Set(other.map(y => y.id));
   const otherNew = new Set(other.filter(y => !b.has(y.id)).map(content));
   added.forEach(x => {
     const c = content(x), from = replaced.get(c);
-    if (from !== undefined && !moves.has(from) && !o.has(x.id) && !otherNew.has(c)) moves.set(from, x.id);
+    if (from === undefined || moves.has(from) || otherNew.has(c)) return;
+    if (o.has(x.id)) aside.set(x.id, fresh());          // (not in the base: a record only the other side has)
+    moves.set(from, x.id);
   });
-  return moves;
+  return { moves, aside };
 }
 const renumber = (list, moves) => (moves.size ? list.map(x => (moves.has(x.id) ? { ...x, id: moves.get(x.id) } : x)) : list);
+/* A record both sides moved to a new id. The copy both started from can be one
+ * worked out without the records only one side has yet (sync.js → syncOnTop),
+ * and so give a moved record an id each side has given to a new record of its
+ * own. Both sides moved it on from there: that id is free on both, and what each
+ * has under it is a record of its own, not the same one changed. So the base
+ * gives the record the other side's new id (and this side's copy of it takes
+ * that id too, when it is free here). */
+function movedBoth(base, local, remote) {
+  const moves = new Map(), localMoves = new Map();     // base: old id → new id; this side: its new id → the other's
+  if (!base.length) return { moves, localMoves };
+  const b = new Map(base.map(x => [x.id, x]));
+  const newIn = side => {
+    const m = new Map();                               // a record's content → its id, among ids the base doesn't have
+    side.forEach(x => { if (typeof x.id === 'number' && !b.has(x.id)) { const c = content(x); if (!m.has(c)) m.set(c, x.id); } });
+    return m;
+  };
+  const ln = newIn(local), rn = newIn(remote);
+  if (!ln.size || !rn.size) return { moves, localMoves };
+  const l = new Map(local.map(x => [x.id, x])), r = new Map(remote.map(x => [x.id, x]));
+  base.forEach(z => {
+    if (typeof z.id !== 'number') return;
+    const c = content(z), jl = ln.get(c), jr = rn.get(c);
+    if (jl === undefined || jr === undefined) return;
+    if ((l.has(z.id) && same(l.get(z.id), z)) || (r.has(z.id) && same(r.get(z.id), z))) return;
+    moves.set(z.id, jr);
+    if (jl !== jr && !l.has(jr)) localMoves.set(jl, jr);
+  });
+  return { moves, localMoves };
+}
 
 function mergeRecords(base0, local0, remote0, opts) {
   let base = Array.isArray(base0) ? base0 : [], local = local0, remote = remote0;
-  const there = movesBy(base, remote, local);          // what the other side moved, this side's changes follow …
-  base = renumber(base, there); local = renumber(local, there);
-  const here = movesBy(base, local, remote);           // … and the other way round
-  base = renumber(base, here); remote = renumber(remote, here);
+  let free = [...base, ...local, ...remote].reduce((m, x) => (typeof x.id === 'number' && x.id > m ? x.id : m), 0);
+  const fresh = () => ++free;
+  const both = movedBoth(base, local, remote);         // a record both sides moved: its old id is free on both
+  base = renumber(base, both.moves); local = renumber(local, both.localMoves);
+  const there = movesBy(base, remote, local, fresh);   // what the other side moved, this side's changes follow …
+  local = renumber(local, there.aside);
+  base = renumber(base, there.moves); local = renumber(local, there.moves);
+  const here = movesBy(base, local, remote, fresh);    // … and the other way round
+  remote = renumber(remote, here.aside);
+  base = renumber(base, here.moves); remote = renumber(remote, here.moves);
   const b = new Map(base.map(x => [x.id, x]));
   const l = new Map(local.map(x => [x.id, x]));
   const r = new Map(remote.map(x => [x.id, x]));
@@ -91,7 +131,11 @@ function mergeRecords(base0, local0, remote0, opts) {
   for (const x of remote) {
     const y = l.get(x.id);
     if (y !== undefined) {
-      if (!b.has(x.id) && typeof x.id === 'number' && !same(x, y)) { out.push(x); moved.push({ ...y, id: ++top }); }
+      if (!b.has(x.id) && typeof x.id === 'number' && !same(x, y)) {
+        /* two records added under one id: this side's moves, unless only it is in the cloud already (opts.settled) */
+        if (opts.settled && opts.settled(y) && !opts.settled(x)) { out.push(y); moved.push({ ...x, id: ++top }); }
+        else { out.push(x); moved.push({ ...y, id: ++top }); }
+      }
       else out.push(merge(b.get(x.id), y, x, opts));
     } else if (!(b.has(x.id) && same(b.get(x.id), x))) {
       out.push(x);                                     // added there, or changed there while deleted here
@@ -169,7 +213,20 @@ function keepBankWithBalance(out, base, local, remote, preferLocal) {
 
 /* The state with both devices' changes. base: the copy both last agreed on;
  * local: this device's; remote: the cloud's. preferLocal: this device's edit is
- * the newer one, for a value both changed. */
-export function syncMerge(base, local, remote, { preferLocal = false } = {}) {
-  return settle(keepBankWithBalance(merge(base, local, remote, { preferLocal }), base, local, remote, preferLocal));
+ * the newer one, for a value both changed. settled(record): whether the cloud
+ * has that record already (syncRecordsIn), so that of two records added under
+ * one id, the one other devices know keeps it (two tabs of Focus merging their
+ * saves; between devices, the remote side is the cloud's). */
+export function syncMerge(base, local, remote, { preferLocal = false, settled = null } = {}) {
+  return settle(keepBankWithBalance(merge(base, local, remote, { preferLocal, settled }), base, local, remote, preferLocal));
+}
+/* Whether a record (an object with an id, anywhere in it) is in a state as it is. */
+export function syncRecordsIn(state) {
+  const set = new Set();
+  const walk = v => {
+    if (Array.isArray(v)) v.forEach(walk);
+    else if (isObj(v)) { if (isRecord(v)) set.add(JSON.stringify(sorted(v))); Object.values(v).forEach(walk); }
+  };
+  walk(state);
+  return rec => set.has(JSON.stringify(sorted(rec)));
 }

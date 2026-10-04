@@ -1,6 +1,6 @@
 /* main.js — Entry point: exposes the inline-handler functions and starts the app. */
 import { $, watchTyping } from './util.js';
-import { gatherState, loadFromLocal, saveToLocal, watchOtherTabs } from './persistence.js';
+import { gatherState, loadFromLocal, saveToLocal, saveToLocalNow, watchOtherTabs } from './persistence.js';
 import {
   changeTimerColor, commitEditTimer, renderTimers, resetTimer, setTimerLabel, startEditTimer,
   syncWakeupUI, tickAll, toggleTimer, updateTimerSummary,
@@ -103,9 +103,9 @@ Object.assign(window, {
   setInterval(renderHome, 60 * 1000);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') dbdCheckRollover();
-    if (document.visibilityState === 'hidden') saveToLocal();
+    if (document.visibilityState === 'hidden') saveToLocalNow();
   });
-  window.addEventListener('pagehide', saveToLocal);
+  window.addEventListener('pagehide', saveToLocalNow);
   watchOtherTabs();          // another tab of Focus saving: its changes come in here too
 
   /* cloud sync */

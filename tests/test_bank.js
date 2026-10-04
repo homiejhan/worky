@@ -725,6 +725,7 @@ async function sealV1(payload) {
 
     /* a refresh on a device that closed before its Budget changes reached the account */
     await sleep(1500);
+    await until(() => !P.w.eval('bankBudgetTimer'), 5000);                  // (a wait started on an earlier change is over: this one starts its own)
     const snack = { id: 'n-snack', account: 'acc-checking', date: today, name: 'Vending machine', amount: 2.5, pending: false };
     cloud.at(`users/user-c/bank/items/${itemId}`).transactions.unshift(snack);
     cloud.emit();

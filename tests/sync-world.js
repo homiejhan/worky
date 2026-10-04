@@ -101,19 +101,27 @@ function world({ delay = () => 30 + Math.random() * 50, transform = src => src }
   }
   /* the app is closed (swiped away, the tab shut): hidden, then the page goes, as
    * a browser tells it (it saves then); after that nothing runs there any more */
-  function close(app) {
+  function hide(app) {
+    if (app.hidden) return;
+    app.hidden = true;
     try {
       Object.defineProperty(app.w.document, 'visibilityState', { value: 'hidden', configurable: true });
       app.w.document.dispatchEvent(new app.w.Event('visibilitychange'));
       app.w.dispatchEvent(new app.w.Event('pagehide'));
     } catch (e) {}
+  }
+  function close(app) {
+    hide(app);
     app.dev.sleep();
     if (app.locks) app.locks.release(app.w);
     app.w.close();
     app.closed = true;
   }
-  /* closed and opened again, with what it had saved on the device */
-  async function reload(app, { signIn = true } = {}) {
+  /* closed and opened again, with what it had saved on the device; `crash`: it
+   * stopped without being told (no last save) */
+  async function reload(app, { signIn = true, crash = false } = {}) {
+    if (!crash) hide(app);                     // (what it saves as it goes is what it opens with)
+    else app.hidden = true;
     const storage = {};
     if (!app.store) for (let i = 0; i < app.w.localStorage.length; i++) { const k = app.w.localStorage.key(i); storage[k] = app.w.localStorage.getItem(k); }
     close(app);

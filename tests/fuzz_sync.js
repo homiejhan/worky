@@ -194,9 +194,14 @@ async function runCase(seed) {
   return { seed, ok: !problems.length, problems, twoTabs, withOlder, ms: Date.now() - t0, changes, log };
 }
 
+/* A new day clears the day's purchases and the Daily routines' checks, as it
+ * should; what a case checks holds within one day, so one that ran across
+ * midnight runs again (crossedMidnight). */
 if (process.env.FUZZ_SEED) {
   const seed = Number(process.env.FUZZ_SEED);
+  const day = new Date().toDateString();
   runCase(seed).then(res => {
+    res.crossedMidnight = new Date().toDateString() !== day;
     if (process.env.FUZZ_LOG) console.log(res.log.join('\n'));
     console.log('RESULT ' + JSON.stringify(res));
     process.exit(0);
@@ -218,6 +223,7 @@ if (process.env.FUZZ_SEED) {
       clearTimeout(timer);
       const line = out.split('\n').find(l => l.startsWith('RESULT '));
       const res = line ? JSON.parse(line.slice(7)) : { seed, ok: false, problems: ['timed out or died without a result'], log: [] };
+      if (res.crossedMidnight) { console.log(`↻ seed ${seed} ran across midnight: again`); resolve(runOne(seed)); return; }
       results.push(res);
       const kind = `${res.twoTabs ? ' +tab' : ''}${res.withOlder ? ' +older' : ''}`;
       console.log(`${res.ok ? '✓' : '✗'} case ${String(results.length).padStart(3)}/${cases}  seed ${seed}${kind}${res.ok ? '' : ` — ${res.problems.join('; ')}`}`);

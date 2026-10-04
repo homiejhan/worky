@@ -23,7 +23,7 @@ import {
   purchaseRecord, renderBudget, runway, setBankBudget, setBudget, setPurchaseIdCounter, setRunway,
 } from './budget.js';
 import { syncFingerprint, syncOnLocalSave } from './sync.js';
-import { syncMerge } from './syncmerge.js';
+import { syncMerge, syncRecordsIn } from './syncmerge.js';
 import {
   applyTheme, compressTheme, decompressTheme, normalizeTheme, renderThemeUI, setTheme, themeGet,
 } from './theme.js';
@@ -391,8 +391,11 @@ function stateTakeInOtherTab() {
       const [ta, ts] = markOf(theirs), [la, ls] = markOf(local);
       const newer = ta > la || (ta === la && ts > ls) ? theirs : local;
       if (!base || syncFingerprint(theirs) !== syncFingerprint(base)) {
-        /* (a page that hadn't saved yet takes the other tab's as it is) */
-        const merged = base ? syncMerge(base, local, theirs, { preferLocal: true }) : theirs;
+        /* (a page that hadn't saved yet takes the other tab's as it is). Of two
+         * records the tabs added under one id, the one the cloud has keeps it. */
+        let settled = null;
+        try { const agreed = JSON.parse(localStorage.getItem(SYNC_BASE_LS_KEY)); if (agreed && typeof agreed.state === 'string') settled = syncRecordsIn(JSON.parse(agreed.state)); } catch(e) {}
+        const merged = base ? syncMerge(base, local, theirs, { preferLocal: true, settled }) : theirs;
         hydrateState({ ...merged, syncLocal: newer.syncLocal, syncLog: newer.syncLog });
         keepField(renderLoadedState);
       } else if (newer === theirs) setStateMark(theirs.syncLocal, theirs.syncLog);
@@ -409,6 +412,19 @@ export function takeInOtherTab() {
   if (cur === stateStored) return;
   clearTimeout(stateOtherTabTimer);
   stateTakeInOtherTab();
+}
+/* Save now, with what another tab saved since taken in first, not just after:
+ * for a page being hidden or closed (there may be no after: a page closing, or
+ * one the browser freezes in the background, runs no more timers), and for a
+ * copy from the cloud sync has just agreed on (the copies and records sync
+ * keeps are the browser's, so the tab that syncs next goes by them: the state
+ * saved has to be built on that copy too). */
+export function saveToLocalNow() {
+  let cur;
+  try { cur = localStorage.getItem(LS_KEY); } catch(e) { saveToLocal(); return; }
+  if (cur === stateStored) { saveToLocal(); return; }
+  clearTimeout(stateOtherTabTimer);
+  stateTakeInOtherTab();                     // (and saves, with both)
 }
 /* In a browser, another tab's save comes as a storage event: taken in now, not at this page's next save. */
 export function watchOtherTabs() {

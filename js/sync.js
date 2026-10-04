@@ -5,7 +5,7 @@ import {
 } from './config.js';
 import { $, closeModal, keepField, showToast, typingPauseIn, userTyping } from './util.js';
 import {
-  bootStateStr, gatherState, loadStateString, renderLoadedState, restoreState, saveToLocal, setStateMark, STATE_BUILD,
+  bootStateStr, gatherState, loadStateString, renderLoadedState, restoreState, saveToLocal, saveToLocalNow, setStateMark, STATE_BUILD,
   takeInOtherTab,
 } from './persistence.js';
 import { formatMode } from './formats.js';
@@ -249,12 +249,27 @@ function syncBuiltOn(remote, knownHash, by) {
   if (typeof remote.syncRev !== 'string' || !remote.syncRev) return null;
   return agreed.filter(e => e.rev === remote.syncRev && (e.canon || (by && e.by === by))).pop() || revCopy(remote.syncRev);
 }
-/* A copy that the one this device and the cloud agreed on comes after: its own
- * revision is in that one's syncLog (a stamping version's copies only). */
-function syncHadIt(remote) {
+/* A copy this device has taken in already, heard again late (a backlog, after
+ * being offline or in another tab's place): from a stamping version, one the
+ * copy agreed on comes after (its own revision is in that one's syncLog); from
+ * an older version (whose revision is the copy it took in), one written no later
+ * than the last write of that writer's taken in here (`wrote`: when it was
+ * written; meta.olderWrote, kept by syncOlderWrote). */
+function syncHadIt(remote, by, wrote) {
   const rev = remote && remote.syncRev;
-  return (Number(remote.build) || 1) >= SYNC_STAMPS_BUILD && typeof rev === 'string' && !!rev
-    && (rev === syncKnownRev || syncKnownLog.includes(rev));
+  if ((Number(remote.build) || 1) >= SYNC_STAMPS_BUILD) return typeof rev === 'string' && !!rev && (rev === syncKnownRev || syncKnownLog.includes(rev));
+  const last = by && wrote > 0 ? (syncLoadMeta().olderWrote || {})[by] : 0;
+  return Number(last) >= wrote && wrote > 0;
+}
+/* When an older version's writer last wrote a copy taken in here: { olderWrote }
+ * for the meta, each writer's newest (a writer is an app session; a week's kept). */
+function syncOlderWrote(stateStr, by, wrote) {
+  const at = Number(wrote) || 0;
+  if (!by || !at || syncStampsOf(stateStr).build >= SYNC_STAMPS_BUILD) return {};
+  const all = { ...(syncLoadMeta().olderWrote || {}) };
+  all[by] = Math.max(Number(all[by]) || 0, at);
+  Object.keys(all).forEach(k => { if (!(Number(all[k]) > Date.now() - 7 * 864e5)) delete all[k]; });
+  return { olderWrote: all };
 }
 /* Built on an older copy than the newest this device's copy takes in: the writer
  * missed what came after (it was offline, or an older version that wrote over
@@ -405,6 +420,7 @@ function syncPushNow(opts) {
       syncCloudSeq = seq + 1;
       syncOverStale = null;
       syncAgree(fp, { pushedAt: Date.now() }, payload.state, syncClientId);
+      saveToLocalNow();                       // saved built on it at once (a crash now doesn't leave it built on the one before)
       syncCommitPending = 0;                  // server has it — priority window closes
       syncUpdateUI();
     })
@@ -555,7 +571,7 @@ function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr, by, agreedStr) {
     keepField(renderLoadedState);             // a cursor left in a field stays, with what was typed
     try { remoteFp = syncFingerprint(JSON.parse(agreedStr || remoteStr)); } catch(e) {}
   } finally {
-    if (remoteFp) { syncLastSeenFp = remoteFp; syncAgree(remoteFp, { editAt: remoteUpdatedAt || Date.now() }, agreedStr || remoteStr, by); }
+    if (remoteFp) { syncLastSeenFp = remoteFp; syncAgree(remoteFp, { editAt: remoteUpdatedAt || Date.now(), ...syncOlderWrote(remoteStr, by, remoteUpdatedAt) }, agreedStr || remoteStr, by); }
     else syncLastSyncAt = Date.now();
     syncApplying = false;
   }
@@ -584,10 +600,11 @@ function syncApplyRemote(remoteStr, remoteUpdatedAt, mergedStr, by, agreedStr) {
    * user's next real edit carry it — without the other device updating,
    * nothing we push would stick anyway. */
   if (bouncing) {
+    takeInOtherTab();                         // (now, as below; another tab's changes still go out, as any change)
     syncApplying = true;
     try { saveToLocal(); syncLastSeenFp = syncFingerprint(gatherState()); } finally { syncApplying = false; }
   } else {
-    saveToLocal();
+    saveToLocalNow();                         // saved built on it at once, with another tab's save taken in (persistence.js)
   }
 }
 
@@ -711,7 +728,11 @@ function syncReconcileRemote(v, { doneWins = false } = {}) {
       return;
     }
   }
-  if (remoteFp === localFp) {                 // already identical
+  /* already identical; but not a copy built on an older one than this device has
+   * (an older version's, say): the same as this device's copy by chance, it isn't
+   * what the other devices agree on (syncOnTop works that out), and taken as
+   * agreed it would hide a change made here that the cloud doesn't have */
+  if (remoteFp === localFp && !syncIsStale(remote)) {
     syncLastSeenFp = remoteFp;
     syncAgree(remoteFp, undefined, v.state, v.client);
     syncUpdateUI();
@@ -750,28 +771,40 @@ function syncReconcileRemote(v, { doneWins = false } = {}) {
   /* a copy the one this device has comes after (an older one delivered late, as a
    * phone back from the background gets what it missed in order): nothing in it
    * is new here, and merging it again would bring back what was since deleted */
-  if (remoteDirty && syncHadIt(remote)) {
+  if (remoteDirty && syncHadIt(remote, v.client, Number(v.updatedAt) || 0)) {
     syncOverStale = syncCloudSeen;            // (if the cloud really holds it now, this device's goes back over it)
     syncSchedulePush();
     return true;
   }
   if (remoteDirty) {
     /* built on an older copy than this device has: applying it as it is would
-     * undo what came after, so its changes go on top of this device's instead … */
+     * undo what came after, so its changes go on top of this device's instead …
+     * (not one numbered past what this device's copy takes in: a copy kept here
+     * after this device's copy was last saved, the storage being full, isn't one
+     * it is built on; that goes as below, from the copy it is built on) */
     const base = syncBuiltOn(remote, knownHash, v.client);
-    if (base && base.hash !== knownHash) {
+    if (base && base.hash !== knownHash && !(syncTopSeq > 0 && base.seq > syncTopSeq)) {
       const state = typeof base.state === 'string' ? base.state : syncLoaded.get(base.id);
       if (state === undefined) { syncLoadCopy(base.id, v); return true; }   // read back from the database first
       if (state && syncOnTop(state, v, remote, remoteFp, local, knownHash)) return true;
     }
     if (!(base && base.hash === knownHash) && syncIsStale(remote)) {
-      /* … from the nearest copy before it this device kept, when it no longer has
-       * that one (read back from the database first, if need be) … */
-      const before = syncAncestor(remote);
-      const state = before ? (typeof before.state === 'string' ? before.state : syncLoaded.get(before.id)) : null;
-      if (before && state === undefined) { syncLoadCopy(before.id, v); return true; }
-      if (state && syncOnTop(state, v, remote, remoteFp, local, knownHash)) return true;
-      /* … and with no copy from before it at all, what this device has stays */
+      /* … and when this device doesn't have that copy: from a version that
+       * stamps its copies (one that went to the cloud over the copy it was built
+       * on, so others may have it already), from the nearest copy before it this
+       * device kept (read back from the database first, if need be) … */
+      if ((Number(remote.build) || 1) >= SYNC_STAMPS_BUILD) {
+        const before = syncAncestorAt(syncBaseSeqOf(remote));
+        const state = before ? (typeof before.state === 'string' ? before.state : syncLoaded.get(before.id)) : null;
+        if (before && state === undefined) { syncLoadCopy(before.id, v); return true; }
+        if (state && syncOnTop(state, v, remote, remoteFp, local, knownHash)) return true;
+      }
+      /* … and otherwise what this device has stays. An older version's copy (one
+       * it wrote over the cloud's without looking) is not put on top from an
+       * earlier copy: what came between the two would count as its change, and
+       * bring back what was undone since (a task deleted again, a check taken
+       * off). A device that has the copy puts its changes on top; the older copy
+       * is kept here, to restore. */
       syncKeepOurs(v);
       return true;
     }
@@ -813,6 +846,9 @@ function syncReconcileRemote(v, { doneWins = false } = {}) {
 function syncOnTop(baseStr, v, remote, remoteFp, local, knownHash) {
   const rebased = syncRebase(baseStr, remote, local);
   if (!rebased) return false;
+  /* this device's copy takes that one in, its number too: what it sends next is
+   * numbered after it, so the writer doesn't take it for an older copy */
+  syncTopSeq = Math.max(syncTopSeq, syncStampsOf(v.state).seq);
   const known = syncBaseCopy(knownHash);
   const fixed = known ? syncRebase(baseStr, remote, known) : null;
   const agreed = fixed ? JSON.stringify({ ...fixed, build: STATE_BUILD, syncRev: null, syncBase: null, syncBaseHash: null,
@@ -825,11 +861,9 @@ function syncOnTop(baseStr, v, remote, remoteFp, local, knownHash) {
   if (agreed) { syncOverStale = syncCloudSeen; syncSchedulePush(); }
   return true;
 }
-/* The nearest copy before a cloud copy's own starting point that this device
- * kept: agreed, written by a version that numbers its copies, numbered below the
- * one it was built on (one numbered the same, that isn't it, went another way).
- * What changed between the two is on both sides alike. */
-function syncAncestor(remote) { return syncAncestorAt(syncBaseSeqOf(remote)); }
+/* The nearest copy before the one numbered `seq` that this device kept: agreed,
+ * written by a version that numbers its copies, numbered below it (one numbered
+ * the same, that isn't it, went another way). */
 function syncAncestorAt(seq) {
   if (!(seq > 1)) return null;
   let best = null;
