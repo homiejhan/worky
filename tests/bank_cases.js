@@ -17,8 +17,8 @@
  *   • a new day starts from the bank's balance as last fetched, and within a
  *     day the start stays put, unless the banks followed change;
  *   • turned off, the total stays where it was and the bank no longer moves it;
- *   • Budget's own lines (under the total, on Home) say the same, and every
- *     device shows the same.
+ *   • what Budget shows says the same (today's balance and the total at the
+ *     top, the line under them, Home's), and every device shows the same.
  * Not part of npm test (100 cases take a few minutes).
  * Run: npm run bank:cases -- [cases=100] [first seed=1] [processes=6]
  * One case, with what happened in it: BANK_SEED=17 npm run bank:cases */
@@ -357,8 +357,10 @@ async function runCase(seed) {
         ? `${money(initial)} at the start of today − ${money(spent)} spent today` + (other ? ` ${other > 0 ? '+' : '−'} ${money(Math.abs(other))} ${other > 0 ? 'in at your bank' : 'more out at your bank'}` : '')
         : `${money(initial)} initial − ${money(spent)} spent today`;
       if (sub !== wantSub) problems.push(`${where}: under the total "${sub}", should be "${wantSub}"`);
-      const figure = bud(app).querySelector('.budget-figure-value').textContent;
+      const figure = bud(app).querySelector('.budget-figure-total .budget-figure-value').textContent;
       if (figure !== money(total)) problems.push(`${where}: Budget shows ${figure}, its total is ${money(total)}`);
+      const todayFigure = bud(app).querySelector('.budget-figure-today .budget-figure-value').textContent;
+      if (todayFigure !== money(tb)) problems.push(`${where}: Budget shows ${todayFigure} for today, today's balance is ${money(tb)}`);
       const home = app.d.querySelector('.home-balance-total');
       if (home && home.textContent !== `${money(total)} total`) problems.push(`${where}: Home shows "${home.textContent}", the total is ${money(total)}`);
       const ro = bud(app).querySelector('[data-bfield="initial"]').readOnly;

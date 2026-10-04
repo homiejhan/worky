@@ -6,6 +6,7 @@ export const LS_KEY          = 'focus-app-state';
 export const CAL_LS_KEY      = 'focus-cal-state';
 export const GCAL_LS_KEY     = 'focus-gcal-token';
 export const GCAL_CAL_LS_KEY = 'focus-gcal-calendars';
+export const BUDGET_UI_LS_KEY = 'focus-budget-ui';        // device-local: Budget settings open?
 
 export const CAL_HOUR_PX  = 64;
 export const CAL_TOTAL_PX = 24 * CAL_HOUR_PX;

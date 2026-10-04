@@ -1,5 +1,6 @@
 /* budget.js — The daily-envelope budget. */
 import { $, calDateKey, calKeyToDate, escAttr, keepField, showToast, userTyping } from './util.js';
+import { BUDGET_UI_LS_KEY } from './config.js';
 import { saveToLocal } from './persistence.js';
 import { dbdTodayKey } from './dbd.js';
 import { homeDesktopOpen, homeToggleDesktop, renderHome } from './home.js';
@@ -249,6 +250,29 @@ export function budgetToggleDesktop(force) {
  * getElementById would always resolve to the mobile one). Everything is
  * scoped to its container and wired with delegated listeners. */
 
+/* Budget settings (the three balances and the cash runway) fold away under
+ * the figures, so a phone shows today's money and purchases first. Whether
+ * it's open is device-local. */
+let budgetSettingsOpen = false;
+export function budgetUiLoad() {
+  try { budgetSettingsOpen = !!JSON.parse(localStorage.getItem(BUDGET_UI_LS_KEY))?.open; } catch(e) {}
+}
+function budgetToggleSettings() {
+  budgetSettingsOpen = !budgetSettingsOpen;
+  try { localStorage.setItem(BUDGET_UI_LS_KEY, JSON.stringify({ open: budgetSettingsOpen })); } catch(e) {}
+  renderBudget();
+}
+/* What the folded row says: the daily budget and how long the cash lasts,
+ * or when it runs out before payday (`short`: in red, so folding it away
+ * never hides that). */
+function budgetSettingsSummary(r) {
+  const daily = budget.daily > 0 ? `${money(budget.daily)} a day` : 'No daily budget';
+  if (!r) return { text: daily, short: false };
+  if (!r.payday) return { text: `${daily} · set your next payday`, short: false };
+  if (r.short) return { text: `Cash runs out ${r.runsOutOn === r.today ? 'today' : fmtDayKey(r.runsOutOn)}`, short: true };
+  return { text: `${daily} · ${r.daysOfCash === null ? `${RUNWAY_HORIZON}+ days` : plural(r.daysOfCash, 'day')} of cash`, short: false };
+}
+
 function budgetFieldHtml(key, label, value, hint, readonly = false) {
   return `
     <div class="budget-field">
@@ -273,6 +297,11 @@ function budgetHtml() {
     ? `${money(round2(budget.initial))} at the start of today − ${money(spent)} spent today`
       + (other ? ` ${other > 0 ? '+' : '−'} ${money(Math.abs(other))} ${other > 0 ? 'in at your bank' : 'more out at your bank'}` : '')
     : `${money(round2(budget.initial))} initial − ${money(spent)} spent today`;
+  const r = runwayResult();
+  const open = budgetSettingsOpen;
+  const summary = budgetSettingsSummary(r);
+  const long = money(tb).length > 8 || money(total).length > 8;        // smaller figures, so both fit side by side
+  const allowance = todayAllowance();
   const rows = budget.purchases.map(p => `
     <div class="budget-purchase-row${p.bank ? ' from-bank' : ''}" data-purchase-id="${p.id}">
       <input class="budget-purchase-title" data-pact="title"
@@ -290,21 +319,38 @@ function budgetHtml() {
         <p class="page-sub">Today's spending money, and how long your cash lasts.</p>
       </div>
 
-      <div class="budget-figure ${total < 0 ? 'over' : ''}">
-        <div class="budget-figure-label">Total balance</div>
-        <div class="budget-figure-value">${money(total)}</div>
+      <div class="budget-figure${total < 0 ? ' over' : ''}">
+        <div class="budget-figures${long ? ' long' : ''}">
+          <div class="budget-figure-cell budget-figure-today${tb < 0 ? ' over' : ''}">
+            <div class="budget-figure-label">Today's balance</div>
+            <div class="budget-figure-value">${money(tb)}</div>
+            <div class="budget-figure-note">${allowance || budget.todayAllowance !== null ? `of ${money(allowance)} today` : 'No daily budget yet'}</div>
+          </div>
+          <div class="budget-figure-cell budget-figure-total${total < 0 ? ' over' : ''}">
+            <div class="budget-figure-label">Total balance</div>
+            <div class="budget-figure-value">${money(total)}</div>
+          </div>
+        </div>
         <div class="budget-figure-sub">${sub}</div>
       </div>
 
-      <div class="budget-fields">
-        ${budgetFieldHtml('today', "Today's balance", tb, 'Spending envelope — editing it won\'t change your total')}
-        ${budgetFieldHtml('daily', 'Daily budget', round2(budget.daily), follows || runwayOn() ? 'What you let yourself spend a day' : 'Added to your balance each new day')}
-        ${budgetFieldHtml('initial', 'Initial balance', round2(budget.initial), fromBank ? 'Your bank balance when today began: it follows your bank'
-          : follows ? 'Your cash this morning: money in and out of your bank is logged for you'
-          : runwayOn() ? 'Your cash this morning: add each paycheck here' : 'Grows by the daily budget each morning', fromBank)}
+      <div class="budget-settings${open ? ' open' : ''}">
+        <button class="budget-settings-toggle" data-budget="settings" aria-expanded="${open}">
+          <span class="budget-settings-title">Budget settings</span>
+          <span class="budget-settings-summary${summary.short ? ' short' : ''}">${summary.text}</span>
+          <svg class="budget-settings-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="budget-settings-body"${open ? '' : ' hidden'}>
+          <div class="budget-fields">
+            ${budgetFieldHtml('today', "Today's balance", tb, 'Spending envelope — editing it won\'t change your total')}
+            ${budgetFieldHtml('daily', 'Daily budget', round2(budget.daily), follows || runwayOn() ? 'What you let yourself spend a day' : 'Added to your balance each new day')}
+            ${budgetFieldHtml('initial', 'Initial balance', round2(budget.initial), fromBank ? 'Your bank balance when today began: it follows your bank'
+              : follows ? 'Your cash this morning: money in and out of your bank is logged for you'
+              : runwayOn() ? 'Your cash this morning: add each paycheck here' : 'Grows by the daily budget each morning', fromBank)}
+          </div>
+          ${runwayHtml(r)}
+        </div>
       </div>
-
-      ${runwayHtml()}
 
       <div class="budget-section-header">
         <span class="section-sublabel">Purchases today</span>
@@ -417,7 +463,7 @@ export function runwayFetchUntil() {
   return last;
 }
 
-function runwayHtml() {
+function runwayHtml(r = runwayResult()) {
   const setup = `
     <div class="runway-setup">
       <label class="runway-field"><span>Next payday</span>
@@ -435,7 +481,6 @@ function runwayHtml() {
       ${setup}
     </div>`;
 
-  const r = runwayResult();
   let head;
   if (!r.payday) {
     head = `<div class="runway-value">No payday ahead</div>
@@ -543,6 +588,11 @@ function bindBudgetContainer(root) {
   });
 
   root.addEventListener('click', e => {
+    if (e.target.closest('[data-budget="settings"]')) {
+      budgetToggleSettings();
+      root.querySelector('[data-budget="settings"]')?.focus();     // (the button was drawn again)
+      return;
+    }
     const bbtn = e.target.closest('button[data-bact]');
     if (bbtn) {
       if (bbtn.dataset.bact === 'add') addBill(root);

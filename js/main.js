@@ -27,7 +27,7 @@ import {
   gcalHandleRedirect, gcalIsConnected, gcalLoadCals, gcalLoadToken, gcalSyncAll, gcalToggleCal,
   gcalUpdateBtn,
 } from './gcal.js';
-import { budgetRollover, budgetTickDay, renderBudget } from './budget.js';
+import { budgetRollover, budgetTickDay, budgetUiLoad, renderBudget } from './budget.js';
 import { bankInit } from './bank.js';
 import {
   setSyncBooting, setSyncLastSeenFp, syncFingerprint, syncHandleRedirect, syncInit,
@@ -76,6 +76,7 @@ Object.assign(window, {
   ['d','m'].forEach(pfx => { const el = $(`dbdDate-${pfx}`); if (el && !el.value) el.value = _dbdDayKey; });
   renderDbd();
   budgetRollover();          // catch up any days missed while closed
+  budgetUiLoad();
   renderBudget();
   renderHome();
   applyViewVisibility();

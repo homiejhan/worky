@@ -2323,7 +2323,7 @@ body.format-mode .list-sched-row { display: flex; }
 .budget-wrap { display: flex; flex-direction: column; gap: 16px; }
 .budget-wrap > .page-head { margin-bottom: 0; }
 
-/* hero figure — total balance */
+/* hero figures — today's balance and the total balance */
 .budget-figure {
   position: relative;
   background: linear-gradient(135deg, color-mix(in srgb, var(--hue-budget) 20%, transparent), transparent 70%), var(--bg-elevated);
@@ -2355,13 +2355,70 @@ body.format-mode .list-sched-row { display: flex; }
   line-height: 1.1;
   margin-top: 2px;
 }
-.budget-figure.over .budget-figure-value { color: var(--danger); }
+.budget-figures { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; container-type: inline-size; }
+.budget-figure-cell { min-width: 0; }
+.budget-figure-total { position: relative; }
+.budget-figure-total::before {
+  content: ''; position: absolute; left: -16px; top: 2px; bottom: 2px;
+  border-left: 1px solid var(--border-mid);
+}
+/* Two figures share a phone's width: their size follows the row's (cqi; vw
+   where container units aren't known), smaller for a long amount (both, so
+   they stay the same size). */
+.budget-figures .budget-figure-value {
+  font-size: clamp(24px, 8.4vw, 46px);
+  font-size: clamp(24px, 10cqi, 46px);
+  white-space: nowrap;
+}
+.budget-figures.long .budget-figure-value {
+  font-size: clamp(18px, 6.4vw, 46px);
+  font-size: clamp(18px, 7.6cqi, 46px);
+}
+.budget-figure-cell.over .budget-figure-value { color: var(--danger); }
+.budget-figure-note { font-size: 12px; color: var(--ink-2); margin-top: 1px; font-variant-numeric: tabular-nums; }
 .budget-figure-sub {
   font-size: 12px;
   color: var(--ink-3);
-  margin-top: 4px;
+  margin-top: 12px;
   font-variant-numeric: tabular-nums;
 }
+
+/* Budget settings: the three balances and the cash runway, folded under the
+   figures until opened (budget.js → budgetToggleSettings) */
+.budget-settings {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.18s var(--ease);
+}
+.budget-settings:has(> .budget-settings-toggle:hover) { border-color: var(--border-mid); }
+.budget-settings-toggle {
+  width: 100%;
+  display: grid; grid-template-columns: 1fr auto; align-items: center;
+  column-gap: 12px; row-gap: 2px;
+  padding: 13px 16px;
+  text-align: left;
+  border-radius: var(--radius-lg);
+  touch-action: manipulation;
+}
+.budget-settings-toggle:focus-visible { outline-offset: -2px; }
+.budget-settings-title { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.budget-settings-summary { grid-column: 1; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.budget-settings-summary.short { color: var(--danger); font-weight: 600; }
+.budget-settings-chev {
+  grid-column: 2; grid-row: 1 / span 2;
+  color: var(--ink-3);
+  transition: transform 0.2s var(--ease), color 0.15s;
+}
+.budget-settings-toggle:hover .budget-settings-chev { color: var(--ink); }
+.budget-settings.open .budget-settings-chev { transform: rotate(180deg); }
+.budget-settings-body { display: flex; flex-direction: column; gap: 12px; padding: 2px 12px 12px; }
+.budget-settings-body[hidden] { display: none; }
+/* inside it the fields and the runway sit flat on the card */
+.budget-settings .budget-field, .budget-settings .runway { background: var(--bg-surface); box-shadow: none; }
+.budget-settings .runway.short { background: linear-gradient(135deg, rgba(var(--danger-rgb),0.12), transparent 70%), var(--bg-surface); }
+.budget-settings .runway-add-row { background: var(--bg-elevated); }
 
 /* editable fields */
 .budget-fields {
@@ -3242,6 +3299,13 @@ body.format-mode .list-sched-row { display: flex; }
   .budget-input { flex: 0 0 auto; width: 6.5ch; text-align: right; }
   .budget-field-hint { max-width: 22ch; }
   .budget-new-amount { width: 84px; }
+  .budget-figure { padding: 18px; }
+  .budget-figures { gap: 28px; }
+  .budget-figure-total::before { left: -14px; }
+  /* a bill's name gets its own line: beside the amount, day and Add it was squeezed to nothing */
+  .runway-add-row { flex-wrap: wrap; }
+  .runway-new-name { flex: 1 1 100%; }
+  .runway-new-amount { margin-right: auto; }
 }
 
 /* Digest header: let the meta line wrap on narrow screens instead of
