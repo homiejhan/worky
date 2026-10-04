@@ -36,11 +36,12 @@ function sandboxTransactions() {
 function createFakePlaid({ clientId = 'test-client', secret = 'test-secret' } = {}) {
   const state = {
     calls: [],                 // { path, body } for every request
-    items: new Map(),          // access_token → { item_id, events, removed }: events are what /transactions/sync pages through
+    items: new Map(),          // access_token → { item_id, events, removed, accounts }: events are what /transactions/sync pages through
     failNext: null,            // { path, status, error_code, error_type, error_message, display_message }
     mutateOnce: false,         // second sync page answers TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION once
     pageSize: 4,
     checkedAt: '2026-09-30T06:12:00Z',   // when Plaid last got transactions from the bank (/item/get)
+    nextItem: null,            // { accounts, transactions } in Plaid's shapes for the next bank connected (else the sandbox's)
     n: 0,
   };
   const error = (status, code, message, type = 'INVALID_INPUT', display = null) =>
@@ -63,11 +64,14 @@ function createFakePlaid({ clientId = 'test-client', secret = 'test-secret' } = 
         if (!/^public-sandbox-/.test(body.public_token || '')) return error(400, 'INVALID_PUBLIC_TOKEN', 'provided public token is in an invalid format');
         const id = ++state.n;
         const token = `access-sandbox-${id}`;
-        state.items.set(token, { item_id: `item-${id}`, events: sandboxTransactions().map(tx => ({ kind: 'added', tx })), removed: false });
+        const next = state.nextItem;
+        state.nextItem = null;
+        state.items.set(token, { item_id: `item-${id}`, events: (next ? next.transactions : sandboxTransactions()).map(tx => ({ kind: 'added', tx })),
+          removed: false, accounts: next ? JSON.parse(JSON.stringify(next.accounts)) : sandboxAccounts() });
         return [200, { access_token: token, item_id: `item-${id}`, request_id: 'r' }];
       }
       case '/accounts/get':
-        return [200, { accounts: sandboxAccounts(), item: { item_id: item.item_id, institution_id: 'ins_109508' }, request_id: 'r' }];
+        return [200, { accounts: JSON.parse(JSON.stringify(item.accounts)), item: { item_id: item.item_id, institution_id: 'ins_109508' }, request_id: 'r' }];
       case '/item/get':
         return [200, { item: { item_id: item.item_id, institution_id: 'ins_109508' }, request_id: 'r',
           status: { transactions: { last_successful_update: state.checkedAt, last_failed_update: null }, last_webhook: null } }];
@@ -118,12 +122,18 @@ function createFakePlaid({ clientId = 'test-client', secret = 'test-secret' } = 
     added.forEach(tx => events.push({ kind: 'added', tx }));
     modified.forEach(tx => events.push({ kind: 'modified', tx }));
   }
+  /* The bank's balances as Plaid has them now: { <account_id>: { available, current } }
+   * (what /accounts/get answers from then on); or another set of accounts altogether. */
+  function setBalances(accessToken, balances) {
+    for (const a of state.items.get(accessToken).accounts) if (balances[a.account_id]) Object.assign(a.balances, balances[a.account_id]);
+  }
+  function setAccounts(accessToken, accounts) { state.items.get(accessToken).accounts = JSON.parse(JSON.stringify(accounts)); }
   /* A transaction in Plaid's shape, on the sandbox checking account unless `account_id` says otherwise. */
   const transaction = (id, amount, date, name, more = {}) => ({ transaction_id: id, account_id: 'acc-checking', date, authorized_date: date,
     name, merchant_name: name, amount, iso_currency_code: 'USD', pending: false, pending_transaction_id: null,
     personal_finance_category: { primary: amount < 0 ? 'INCOME' : 'GENERAL_MERCHANDISE' }, ...more });
 
-  return { state, fetchImpl, listen, addTransactions, changeTransactions, transaction };
+  return { state, fetchImpl, listen, addTransactions, changeTransactions, transaction, setBalances, setAccounts };
 }
 
 module.exports = { createFakePlaid, sandboxAccounts, sandboxTransactions };

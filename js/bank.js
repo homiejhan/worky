@@ -9,10 +9,11 @@
  * (the sealed token, balances and recent transactions), so every device signed in
  * to it shows the bank, and Disconnect removes it from all of them. This device
  * keeps a copy for when it's offline, dropped on sign-out. None of it is in the
- * synced state or in Export, except what Budget logs from it (budget.js, with
- * the rules in bankbudget.js): the app refreshes the banks on its own when
- * what it has is half an hour old, and hands every change to Budget. The
- * connection is read-only. */
+ * synced state or in Export, except what Budget takes from it (budget.js, with
+ * the rules in bankbudget.js: its total balance is the bank's, the day's start
+ * is saved, and new transactions are logged): the app refreshes the banks on
+ * its own when what it has is half an hour old, and hands every change to
+ * Budget. The connection is read-only. */
 import { BANK_LS_KEY, BANK_RELAY_URL, PLAID_LINK_JS } from './config.js';
 import { $, calKeyToDate, escAttr, showToast } from './util.js';
 import { bankBudget, budgetFollowBank, budgetForgetBank, budgetFromBank, budgetSeeBank, money } from './budget.js';
@@ -331,8 +332,8 @@ async function bankRefresh(uid, item) {
   const { acc, tx } = fresh;
   const base = latest();
   const byId = new Map(base.transactions.map(t => [t.id, t]));
-  (tx.removed || []).forEach(id => byId.delete(id));
   [...(tx.added || []), ...(tx.modified || [])].forEach(t => byId.set(t.id, t));
+  (tx.removed || []).forEach(id => byId.delete(id));   // last: one added and removed since the last refresh (a pending charge dropped) is gone; Plaid never reuses an id
   const next = {
     ...base,
     accounts: Array.isArray(acc.accounts) ? acc.accounts : [],
@@ -587,10 +588,10 @@ function bankRender() {
   const who = syncUser.email ? `every device signed in as ${escAttr(syncUser.email)}` : 'every device signed in to it';
   const toBudget = items.length ? `
     <div class="settings-view-row">
-      <span class="settings-view-name">Log new transactions in Budget</span>
+      <span class="settings-view-name">Budget follows your bank</span>
       <label class="gcal-toggle"><input type="checkbox" data-bank="budget"${bankBudget.on ? ' checked' : ''}><span class="gcal-toggle-track"></span></label>
     </div>
-    <div class="bank-fine">From checking accounts. When it starts, Budget takes its balance to match your bank's, then logs each new transaction: today's spending as purchases, money in and earlier days in the total balance.</div>` : '';
+    <div class="bank-fine">From checking accounts. Budget's total balance is your bank's balance, and each day starts from what it was when the day began. New transactions are logged too: today's spending as purchases, money in and earlier days' charges under From your bank.</div>` : '';
   panel.innerHTML = `
     ${items.map(bankItemHtml).join('')}
     ${toBudget}

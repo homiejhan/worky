@@ -225,6 +225,24 @@ const item = (transactions, more = {}) => ({ id: 'item-1', accounts: ACCOUNTS, t
       'naming the checking account and since when');
   }
 
+  console.log('\n── 8. The balance Budget\'s total is ──');
+  {
+    const acct = (id, subtype, available, current, type = 'depository') => ({ id, type, subtype, available, current });
+    const bank = (id, accounts) => ({ id, accounts, transactions: [], updatedAt: 1 });
+    eq(B.bankBalance([bank('b1', [acct('chk', 'checking', 120.5, 130), acct('sav', 'savings', 900, 900), acct('cc', 'credit card', null, 410, 'credit')])]), 120.5,
+      'the checking account\'s available balance: savings and the credit card are left out');
+    eq(B.bankBalance([bank('b1', [acct('chk', 'checking', null, 130)])]), 130, 'its current balance where the bank gives no available one');
+    eq(B.bankBalance([bank('b1', [acct('chk', 'checking', 0, 130)])]), 0, 'an available balance of $0 is a balance');
+    eq(B.bankBalance([bank('b1', [acct('chk', 'checking', 20.1, 0)]), bank('b2', [acct('chk', 'checking', 10.2, 0), acct('pp', 'paypal', 5, 5)])]), 35.3,
+      'every followed account of every bank, added up (to the cent)');
+    eq(B.bankBalance([bank('b1', [acct('chk', 'checking', -42.5, -40)])]), -42.5, 'an overdrawn account counts below zero');
+    eq(B.bankBalance([bank('b1', [acct('chk', 'checking', null, null), acct('sav', 'savings', 900, 900)])]), null, 'no balance from a followed account: none (Budget keeps its own)');
+    eq(B.bankBalance([]), null, 'no banks: none');
+    eq(B.bankBalance([bank('b1', [acct('chk', 'checking', '120', 130)])]), 130, 'a balance that isn\'t a number isn\'t taken (the current one is)');
+    eq(B.bankBalanceKey([bank('b2', [acct('chk', 'checking', 1, 1)]), bank('b1', [acct('x', 'checking', 1, 1), acct('sav', 'savings', 1, 1), acct('n', 'checking', null, null)])]),
+      'b1/x,b2/chk', 'which accounts: the followed ones with a balance, in a fixed order');
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

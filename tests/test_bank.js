@@ -603,10 +603,11 @@ async function sealV1(payload) {
     const tracked = () => L.w.eval('bankBudget.items')[itemId];
     eq(tracked().since, today, 'dated today');
     eq(Object.keys(tracked().seen).sort().join(), 'tx-1,tx-2,tx-4,tx-6', 'counting what the checking account shows as already in the balance');
-    ok(L.w.eval('budget.initial') === 500 && purchases(L).length === 0, 'Budget is left as it was: its balance is taken to match the bank');
+    ok(L.w.eval('totalBalance()') === 100 && L.w.eval('budget.initial') === 100 && purchases(L).length === 0,
+      'the total balance becomes the bank\'s ($100 available in checking, not the $500 typed), and the day starts from it');
     ok(L.w.eval('budgetFollowsBank()') && !/Logged/.test(toast(L.d)), 'it follows the bank from now on, with nothing logged');
     const toggle = () => L.d.querySelector('#bankPanel [data-bank="budget"]');
-    ok(toggle() && toggle().checked, 'Settings → Bank accounts: "Log new transactions in Budget" is on');
+    ok(toggle() && toggle().checked && /Budget follows your bank/.test(toggle().closest('.settings-view-row').textContent), 'Settings → Bank accounts: "Budget follows your bank" is on');
     ok(!L.w.eval('JSON.stringify(gatherState())').includes('Starbucks'), 'the sync point keeps ids, amounts and dates, not names');
 
     const access = [...W.plaid.state.items.keys()].pop();
@@ -617,20 +618,25 @@ async function sealV1(payload) {
       tx('n-save', 20, today, 'Transfer to savings', { account_id: 'acc-saving' }),
       tx('n-card', 55, today, 'Amazon', { account_id: 'acc-credit' }),
     ] });
+    W.plaid.setBalances(access, { 'acc-checking': { available: 557.5, current: 580 }, 'acc-saving': { available: 180, current: 190 }, 'acc-credit': { current: 465 } });
     await refresh(L);
     ok(await until(() => purchases(L).length === 1), 'Refresh brings new transactions into Budget');
     const chip = purchases(L)[0];
     ok(chip.title === 'Chipotle' && chip.amount === 12.5 && chip.pending === true && chip.bank === 'n-chipotle', "today's spending is a purchase today, still pending");
-    eq(L.w.eval('budget.initial'), 970, "yesterday's Target (−30) and today's payroll (+500) move the balance");
-    ok(L.w.eval('totalBalance()') === 957.5 && L.w.eval('todayBalance()') === 7.5, 'total balance $957.50, and today\'s envelope $20 − $12.50');
+    eq(L.w.eval('totalBalance()'), 557.5, "the total balance is the bank's new one: today's payroll (+500) in, yesterday's Target (−30) and the pending Chipotle out");
+    ok(L.w.eval('budget.initial') === 100 && L.w.eval('todayBalance()') === 7.5, 'the day still starts from $100, and today\'s envelope is $20 − $12.50');
+    const sub = () => bud(L).querySelector('.budget-figure-sub').textContent;
+    ok(/^\$100\.00 at the start of today − \$12\.50 spent today \+ \$470\.00 in at your bank$/.test(sub()), `under it, how the day got there: "${sub()}"`);
     ok(/Logged 3 bank transactions in Budget/.test(toast(L.d)), `a toast says so: "${toast(L.d)}"`);
-    ok(!purchases(L).some(p => /savings|Amazon/.test(p.title)) && L.w.eval('budget.initial') === 970, 'savings and the credit card are left out');
+    ok(!purchases(L).some(p => /savings|Amazon/.test(p.title)) && L.w.eval('totalBalance()') === 557.5, 'savings and the credit card are left out, of the purchases and of the balance');
     const tag = bud(L).querySelector('.budget-purchase-row.from-bank .budget-bank-tag');
     ok(tag && tag.textContent === 'pending', 'on the Budget screen it is marked as from the bank, pending');
     const lines = [...bud(L).querySelectorAll('.budget-bank-list .bank-tx')].map(r => r.textContent.replace(/\s+/g, ' ').trim());
     ok(lines.length === 2 && /Campus Café payroll \+\$500\.00$/.test(lines[0]) && /Target -\$30\.00$/.test(lines[1]), `From your bank lists the rest: ${lines.join(' | ')}`);
-    ok(/What you let yourself spend a day/.test(bud(L).textContent) && /money in and out of your bank is logged for you/.test(bud(L).textContent),
-      'the daily budget is spending, and the balance follows the bank');
+    ok(/What you let yourself spend a day/.test(bud(L).textContent) && /Your bank balance when today began/.test(bud(L).textContent)
+      && bud(L).querySelector('[data-bfield="initial"]').readOnly, 'the daily budget is spending, and the initial balance follows the bank (it can\'t be typed over)');
+    L.w.eval('setBudgetField("initial", "9999")');
+    ok(L.w.eval('budget.initial') === 100 && L.w.eval('totalBalance()') === 557.5, 'nothing typed there changes it');
 
     await sleep(1500);                                                       // the laptop's state reaches the account
     const P = await device(W, { transform: withRelay(RELAY), storage: { 'focus-app-state': cloud.at('users/user-c/state'),
@@ -639,23 +645,27 @@ async function sealV1(payload) {
     P.signIn('user-c');
     ok(await until(() => P.d.querySelectorAll('#bankPanel .bank-item').length === 1 || P.w.eval('bank.items.length') === 1), 'the phone signs in to the same account');
     await sleep(200);
-    ok(purchases(P).length === 1 && P.w.eval('totalBalance()') === 957.5, 'and has the same budget: nothing logged twice');
+    ok(purchases(P).length === 1 && P.w.eval('totalBalance()') === 557.5 && P.w.eval('budget.initial') === 100, 'and has the same budget: nothing logged twice');
 
     W.plaid.changeTransactions(access, { removed: ['n-chipotle'],
       added: [tx('n-chipotle-posted', 14, today, 'CHIPOTLE 1234', { pending_transaction_id: 'n-chipotle' })] });
+    W.plaid.setBalances(access, { 'acc-checking': { available: 556, current: 566 } });
     await refresh(P);
     ok(await until(() => purchases(P)[0] && purchases(P)[0].amount === 14), 'the charge posts with a tip: Refresh on the phone updates the purchase');
     ok(purchases(P).length === 1 && !purchases(P)[0].pending && purchases(P)[0].bank === 'n-chipotle-posted', 'the same purchase, posted, not a second one');
+    ok(await until(() => P.w.eval('totalBalance()') === 556 && L.w.eval('totalBalance()') === 556, 3000), 'and the total follows the bank, the tip taken off, on both devices');
     ok(await until(() => purchases(L)[0] && purchases(L)[0].amount === 14, 4000), 'the laptop has it too');
     await sleep(1500);
     ok(purchases(L).length === 1 && purchases(P).length === 1, 'and neither logs it again');
 
     W.plaid.changeTransactions(access, { added: [tx('n-hold', 45, today, 'Shell gas hold', { pending: true })] });
+    W.plaid.setBalances(access, { 'acc-checking': { available: 511 } });
     await refresh(L);
-    ok(await until(() => purchases(L).some(p => p.bank === 'n-hold')), 'a pending hold shows as a purchase');
+    ok(await until(() => purchases(L).some(p => p.bank === 'n-hold')) && L.w.eval('totalBalance()') === 511, 'a pending hold shows as a purchase, and comes off the total as at the bank');
     W.plaid.changeTransactions(access, { removed: ['n-hold'] });
+    W.plaid.setBalances(access, { 'acc-checking': { available: 556 } });
     await refresh(L);
-    ok(await until(() => !purchases(L).some(p => p.bank === 'n-hold')), 'the bank drops it: it leaves Budget');
+    ok(await until(() => !purchases(L).some(p => p.bank === 'n-hold')) && L.w.eval('totalBalance()') === 556, 'the bank drops it: it leaves Budget, and the total is back');
 
     const add = (title, amount) => {
       bud(L).querySelector('.budget-new-title').value = title;
@@ -665,11 +675,14 @@ async function sealV1(payload) {
     const newTitle = () => bud(L).querySelector('.budget-new-title');
     add('Coffee', '4.75');
     newTitle().focus();                                                    // "+ Add" puts the cursor back for the next one
+    eq(L.w.eval('totalBalance()'), 551.25, 'a purchase typed here comes off the total before the bank shows it');
     W.plaid.changeTransactions(access, { added: [tx('n-coffee', 4.75, today, 'STARBUCKS 800', { pending: true })] });
+    W.plaid.setBalances(access, { 'acc-checking': { available: 551.25 } });
     await refresh(L);
     ok(await until(() => purchases(L).some(p => p.title === 'Coffee' && p.bank === 'n-coffee'), 1000),
       'a cursor left in "What did you buy?" holds nothing up: the bank\'s copy is matched to the purchase typed by hand');
     eq(purchases(L).filter(p => p.amount === 4.75).length, 1, 'not counted twice');
+    eq(L.w.eval('totalBalance()'), 551.25, 'nor off the total twice: it is the bank\'s now');
     ok(L.d.activeElement === newTitle(), 'and the cursor is still in the field');
 
     /* someone typing: logging waits for a pause, then keeps what was typed */
@@ -678,6 +691,7 @@ async function sealV1(payload) {
     newTitle().value = 'Ban';
     newTitle().dispatchEvent(new L.w.Event('input', { bubbles: true }));
     W.plaid.changeTransactions(access, { added: [tx('n-vend', 1.25, today, 'Vending machine')] });
+    W.plaid.setBalances(access, { 'acc-checking': { available: 550, current: 564.75 } });
     const syncs = W.plaid.state.calls.filter(c => c.path === '/transactions/sync').length;
     L.w.eval('bankRefreshNow(bankItems()[0])');                               // Refresh without leaving the field
     await until(() => W.plaid.state.calls.filter(c => c.path === '/transactions/sync').length > syncs, 3000);
@@ -691,10 +705,13 @@ async function sealV1(payload) {
     bud(L).querySelector(`.budget-purchase-row[data-purchase-id="${coffee.id}"] [data-pact="del"]`).click();
     ok(!purchases(L).some(p => p.title === 'Coffee'), 'taken out of Budget with ×');
     const kept = L.w.eval('budget.initial'), lines0 = L.w.eval('bankBudget.log.length');
+    eq(L.w.eval('totalBalance()'), 550, 'the total is still the bank\'s: the money did leave');
     W.plaid.changeTransactions(access, { removed: ['n-coffee'], added: [tx('n-coffee-posted', 5.25, today, 'STARBUCKS 800', { pending_transaction_id: 'n-coffee' })] });
+    W.plaid.setBalances(access, { 'acc-checking': { available: 549.5, current: 559.5 } });
     await refresh(L);
     ok(!purchases(L).some(p => /STARBUCKS|Coffee/.test(p.title)) && L.w.eval('budget.initial') === kept && L.w.eval('bankBudget.log.length') === lines0,
       'and it stays out when the bank posts it, with another amount');
+    eq(L.w.eval('totalBalance()'), 549.5, 'while the total follows the bank');
 
     const exported = L.w.eval('JSON.stringify(compressState(gatherState()))');
     ok(/"bb":\{"o":1,"i":\{/.test(exported) && /"b":"n-chipotle-posted"/.test(exported), 'Export keeps the sync point and which purchases came from the bank');
@@ -705,12 +722,13 @@ async function sealV1(payload) {
     const total = L.w.eval('totalBalance()');
     L.w.eval(`budget.lastDate = '${yesterday}'`);
     L.w.eval('budgetRollover()');
-    ok(L.w.eval('budget.initial') === total && purchases(L).length === 0, 'a new day carries the total balance over as it is: no daily budget added, the bank moves it');
+    ok(L.w.eval('budget.initial') === total && total === 549.5 && purchases(L).length === 0, 'a new day starts from the bank\'s balance: no daily budget added, the bank moves it');
 
     await sleep(1500);                                                       // the rollover reaches the phone
     L.w.openSettings('bank');
     toggle().click();
     ok(!L.w.eval('bankBudget.on') && !L.w.eval('budgetFollowsBank()'), 'turned off: Budget stops following the bank');
+    ok(L.w.eval('totalBalance()') === 549.5 && !bud(L).querySelector('[data-bfield="initial"]').readOnly, 'the total stays where it was, Budget\'s own again: the initial balance can be typed');
     ok(!bud(L).querySelector('.budget-bank-note'), 'and From your bank goes away');
     ok(await until(() => !P.w.eval('bankBudget.on'), 3000), 'on the phone too, through sync');
     W.plaid.changeTransactions(access, { added: [tx('n-off', 9, today, 'Lunch while off')] });
@@ -722,6 +740,10 @@ async function sealV1(payload) {
     ok(L.w.eval('bankBudget.on') && L.w.eval('bankBudget.items')[itemId].since === today && L.w.eval('bankBudget.items')[itemId].seen['n-off'],
       'turned on again: a new sync point, counting what the bank shows now');
     ok(!purchases(L).some(p => p.bank === 'n-off'), 'so the lunch from while it was off is taken as already in the balance');
+    ok(L.w.eval('totalBalance()') === 549.5 && L.w.eval('budget.initial') === 549.5, 'the total is the bank\'s again, and the day starts from it');
+    L.w.eval('budget.initial = 1');                                           // another copy merged in with an older start of the day
+    await refresh(L);
+    ok(L.w.eval('budget.initial') === 549.5 && L.w.eval('totalBalance()') === 549.5, 'the next refresh takes the start of the day again');
 
     /* a refresh on a device that closed before its Budget changes reached the account */
     await sleep(1500);

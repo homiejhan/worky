@@ -1,16 +1,20 @@
-/* bankbudget.js — New bank transactions, logged in Budget. Pure functions over
- * plain data, so tests import this file directly and budget.js applies the result.
+/* bankbudget.js — Budget following the bank. Pure functions over plain data, so
+ * tests import this file directly and budget.js applies the result.
  *
- * The sync point. The first time Budget sees a bank connection whose history
- * Plaid has finished gathering, it takes Budget's balance to match the bank's
- * at that moment: every transaction it can see then counts as already in the
- * balance. From then on each new transaction on a spending (checking) account
- * is logged:
+ * The balance. Budget's total balance is the bank's own balance over the
+ * accounts it follows (bankBalance), so it can't drift from the bank's, and the
+ * day starts from what that balance was when the day began (budget.js).
+ *
+ * The transactions say what the day's spending is. The first time Budget sees a
+ * bank connection whose history Plaid has finished gathering (the sync point),
+ * every transaction it can see then counts as already in the balance. From then
+ * on each new transaction on a spending (checking) account is logged:
  *   • money out dated today → a purchase under Purchases today, marked as from
  *     the bank (or the purchase typed by hand today for the same amount, now
  *     matched to it, so it isn't counted twice);
- *   • money in, and money out dated an earlier day → the total balance, with a
- *     line under From your bank.
+ *   • money in, and money out dated an earlier day → a line under From your
+ *     bank (the bank's balance has it already; with no balance from the bank,
+ *     it moves Budget's own: `balance` below).
  * A pending charge that posts is the same purchase: only a change in the amount
  * (a tip) is logged. A pending charge the bank drops is given back.
  *
@@ -27,6 +31,29 @@ const canon = v => (Array.isArray(v) ? v.map(canon)
 
 /* The accounts Budget follows: where day-to-day money comes and goes. */
 export function bankSpendingAccount(a) { return !!a && a.type === 'depository' && SPENDING.has(a.subtype); }
+
+/* The balance Budget's total follows: the bank's own, over the accounts it
+ * follows, each one's available balance (pending charges taken off, as the bank
+ * counts what you can spend), or its current balance where the bank gives no
+ * available one. null while no followed account has a balance. */
+const accountBalance = a => (Number.isFinite(a.available) ? a.available : Number.isFinite(a.current) ? a.current : null);
+export function bankBalance(items = []) {
+  let sum = 0, any = false;
+  for (const item of items) {
+    for (const a of (item && item.accounts) || []) {
+      if (!bankSpendingAccount(a) || accountBalance(a) === null) continue;
+      sum += accountBalance(a);
+      any = true;
+    }
+  }
+  return any ? round2(sum) : null;
+}
+/* Which accounts that balance is of: when they change (a bank connected or
+ * disconnected), the start of the day is taken again. */
+export function bankBalanceKey(items = []) {
+  return items.flatMap(item => ((item && item.accounts) || [])
+    .filter(a => bankSpendingAccount(a) && accountBalance(a) !== null).map(a => `${item.id}/${a.id}`)).sort().join(',');
+}
 
 /* Plaid has gathered the history the sync point should hold. */
 export function bankItemReady(item) {

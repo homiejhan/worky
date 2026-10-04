@@ -49,7 +49,7 @@ import { normalizeShiftCals, setShiftCals, shiftCals } from './gcal.js';
  *   shiftCals→sc  { calId: { shift, wage } } per Google calendar (see gcal.js)
  *   runway→rw {p: payday, r: repeat, b: bills [{i: id, n: name, a: amount, d: day}]} (see budget.js)
  *   purchase: id→i title→t amount→a bank→b pending→pd   (a purchase logged from the bank)
- *   bankBudget→bb {o: on (0 = off), i: items, l: log}    (bank transactions in Budget, see budget.js)
+ *   bankBudget→bb {o: on (0 = off), i: items, l: log, a: anchor {d: day, k: key, s: start}}    (Budget following the bank, see budget.js)
  *   digest: enabled→en last→l {at, md, n, m, s} clearedAt→ca   (see digest.js)
  */
 export function compressState(st) {
@@ -111,8 +111,9 @@ export function compressState(st) {
     ...(st.runway && (st.runway.payday || st.runway.bills.length)
       ? { rw: { p: st.runway.payday, r: st.runway.repeat, b: st.runway.bills.map(b => ({ i: b.id, n: b.name, a: b.amount, d: b.day })) } }
       : {}),
-    ...(st.bankBudget && (!st.bankBudget.on || Object.keys(st.bankBudget.items).length || st.bankBudget.log.length)
-      ? { bb: { o: st.bankBudget.on ? 1 : 0, i: st.bankBudget.items, l: st.bankBudget.log } }
+    ...(st.bankBudget && (!st.bankBudget.on || Object.keys(st.bankBudget.items).length || st.bankBudget.log.length || st.bankBudget.anchor)
+      ? { bb: { o: st.bankBudget.on ? 1 : 0, i: st.bankBudget.items, l: st.bankBudget.log,
+        ...(st.bankBudget.anchor ? { a: { d: st.bankBudget.anchor.day, k: st.bankBudget.anchor.key, s: st.bankBudget.anchor.start } } : {}) } }
       : {}),
     cal: { ce: cEvents, ct: (st.calendar.calTemplates||[]).map(cCalEv), cec: st.calendar.calEventIdCtr },
   };
@@ -164,7 +165,7 @@ function decompressState(c) {
     digest: decompressDigest(c.dg),
     shiftCals: normalizeShiftCals(c.sc),
     runway: normalizeRunway(c.rw ? { payday: c.rw.p, repeat: c.rw.r, bills: (c.rw.b || []).map(b => ({ id: b.i, name: b.n, amount: b.a, day: b.d })) } : null),
-    bankBudget: normalizeBankBudget(c.bb ? { on: c.bb.o !== 0, items: c.bb.i, log: c.bb.l } : null),
+    bankBudget: normalizeBankBudget(c.bb ? { on: c.bb.o !== 0, items: c.bb.i, log: c.bb.l, anchor: c.bb.a ? { day: c.bb.a.d, key: c.bb.a.k, start: c.bb.a.s } : null } : null),
     calendar: { calEvents: dEvents, calTemplates: (c.cal.ct||[]).map(dCalEv), calEventIdCtr: c.cal.cec || 1 },
   };
 }
@@ -249,7 +250,7 @@ export function gatherState() {
     digest: digestRecord(),
     shiftCals: normalizeShiftCals(shiftCals),
     runway: normalizeRunway(runway),
-    bankBudget: { on: bankBudget.on, items: bankBudget.items, log: bankBudget.log },
+    bankBudget: { on: bankBudget.on, items: bankBudget.items, log: bankBudget.log, ...(bankBudget.anchor ? { anchor: bankBudget.anchor } : {}) },
     calendar: { calEvents, calTemplates, calEventIdCtr },
   };
 }
