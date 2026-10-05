@@ -780,7 +780,7 @@ function digestInline(s) {
   let t = escAttr(s);
   const codes = [];
   t = t.replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
-  t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, txt, url) => `<a href="${url}" target="_blank" rel="noopener">${txt}</a>`);
+  t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, txt, url) => `<a href="${url}" target="_blank" rel="noopener"${txt.length <= 14 ? ' class="dg-ext"' : ''}>${txt}</a>`);
   t = t.replace(/(^|[\s(])((https?:\/\/)[^\s<)]+)/g, (_, pre, url) => `${pre}<a href="${url}" target="_blank" rel="noopener">${url.length > 60 ? url.slice(0, 57) + '…' : url}</a>`);
   t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   t = t.replace(/(^|[\s(])_([^_]+)_(?=[\s.,;:!?)]|$)/g, '$1<em>$2</em>');
@@ -814,8 +814,11 @@ function digestRenderMd(md) {
       const head = splitRow(line); i += 2;
       const rows = [];
       while (i < lines.length && lines[i].includes('|') && lines[i].trim()) { rows.push(splitRow(lines[i])); i++; }
-      out.push('<table><thead><tr>' + head.map(c => `<th>${digestInline(c)}</th>`).join('') + '</tr></thead><tbody>' +
-        rows.map(r => '<tr>' + head.map((_, k) => `<td>${digestInline(r[k] || '')}</td>`).join('') + '</tr>').join('') + '</tbody></table>');
+      /* 3+ columns: a phone shows each row as its own block, labelled by the header (CSS) */
+      const colName = c => escAttr(c.replace(/[*_`]/g, '').trim());
+      const nil = c => /^(?:—|–|-|n\/a)?$/i.test(c.trim());
+      out.push(`<div class="dg-table${head.length >= 3 ? ' dg-stack' : ''}"><table><thead><tr>` + head.map(c => `<th>${digestInline(c)}</th>`).join('') + '</tr></thead><tbody>' +
+        rows.map(r => '<tr>' + head.map((c, k) => `<td data-label="${colName(c)}"${nil(r[k] || '') ? ' class="dg-nil"' : ''}>${digestInline(r[k] || '')}</td>`).join('') + '</tr>').join('') + '</tbody></table></div>');
       continue;
     }
     if (/^\s*([-*+]|\d+[.)])\s+/.test(line)) {
@@ -840,7 +843,11 @@ function digestRenderMd(md) {
     }
     const buf = [];
     while (i < lines.length && lines[i].trim() && !/^(#{1,6}\s|```|\s*([-*+]|\d+[.)])\s+|\s*>)/.test(lines[i]) && !(lines[i].includes('|') && i + 1 < lines.length && isTableSep(lines[i + 1]))) buf.push(lines[i++].trim());
-    out.push(`<p>${digestInline(buf.join(' '))}</p>`);
+    const para = buf.join(' ');
+    const label = para.match(/^\*\*([^*]+)\*\*:?$/);                  // **TLDR AI** on its own: a sub-heading
+    if (label) out.push(`<h3 class="dg-sub">${digestInline(label[1])}</h3>`);
+    else if (/^(⚠️|⚠|❗|🚨|⏰)/u.test(para)) out.push(`<p class="dg-callout">${digestInline(para)}</p>`);
+    else out.push(`<p>${digestInline(para)}</p>`);
   }
   return out.join('');
 }
@@ -865,6 +872,33 @@ export function renderDigest() {
   ['digestContainer-d', 'digestContainer-m'].forEach(id => { const el = $(id); if (el) el.innerHTML = html; });
   if (html && digestShowing()) digestMarkSeen();
 }
+/* The digest's own shape: an overview ("Top of the inbox"), then one ##
+ * section per group of emails. Each becomes a card, its leading emoji the
+ * card's icon. (A # inside a code block is not a heading.) */
+function digestSections(md) {
+  const out = [];
+  let cur = { head: '', lines: [] }, code = false;
+  const push = () => { if (cur.head || cur.lines.some(l => l.trim())) out.push(cur); };
+  for (const line of String(md || '').replace(/\r\n?/g, '\n').split('\n')) {
+    if (/^```/.test(line)) code = !code;
+    const m = !code && line.match(/^#{1,2}\s+(.*)$/);
+    if (m) { push(); cur = { head: m[1].trim(), lines: [] }; } else cur.lines.push(line);
+  }
+  push();
+  return out.map(sec => {
+    const e = sec.head.match(/^((?:\p{Extended_Pictographic}|\p{Regional_Indicator})(?:\uFE0F|\u200D\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator})*)\s*(.*)$/u);
+    return { emoji: e ? e[1] : '', title: e ? e[2] : sec.head, body: sec.lines.join('\n') };
+  });
+}
+/* A tap on the page's contents scrolls the copy that is showing. */
+export function digestJump(n) {
+  const root = $(isMobileLayout() ? 'digestContainer-m' : 'digestContainer-d');
+  root?.querySelector(`[data-dg-sec="${n}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+const DG_QUIET = /^[\s_*]*nothing(?: new| to report| notable)?(?: today)?[\s_*.!]*$/i;
+function digestSecHead(emoji, title, extra = '') {
+  return `<h2 class="dg-sec-head">${emoji ? `<span class="dg-sec-ico" aria-hidden="true">${escAttr(emoji)}</span>` : ''}<span class="dg-sec-title">${digestInline(title)}</span>${extra}</h2>`;
+}
 function digestPageHtml() {
   const d = digestGet();
   if (!d.enabled) return '';
@@ -873,11 +907,25 @@ function digestPageHtml() {
   const hasToken = !!digestGithubToken();
   const runBtn = busy ? '' : `<button class="dg-btn" onclick="digestRunNow()" title="${hasToken ? 'Start the GitHub workflow now; the result arrives here in 15–40 minutes' : 'Add a GitHub token in Settings to run it from here'}">Run now</button>`;
   const gear = `<button class="dg-gear" onclick="openSettings(&quot;digest&quot;)" title="Digest settings: GitHub token, prompts and sections" aria-label="Digest settings">${DG_GEAR}</button>`;
-  let body;
-  if (last) body = `${digestTasksHtml()}<div class="dg-md">${digestRenderMd(last.markdown)}</div>`;
-  else if (busy) body = digestTasksHtml();
-  else body = `${digestTasksHtml()}
-      <div class="dg-empty">
+  const when = last ? new Date(last.at) : null;
+  const hero = `
+    <header class="dg-hero">
+      <div class="dg-hero-text">
+        <h1 class="page-title">Email digest</h1>
+        <p class="page-sub">${when ? escAttr(`${when.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })} \u00b7 ${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`) : 'The last day of your email, summed up every morning.'}</p>
+        ${last ? `<div class="dg-meta">${digestMetaLine(last).split(' \u00b7 ').slice(1).map(b => `<span>${escAttr(b)}</span>`).join('')}</div>` : ''}
+      </div>
+      <div class="dg-actions">${runBtn}${gear}</div>
+    </header>`;
+  const tasks = digestTasksHtml();
+  if (!last) {
+    return `
+    <div class="dg-page">
+      ${hero}
+      ${digestRunHtml()}
+      ${busy ? (tasks ? `<section class="dg-sec dg-sec-tasks">${tasks}</section>` : '') : `
+      <section class="dg-sec dg-empty">
+        ${tasks}
         <div class="dg-empty-text">${hasToken
           ? 'Nothing delivered yet. GitHub builds the digest every morning and it lands here through sync — or press Run now to start one.'
           : 'GitHub builds the digest every morning from the last day of Gmail and it lands here through sync. To start one yourself, add a GitHub token in Settings → Email Digest. It is saved to your account, so once covers all your devices.'}</div>
@@ -885,23 +933,45 @@ function digestPageHtml() {
           ${hasToken ? '' : '<button class="dg-btn" onclick="openSettings(&quot;digest&quot;)">Open Settings</button>'}
           <button class="dg-btn ghost" onclick="digestLoadSample()">See a sample</button>
         </div>
-      </div>`;
+      </section>`}
+    </div>`;
+  }
+  const secs = digestSections(last.markdown);
+  /* the overview comes first (the backend writes it there, whatever its
+   * heading says); a digest of one part leads only if that part is one */
+  const lead = secs.length > 1 || /top of the inbox|overview|summary/i.test(secs[0]?.title || '') ? secs.shift() : null;
+  const cards = [], toc = [];
+  if (lead) {
+    cards.push(`<section class="dg-sec dg-lead" data-dg-sec="0">${lead.title || lead.emoji ? digestSecHead(lead.emoji, lead.title) : ''}<div class="dg-md">${digestRenderMd(lead.body)}</div></section>`);
+    if (lead.title) toc.push([0, lead.emoji, lead.title]);
+  }
+  if (tasks) {
+    cards.push(`<section class="dg-sec dg-sec-tasks" data-dg-sec="1">${tasks}</section>`);
+    toc.push([1, '✅', 'Suggested tasks']);
+  } else {                                                          // nothing to add: one slim line
+    cards.push(`<section class="dg-sec dg-quiet dg-sec-tasks" data-dg-sec="1">${digestSecHead('✅', 'Suggested tasks', '<span class="dg-quiet-note">Nothing to add</span>')}</section>`);
+  }
+  secs.forEach((sec, k) => {
+    const n = k + 2;
+    if (sec.title && DG_QUIET.test(sec.body)) {                       // "_Nothing today_": one slim line, not in the contents
+      cards.push(`<section class="dg-sec dg-quiet" data-dg-sec="${n}">${digestSecHead(sec.emoji, sec.title, `<span class="dg-quiet-note">${escAttr(sec.body.replace(/[_*]/g, '').trim())}</span>`)}</section>`);
+      return;
+    }
+    cards.push(`<section class="dg-sec" data-dg-sec="${n}">${sec.title || sec.emoji ? digestSecHead(sec.emoji, sec.title) : ''}<div class="dg-md">${digestRenderMd(sec.body)}</div></section>`);
+    if (sec.title) toc.push([n, sec.emoji, sec.title]);
+  });
+  const tocHtml = toc.length > 2 ? `
+      <nav class="dg-toc" aria-label="In this digest">
+        <div class="dg-toc-label">In this digest</div>
+        ${toc.map(([n, emoji, title]) => `<button class="dg-toc-item" onclick="digestJump(${n})">${emoji ? `<span aria-hidden="true">${escAttr(emoji)}</span>` : ''}<span>${digestInline(title)}</span></button>`).join('')}
+      </nav>` : '';
   return `
     <div class="dg-page">
-      <div class="page-head">
-        <h1 class="page-title">Email digest</h1>
-        <p class="page-sub">The last day of your email, summed up every morning.</p>
-      </div>
-      <div class="home-card dg-card">
-        <div class="dg-head">
-          <div class="dg-title-wrap">
-            <div class="dg-title">${last ? 'Latest digest' : 'No digest yet'}</div>
-            ${last ? `<div class="dg-meta">${escAttr(digestMetaLine(last))}</div>` : ''}
-          </div>
-          <div class="dg-actions">${runBtn}${gear}</div>
-        </div>
-        ${digestRunHtml()}
-        ${body}
+      ${hero}
+      ${digestRunHtml()}
+      <div class="dg-layout${tocHtml ? ' has-toc' : ''}">
+        ${tocHtml}
+        <div class="dg-main">${cards.join('')}</div>
       </div>
     </div>`;
 }
@@ -933,7 +1003,7 @@ export function homeDigestButtonHtml() {
     </button>`;
 }
 
-/* ── suggested tasks: the pool, rendered above the summary ──
+/* ── suggested tasks: the pool, rendered under the overview ──
  * Pending ones stay until Add or Dismiss. Ones added since the last digest
  * stay visible (struck through) so the feedback is obvious; they drop off
  * the card on the next one. An added suggestion whose task the user later
@@ -961,7 +1031,7 @@ function digestOpenSuggestions() {
 }
 function digestTasksHtml() {
   const all = digestVisibleSuggestions();
-  if (!all.length && !(digestGet().last)) return '';
+  if (!all.length) return '';
   const dupes = digestDupMap(all);                                   // open suggestions that repeat an existing task
   const tasks = all.filter(t => !dupes.has(t.id)).concat(all.filter(t => dupes.has(t.id)));   // those sink to the bottom
   const remaining = tasks.filter(t => !digestTaskIsAdded(t) && !dupes.has(t.id));
@@ -992,10 +1062,10 @@ function digestTasksHtml() {
   return `
     <div class="dg-todos">
       <div class="dg-todos-head">
-        <div class="dg-todos-title">✅ Suggested tasks${tasks.length ? ` <span class="dg-todos-count">${countLabel}</span>` : ''}</div>
+        ${digestSecHead('✅', 'Suggested tasks', ` <span class="dg-todos-count">${countLabel}</span>`)}
         ${addAll}
       </div>
-      ${tasks.length ? rows : '<div class="dg-todos-empty">No open suggestions.</div>'}
+      ${rows}
     </div>`;
 }
 function digestTaskById(id) {

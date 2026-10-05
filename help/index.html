@@ -400,14 +400,14 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"</cod
       <h2>Email digest</h2>
       <p>The digest is optional and off until it's set up. Every morning around 6:30 (Central time), a GitHub Actions workflow in the <code>worky</code> repository reads the last day of Gmail, writes a short summary with a language model it runs itself, and delivers it to the <strong>Digest</strong> tab through <a href="#cloud">cloud sync</a>. Nothing on your device reads mail.</p>
       <ul>
-        <li><strong>The Digest tab</strong> is where you read it: the newest digest, when it came and from how many emails. <strong>Run now</strong> and the digest's settings (the gear) are at the top.</li>
+        <li><strong>The Digest tab</strong> is where you read it. The top says when the newest digest came and from how many emails, with <strong>Run now</strong> and the digest's settings (the gear) beside it. <strong>Top of the inbox</strong> comes first, then the suggested tasks, then a card for each section of your digest in its usual order. A section with nothing today shrinks to one line. <strong>In this digest</strong> lists the cards (a row of chips on a phone, a column on a wide screen); tap one to jump to it. On a phone, a wide table shows each row as its own block.</li>
         <li><strong>The Email digest button on Home</strong> opens the tab. It says <strong>New</strong> when a digest has arrived that you haven't opened on that device, and how many suggested tasks are waiting.</li>
-        <li><strong>Suggested tasks</strong> sit above the summary: <strong>Add</strong> makes one a Day by Day task with its date, <strong>×</strong> dismisses it, <strong>Add all</strong> takes them all.</li>
+        <li><strong>Suggested tasks</strong> come right after Top of the inbox: <strong>Add</strong> makes one a Day by Day task with its date, <strong>×</strong> dismisses it, <strong>Add all</strong> takes them all.</li>
         <li><strong>Settings → Email Digest</strong> turns the Digest tab on or off, and <strong>Load sample</strong> shows what a digest looks like. Settings → Sections decides whether it also sits on your phone's bottom bar.</li>
         <li>To start a digest now instead of waiting for the morning, add a GitHub token under <strong>Run it from any device</strong> and press <strong>Run now</strong>. The token is saved to your cloud sync account, so you add it once and every device signed in to that account can use Run now. <strong>Remove</strong> takes it off all of them.</li>
       </ul>
       <figure class="small">
-        <img src="img/digest.webp" width="390" height="844" loading="lazy" alt="The Digest tab on a phone with sample data: Email digest, Latest digest from 23 emails with Run now, four suggested tasks with Add buttons, and the summary starting with Top of the inbox.">
+        <img src="img/digest.webp" width="390" height="844" loading="lazy" alt="The Digest tab on a phone with sample data: Email digest with the date and 23 emails, Run now, a row of chips listing the cards, the Top of the inbox card, and suggested tasks with Add buttons.">
         <figcaption>The Digest tab, with sample data.</figcaption>
       </figure>
       <p>Setting it up for a copy of Focus is described in <a href="https://github.com/homiejhan/worky/blob/main/EMAIL_DIGEST.md" target="_blank" rel="noopener"><code>EMAIL_DIGEST.md</code></a>.</p>

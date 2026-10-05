@@ -35,7 +35,7 @@ import {
 import { applyTheme } from './theme.js';
 import {
   digestAddAllTasks, digestAddTask, digestDismissTask, digestLoadSample, digestRunActive,
-  digestRunDismiss, digestRunLoad, digestRunNow, digestRunPoll, digestUiLoad, renderDigest,
+  digestJump, digestRunDismiss, digestRunLoad, digestRunNow, digestRunPoll, digestUiLoad, renderDigest,
 } from './digest.js';
 import { bindStatic } from './bindings.js';
 import { applyStarterProfile, tourOffer } from './onboarding.js';
@@ -45,7 +45,7 @@ import { applyStarterProfile, tourOffer } from './onboarding.js';
  * window; tests/test_smoke.js fails if a handler names one that is missing. */
 Object.assign(window, {
   addDbdTask, addTask, changeTimerColor, changeTodoColor, commitEditTimer, digestAddAllTasks,
-  digestAddTask, digestDismissTask, digestLoadSample, digestRunDismiss, digestRunNow,
+  digestAddTask, digestDismissTask, digestJump, digestLoadSample, digestRunDismiss, digestRunNow,
   gcalToggleCal, homeInsightGo, openBudgetTab, openDigestTab, openScheduleModal,
   openSettings, openTaskLinkModal, refreshSyncBadges, removeDbdTask, removeFormatDaily,
   removeFormatTimer, removeTask, removeTodoList, resetTimer, retagListTask, setDbdDue,

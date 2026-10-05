@@ -80,25 +80,97 @@ console.log('\n── 2. Settings toggle shows the Digest tab; empty state expla
   eq(savedDigest(w).enabled, true, 'enabled persisted');
 }
 
-console.log('\n── 3. Sample digest renders every section, tables, code, task list ──');
+console.log('\n── 3. Sample digest: the overview leads, then suggested tasks, then a card per section ──');
 {
   const { w, d } = await boot();
   w.digestLoadSample();
-  const md = d.querySelector('#digestContainer-d .dg-md');
-  ok(md, 'markdown body rendered');
-  eq(md.querySelectorAll('h2').length, 6, 'six h2 headings (overview + 5 sections; actions became suggested tasks)');
-  ok(md.querySelector('table'), 'job table rendered');
-  eq(md.querySelectorAll('table tbody tr').length, 3, 'three job rows');
-  ok(md.querySelector('pre code'), 'ASCII diagram in code block');
-  eq(md.querySelectorAll('li.dg-task').length, 0, 'no checklist items in the markdown any more');
+  const page = d.querySelector('#digestContainer-d .dg-page');
+  ok(page.querySelector('.dg-md'), 'markdown body rendered');
+  const cards = [...page.querySelectorAll('.dg-main > .dg-sec')];
+  eq(cards.length, 7, 'seven cards: the overview, suggested tasks and the five sections');
+  ok(cards[0].classList.contains('dg-lead'), 'Top of the inbox leads, in its own highlighted card');
+  eq(cards[0].querySelector('.dg-sec-title').textContent, 'Top of the inbox', 'its heading loses the emoji…');
+  eq(cards[0].querySelector('.dg-sec-ico').textContent, '🔝', '…which becomes the card\'s icon');
+  ok(cards[1].classList.contains('dg-sec-tasks') && cards[1].querySelectorAll('.dg-todo').length === 4, 'the four suggested tasks come right after it');
+  eq(cards.slice(2).map(c => c.querySelector('.dg-sec-title').textContent).join(' | '),
+    'Tech News (TLDR) | ByteByteGo | Other Newsletters | Job Application Updates | Miscellaneous', 'then the sections, in the digest\'s own order');
+  eq(cards[5].querySelector('.dg-sec-ico').textContent, '💼', 'each section keeps its emoji as the icon');
+  eq(page.querySelectorAll('.dg-md h2').length, 0, 'section headings are card headings, not part of the text');
+  eq([...page.querySelectorAll('.dg-md h3.dg-sub')].map(h => h.textContent).join(' | '),
+    'TLDR | TLDR AI | Major concepts | How it works | Why it matters | Pragmatic Engineer | Medium Daily Digest', 'a bold line on its own becomes a sub-heading');
+  const callout = page.querySelector('.dg-md p.dg-callout');
+  ok(callout && callout.textContent.includes('Northwind Labs'), 'a line starting with ⚠️ stands out as a callout');
+  const table = page.querySelector('.dg-table.dg-stack > table');
+  ok(table, 'job table rendered in a frame of its own, marked to stack on a phone');
+  eq(table.querySelectorAll('tbody tr').length, 3, 'three job rows');
+  eq([...table.querySelectorAll('tbody tr:first-child td')].map(td => td.getAttribute('data-label')).join(','), 'Company,Role,Status,Action needed,Deadline', 'every cell carries its column name for the phone layout');
+  eq(table.querySelectorAll('td.dg-nil').length, 2, 'the two "—" cells are marked empty (left out on a phone)');
+  ok(page.querySelector('.dg-md pre code'), 'ASCII diagram in code block');
+  eq(page.querySelectorAll('li.dg-task').length, 0, 'no checklist items in the markdown any more');
   eq(d.querySelectorAll('#digestContainer-d .dg-todo').length, 4, 'four suggested-task rows instead');
-  ok(md.querySelector('a[href="https://example.com/pg18-async"]'), 'markdown link rendered');
-  eq(md.querySelector('a').getAttribute('target'), '_blank', 'links open in a new tab');
-  ok(d.querySelector('.dg-meta').textContent.includes('sample data'), 'meta line says sample data');
-  ok(d.querySelector('.dg-meta').textContent.includes('23 emails'), 'meta line shows count');
+  const link = page.querySelector('.dg-md a[href="https://example.com/pg18-async"]');
+  ok(link, 'markdown link rendered');
+  eq(link.getAttribute('target'), '_blank', 'links open in a new tab');
+  ok(link.classList.contains('dg-ext'), 'a short link ("Read") is marked as leaving the app');
+  const toc = [...page.querySelectorAll('.dg-layout.has-toc > .dg-toc .dg-toc-item')];
+  eq(toc.map(b => b.querySelector('span:last-child').textContent).join(' | '),
+    'Top of the inbox | Suggested tasks | Tech News (TLDR) | ByteByteGo | Other Newsletters | Job Application Updates | Miscellaneous', '"In this digest" lists every card');
+  eq(toc.map(b => b.getAttribute('onclick')).join(','), cards.map(c => `digestJump(${c.dataset.dgSec})`).join(','), 'each entry jumps to its card');
+  const when = new Date(w.digestGet().last.at);
+  eq(page.querySelector('.dg-hero .page-sub').textContent.split(' · ')[0], when.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }), 'the date of the digest sits under the title');
+  eq([...d.querySelectorAll('#digestContainer-d .dg-meta span')].map(s => s.textContent).join(','), '23 emails,sample data', 'chips: how many emails, and that it is sample data');
   eq(savedDigest(w).last.source, 'sample', 'sample persisted to state');
   d.getElementById('settingsBtn').click();
   eq(d.getElementById('digestClearBtn').style.display, '', 'Clear digest button visible once a digest exists');
+}
+
+console.log('\n── 3b. Quiet sections, a digest without headings, a run with nothing yet, jumping ──');
+{
+  const { w, d } = await boot();
+  w.eval('syncReconciled = true');
+  w.digestInboxSeen({ at: Date.now(), count: 4, model: 'qwen3.5-4b', source: 'github', tasks: [],
+    markdown: '## 🔝 Top of the inbox\n4 emails.\n\n## 📰 Tech News (TLDR)\n_Nothing today_\n\n## 🏗️ ByteByteGo\nNothing new today.\n\n## 📬 Miscellaneous\n- **Mom** — dinner Sunday\n\n| Item | Cost |\n|---|---|\n| Rent | $900 |' });
+  const page = d.querySelector('#digestContainer-d .dg-page');
+  const quiet = [...page.querySelectorAll('.dg-sec.dg-quiet:not(.dg-sec-tasks)')];
+  eq(quiet.map(c => c.querySelector('.dg-sec-title').textContent).join(','), 'Tech News (TLDR),ByteByteGo', 'a section with nothing today shrinks to one line');
+  eq(quiet.map(c => c.querySelector('.dg-quiet-note').textContent).join(','), 'Nothing today,Nothing new today.', 'saying what the digest said');
+  eq(page.querySelectorAll('.dg-quiet .dg-md').length, 0, 'with no body under it');
+  const none = page.querySelector('.dg-sec-tasks');
+  ok(none && none.classList.contains('dg-quiet') && none.querySelector('.dg-quiet-note').textContent === 'Nothing to add' && !none.querySelector('.dg-todo'), 'no suggested tasks: that card shrinks to one line too');
+  eq([...page.querySelectorAll('.dg-toc-item')].length, 0, 'two cards worth reading: no contents');
+  ok(!page.querySelector('.dg-layout.has-toc'), 'and no room kept for them');
+  ok(page.querySelector('.dg-table:not(.dg-stack) table'), 'a two-column table stays a table on a phone');
+  ok(page.querySelector('.dg-meta').textContent.includes('GitHub'), 'chips say it came from GitHub');
+
+  w.digestInboxSeen({ at: Date.now() + 1, count: 2, model: 'm', source: 'github', tasks: [], markdown: '## 🌅 Morning brief\nAll quiet.\n\n## 📬 Miscellaneous\n- **Mom** — dinner Sunday' });
+  const renamed = d.querySelector('#digestContainer-d .dg-main > .dg-sec');
+  ok(renamed.classList.contains('dg-lead') && renamed.querySelector('.dg-sec-title').textContent === 'Morning brief', 'the overview leads whatever its heading says');
+
+  w.digestInboxSeen({ at: Date.now() + 2, count: 1, model: 'm', source: 'github', tasks: [], markdown: 'Just one line, no headings.' });
+  const only = [...d.querySelectorAll('#digestContainer-d .dg-main > .dg-sec:not(.dg-sec-tasks)')];
+  eq(only.length, 1, 'a digest with no headings is one card');
+  ok(!only[0].querySelector('.dg-sec-head') && only[0].querySelector('.dg-md').textContent === 'Just one line, no headings.', 'with the text and no heading');
+  ok(!only[0].classList.contains('dg-lead'), 'and not dressed up as the overview');
+
+  w.digestClearLast();
+  w.eval('digestRun = { requestedAt: Date.now(), status: "in_progress", startedAt: Date.now() }'); w.renderDigest();
+  ok(d.querySelector('#digestContainer-d .dg-run'), 'a run in progress shows its status');
+  eq(d.querySelectorAll('#digestContainer-d .dg-sec').length, 0, 'and no empty card under it');
+  w.eval('digestRun = null'); w.renderDigest();
+  ok(d.querySelector('#digestContainer-d .dg-sec.dg-empty'), 'back to the empty card once the run is gone');
+
+  w.digestLoadSample();
+  const scrolled = [];
+  w.HTMLElement.prototype.scrollIntoView = function () { scrolled.push(this); };
+  w.eval('isMobileLayout = () => false');
+  w.digestJump(5);
+  ok(scrolled.length === 1 && scrolled[0] === d.querySelector('#digestContainer-d [data-dg-sec="5"]'), 'on a computer, a contents entry scrolls the desktop copy');
+  w.eval('isMobileLayout = () => true');
+  w.digestJump(1);
+  ok(scrolled.length === 2 && scrolled[1] === d.querySelector('#digestContainer-m [data-dg-sec="1"]'), 'on a phone, the copy in the Digest tab');
+  w.digestJump(99);
+  eq(scrolled.length, 2, 'a card that is not there: nothing happens');
+  w.eval('isMobileLayout = () => false');
 }
 
 console.log('\n── 4. Renderer is safe: raw HTML and javascript: links are neutralised ──');

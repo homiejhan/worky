@@ -75,7 +75,14 @@ workflow are documented in [`backend/README.md`](backend/README.md).
 
 **Digest tab** (a sidebar page on a computer, a tab on a phone)
 - The newest digest, with **Run now** and a gear for Settings → Email Digest.
-- Suggested tasks sit above the summary until you **Add** (becomes a Day by Day
+- The page follows the digest's own shape: the "Top of the inbox" overview leads,
+  suggested tasks follow, then a card per `##` section in the order the backend
+  wrote them, its leading emoji as the card's icon. A section whose whole body is
+  "Nothing today" shrinks to one line. A bold line on its own is a sub-heading, a
+  line starting with ⚠️ is a callout, and on a phone a table of 3+ columns shows
+  each row as a block. "In this digest" lists the cards (chips on a phone, a
+  sticky column on a wide screen) and jumps to them.
+- Suggested tasks sit under the overview until you **Add** (becomes a Day by Day
   task with the digest's due date, else today) or **Dismiss** (hidden, and the same
   title isn't re-suggested for two weeks). A dismissed or added title survives
   across runs; an added task you later delete is offered again.
