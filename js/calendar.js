@@ -22,6 +22,7 @@ import {
   gcalReconcileDay, gcalShiftCalendars, gcalSyncAll, gcalUpdateEvent,
 } from './gcal.js';
 import { budgetDesktopOpen, budgetToggleDesktop, money } from './budget.js';
+import { digestDesktopOpen, digestToggleDesktop } from './digest.js';
 import {
   isShift, normalizeWage, shiftAppIn, shiftMinutes, shiftPay, shiftReason, shiftsOnDays, sumShifts,
 } from './shifts.js';
@@ -537,6 +538,7 @@ export function calNavDay(dir) {
 export function calToggleDesktop() {
   if (!calDesktopOpen && homeDesktopOpen) homeToggleDesktop(false);
   if (!calDesktopOpen && budgetDesktopOpen) budgetToggleDesktop(false);
+  if (!calDesktopOpen && digestDesktopOpen) digestToggleDesktop(false);
   calDesktopOpen = !calDesktopOpen;
   const panel   = $('calDesktopPanel');
   const tab     = $('calDesktopNavTab');

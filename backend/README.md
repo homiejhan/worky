@@ -4,7 +4,7 @@ The email digest, running on GitHub's free Actions runner instead of your laptop
 Once a day the workflow restores a 4-bit Qwen3.5-4B (2.7 GB) from cache, starts
 `llama-server` on the runner, reads the last 24 hours of Gmail, builds the digest
 (five sections by default, see below), and drops the result into Firebase. The app
-merges it into the digest card and suggestion pool the next time it syncs.
+merges it into the Digest tab and suggestion pool the next time it syncs.
 No paid API is involved; the recurring cost is $0.
 
 ```
@@ -43,7 +43,7 @@ Routing is `classify()`: an email goes to the first section, top to bottom, whos
 
 Edit all of this from the app under **Settings → Email Digest → Prompts**: rename, reorder, add and delete sections, change keywords and prompts. Edits are saved to `users/<uid>/digestPrompts` (`{rules?, overview?, tasks?, sections?, updatedAt}`) and read at the start of every run, so the next run picks them up with no commit. A prompt is stored only when it differs from the original; the section list is stored whole once anything about it changes. **Reset to original** restores one prompt or section, **Restore all originals** clears the node, and **Export .md** / **Import .md** move the whole set through a Markdown file (one `## Section:` block per section). Changing `prompts.json` itself changes the originals for both the script and the editor.
 
-If the saved edits can't be read, the run logs it and falls back to the originals rather than failing. A `--dry-run` still reads your saved edits when the Firebase secrets are set, so it's the way to try a new prompt without replacing the digest on your Home card.
+If the saved edits can't be read, the run logs it and falls back to the originals rather than failing. A `--dry-run` still reads your saved edits when the Firebase secrets are set, so it's the way to try a new prompt without replacing the digest in the app.
 
 ## One-time setup (about 15 minutes)
 

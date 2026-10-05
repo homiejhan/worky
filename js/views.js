@@ -4,10 +4,13 @@ import { $, isMobileLayout } from './util.js';
 import { homeDesktopOpen, homeToggleDesktop, renderHome } from './home.js';
 import { calDesktopOpen, calRenderMobile, calToggleDesktop } from './calendar.js';
 import { budgetDesktopOpen, budgetToggleDesktop, renderBudget } from './budget.js';
+import { digestDesktopOpen, digestOn, digestToggleDesktop, renderDigest } from './digest.js';
 
 /* view visibility — which sections appear in the UI, in tab-bar order.
- * 'home' is always on and is not stored. On mobile every view is one swipe
- * panel, and currentView holds the key of the one showing. */
+ * 'home' is always on and is not stored; 'digest' is on while the email
+ * digest is (digest.enabled, digest.js), so it isn't stored here either. On
+ * mobile every view is one swipe panel, and currentView holds the key of the
+ * one showing. */
 export const VIEW_DEFS = [
   { key: 'home',     label: 'Home' },
   { key: 'timers',   label: 'Timers' },
@@ -15,6 +18,7 @@ export const VIEW_DEFS = [
   { key: 'daily',    label: 'Daily' },
   { key: 'calendar', label: 'Calendar' },
   { key: 'budget',   label: 'Budget' },
+  { key: 'digest',   label: 'Digest' },
 ];
 export let views = { timers: true, daily: true, lists: true, calendar: true, budget: true };
 export function setViews(v) { views = v; }
@@ -22,12 +26,12 @@ export let currentView = 'home';
 
 /* Desktop: Lists and Daily are separate pages that share the right panel.
  * desktopPage says which one it shows whenever no overlay (Home, Calendar,
- * Budget) is covering it. */
+ * Budget, Digest) is covering it. */
 let desktopPage = 'lists';
 
 /* Keep the sidebar nav in step with whichever desktop panel is showing. */
 export function desktopNavSync() {
-  const base = !homeDesktopOpen && !calDesktopOpen && !budgetDesktopOpen;
+  const base = !homeDesktopOpen && !calDesktopOpen && !budgetDesktopOpen && !digestDesktopOpen;
   const rp = $('rightPanel');
   if (rp) rp.dataset.page = desktopPage;          // CSS shows the matching .page-* blocks
   const listsTab = $('listsDesktopNavTab');
@@ -40,6 +44,7 @@ export function showDesktopPage(page) {
   desktopPage = page === 'daily' ? 'daily' : 'lists';
   if (calDesktopOpen) calToggleDesktop();
   if (budgetDesktopOpen) budgetToggleDesktop(false);
+  if (digestDesktopOpen) digestToggleDesktop(false);
   homeToggleDesktop(false);                       // ends in desktopNavSync()
   const rp = $('rightPanel');
   if (rp) rp.scrollTop = 0;
@@ -68,6 +73,7 @@ export function viewsOffList(v) {
 export function viewEnabled(key) {
   if (!key) return true;
   if (key === 'home') return true;              // Home can never be turned off
+  if (key === 'digest') return digestOn();
   return views[key] !== false;
 }
 function visibleViews() { return VIEW_DEFS.filter(v => viewEnabled(v.key)); }
@@ -84,12 +90,13 @@ export function applyViewVisibility() {
   });
   if (!viewEnabled('calendar') && calDesktopOpen)   calToggleDesktop();
   if (!viewEnabled('budget')   && budgetDesktopOpen) budgetToggleDesktop(false);
+  if (!viewEnabled('digest')   && digestDesktopOpen) digestToggleDesktop(false);
   /* The right panel shows Lists or Daily. If the page it is on was just
    * switched off, fall over to the other one — or Home when both are off. */
   if (!viewEnabled(desktopPage)) {
     const other = desktopPage === 'lists' ? 'daily' : 'lists';
     if (viewEnabled(other)) desktopPage = other;
-    else if (!homeDesktopOpen && !calDesktopOpen && !budgetDesktopOpen) homeToggleDesktop(true);
+    else if (!homeDesktopOpen && !calDesktopOpen && !budgetDesktopOpen && !digestDesktopOpen) homeToggleDesktop(true);
   }
   desktopNavSync();
   if (!panelEnabled(currentView)) currentView = 'home';
@@ -141,6 +148,7 @@ export function goTab(key, animate) {
   if (key === 'calendar') calRenderMobile({ fresh: true });   // opening the tab starts at 7am
   if (key === 'home')     renderHome();
   if (key === 'budget')   renderBudget();
+  if (key === 'digest')   renderDigest();
 }
 
 /* Total-balance chip on Home opens Budget on whichever layout is active. */
@@ -148,6 +156,12 @@ export function openBudgetTab() {
   if (!viewEnabled('budget')) return;
   if (isMobileLayout()) goTab('budget', true);
   else budgetToggleDesktop(true);
+}
+/* So does the Email digest button, the Digest tab. */
+export function openDigestTab() {
+  if (!viewEnabled('digest')) return;
+  if (isMobileLayout()) goTab('digest', true);
+  else digestToggleDesktop(true);
 }
 
 export function initSwipe() {

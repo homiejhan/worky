@@ -81,6 +81,12 @@
         </span>
         Budget
       </button>
+      <button class="cal-nav-tab nav-digest" id="digestDesktopNavTab" data-view="digest">
+        <span class="nav-ico" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1.8" y="3.4" width="12.4" height="9.2" rx="1.9" stroke="currentColor" stroke-width="1.5"/><path d="M2.4 4.7L8 8.9l5.6-4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        Digest
+      </button>
     </nav>
     <button class="cal-week-mode-btn" id="calWeekModeBtn">Sun – Sat</button>
 
@@ -168,6 +174,10 @@
     <button class="tab-btn tab-budget" id="tab-5" data-view="budget">
       <span class="tab-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="4" width="13" height="9.5" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M1.5 7h13" stroke="currentColor" stroke-width="1.5"/><circle cx="11" cy="10.4" r="1.1" fill="currentColor"/></svg></span>
       <span class="tab-lbl">Budget</span>
+    </button>
+    <button class="tab-btn tab-digest" id="tab-6" data-view="digest">
+      <span class="tab-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><rect x="1.8" y="3.4" width="12.4" height="9.2" rx="1.9" stroke="currentColor" stroke-width="1.5"/><path d="M2.4 4.7L8 8.9l5.6-4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span class="tab-lbl">Digest</span>
     </button>
   </nav>
 
@@ -267,6 +277,11 @@
         <div id="budgetContainer-m"></div>
       </section>
 
+      <!-- Tab 6: Email digest (on while the digest is) -->
+      <section class="swipe-panel" data-view="digest">
+        <div id="digestContainer-m"></div>
+      </section>
+
     </div>
   </div>
 </div>
@@ -279,6 +294,11 @@
 <!-- ════════ DESKTOP BUDGET PANEL ════════ -->
 <div class="home-desktop-panel" id="budgetDesktopPanel">
   <div class="home-col budget-col" id="budgetContainer-d"></div>
+</div>
+
+<!-- ════════ DESKTOP EMAIL DIGEST PANEL ════════ -->
+<div class="home-desktop-panel" id="digestDesktopPanel">
+  <div class="home-col digest-col" id="digestContainer-d"></div>
 </div>
 
 <!-- ════════ DESKTOP CALENDAR PANEL ════════ -->
@@ -475,7 +495,7 @@
       <section class="settings-section" data-settings-section="digest">
         <div id="digestSettings">
           <div class="settings-view-row">
-            <span class="settings-view-name">Show digest on Home</span>
+            <span class="settings-view-name">Show the Digest tab</span>
             <label class="gcal-toggle">
               <input type="checkbox" id="digestEnabledToggle">
               <span class="gcal-toggle-track"></span>

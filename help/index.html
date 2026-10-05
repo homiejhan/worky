@@ -128,7 +128,7 @@
       <ul>
         <li><strong>Keep it on your phone:</strong> on an iPhone, open Focus in Safari and choose Share → <strong>Add to Home Screen</strong>. On Android, open it in Chrome and choose <strong>Install app</strong> or <strong>Add to Home screen</strong> from the menu.</li>
         <li><strong>Your first visit</strong> loads the <strong>Working student</strong> setup: Study, Work and Sleep timers, Daily routines, a Deadlines list and a few blocks on the calendar. Change any of it in <a href="#formats">Formats</a>.</li>
-        <li><strong>Where things are:</strong> on a computer, the sidebar on the left has Home, Lists, Daily, Calendar and Budget, your timers, and at the bottom Formats, Settings (the gear), Export, Import and Reset the day. On a phone, the pages (and Timers) are tabs along the bottom; Formats, Settings and ⋯ (Export, Import, Reset the day) are at the top.</li>
+        <li><strong>Where things are:</strong> on a computer, the sidebar on the left has Home, Lists, Daily, Calendar and Budget (and Digest, with the <a href="#digest">email digest</a> on), your timers, and at the bottom Formats, Settings (the gear), Export, Import and Reset the day. On a phone, the pages (and Timers) are tabs along the bottom; Formats, Settings and ⋯ (Export, Import, Reset the day) are at the top.</li>
         <li><strong>The tour</strong> walks through every section one step at a time. Replay it from <strong>Settings → Help → Take the tour</strong>.</li>
       </ul>
       <figure>
@@ -139,7 +139,7 @@
 
     <section id="home">
       <h2>Home and Heads up</h2>
-      <p>Home gathers today in one place: how many of today's tasks are done, the tasks due today, what's on the calendar in the next four hours, your timers, and today's balance from the budget.</p>
+      <p>Home gathers today in one place: how many of today's tasks are done, the tasks due today, what's on the calendar in the next four hours, your timers, and today's balance from the budget. With the <a href="#digest">email digest</a> on, an <strong>Email digest</strong> button under the progress bar opens it.</p>
       <p><strong>Heads up</strong> cards appear only when something needs you, and each has a button that goes straight to where you fix it. Focus works these out from your own shifts, deadlines and cash, on your device.</p>
       <ul>
         <li><strong>A shift lands on a deadline:</strong> a paid shift in the next week falls in the 24 hours before something on your <strong>Deadlines</strong> list is due. Deadlines count as due at the end of their day.</li>
@@ -398,15 +398,17 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"</cod
 
     <section id="digest">
       <h2>Email digest</h2>
-      <p>The digest is optional and off until it's set up. Every morning around 6:30 (Central time), a GitHub Actions workflow in the <code>worky</code> repository reads the last day of Gmail, writes a short summary with a language model it runs itself, and delivers it to Home through <a href="#cloud">cloud sync</a>. Nothing on your device reads mail.</p>
+      <p>The digest is optional and off until it's set up. Every morning around 6:30 (Central time), a GitHub Actions workflow in the <code>worky</code> repository reads the last day of Gmail, writes a short summary with a language model it runs itself, and delivers it to the <strong>Digest</strong> tab through <a href="#cloud">cloud sync</a>. Nothing on your device reads mail.</p>
       <ul>
-        <li><strong>Suggested tasks</strong> sit at the top of the card: <strong>Add</strong> makes one a Day by Day task with its date, <strong>×</strong> dismisses it, <strong>Add all</strong> takes them all.</li>
-        <li><strong>Settings → Email Digest</strong> turns the card on or off, and <strong>Load sample</strong> shows what a digest looks like.</li>
+        <li><strong>The Digest tab</strong> is where you read it: the newest digest, when it came and from how many emails. <strong>Run now</strong> and the digest's settings (the gear) are at the top.</li>
+        <li><strong>The Email digest button on Home</strong> opens the tab. It says <strong>New</strong> when a digest has arrived that you haven't opened on that device, and how many suggested tasks are waiting.</li>
+        <li><strong>Suggested tasks</strong> sit above the summary: <strong>Add</strong> makes one a Day by Day task with its date, <strong>×</strong> dismisses it, <strong>Add all</strong> takes them all.</li>
+        <li><strong>Settings → Email Digest</strong> turns the Digest tab on or off (so does its switch under Settings → Sections), and <strong>Load sample</strong> shows what a digest looks like.</li>
         <li>To start a digest now instead of waiting for the morning, add a GitHub token under <strong>Run it from any device</strong> and press <strong>Run now</strong>. The token is saved to your cloud sync account, so you add it once and every device signed in to that account can use Run now. <strong>Remove</strong> takes it off all of them.</li>
       </ul>
       <figure class="small">
-        <img src="img/digest.webp" width="438" height="760" loading="lazy" alt="The Email digest card with sample data: 23 emails, four suggested tasks with Add buttons, and a summary starting with Top of the inbox.">
-        <figcaption>The digest card, with sample data.</figcaption>
+        <img src="img/digest.webp" width="390" height="844" loading="lazy" alt="The Digest tab on a phone with sample data: Email digest, Latest digest from 23 emails with Run now, four suggested tasks with Add buttons, and the summary starting with Top of the inbox.">
+        <figcaption>The Digest tab, with sample data.</figcaption>
       </figure>
       <p>Setting it up for a copy of Focus is described in <a href="https://github.com/homiejhan/worky/blob/main/EMAIL_DIGEST.md" target="_blank" rel="noopener"><code>EMAIL_DIGEST.md</code></a>.</p>
     </section>

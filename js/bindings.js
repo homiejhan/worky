@@ -25,7 +25,7 @@ import {
 import { budgetToggleDesktop } from './budget.js';
 import { syncBtnClick, syncChooseExport, syncChooseImport, syncCopiesOpen } from './sync.js';
 import { bindTheme } from './theme.js';
-import { bindDigest } from './digest.js';
+import { bindDigest, digestToggleDesktop } from './digest.js';
 import { bindTour } from './onboarding.js';
 
 /* ───────────────────────── STATIC BINDINGS ───────────────────────── */
@@ -53,6 +53,7 @@ export function bindStatic() {
     if (key) setViewEnabled(key, e.target.checked);
   });
   $('budgetDesktopNavTab')?.addEventListener('click', () => budgetToggleDesktop());
+  $('digestDesktopNavTab')?.addEventListener('click', () => digestToggleDesktop());
   $('calWeekModeBtn')?.addEventListener('click', e => { e.stopPropagation(); calToggleWeekMode(); });
   $('calNavPrev')?.addEventListener('click', () => calNavDay(-1));
   $('calNavNext')?.addEventListener('click', () => calNavDay(1));

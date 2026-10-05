@@ -1,5 +1,5 @@
-/* digest.js — Email digest: synced state, suggested tasks, delivery, Run now, the Home
- * card and its settings. */
+/* digest.js — Email digest: synced state, suggested tasks, delivery, Run now, its tab,
+ * the shortcut on Home, and its settings. */
 import {
   DIGEST_GITHUB_LS_KEY, DIGEST_GITHUB_REPO, DIGEST_GITHUB_WORKFLOW, DIGEST_RUN_LS_KEY,
   DIGEST_UI_LS_KEY,
@@ -10,8 +10,10 @@ import {
 import { saveToLocal } from './persistence.js';
 import { todoLists } from './lists.js';
 import { dbdById, dbdLabelFor, dbdTasks, dbdTodayKey, nextDbdId, renderDbd } from './dbd.js';
-import { homeToggleDesktop, renderHome } from './home.js';
-import { goTab } from './views.js';
+import { homeDesktopOpen, homeToggleDesktop, renderHome } from './home.js';
+import { applyViewVisibility, currentView, desktopNavSync, openDigestTab } from './views.js';
+import { calDesktopOpen, calToggleDesktop } from './calendar.js';
+import { budgetDesktopOpen, budgetToggleDesktop } from './budget.js';
 import { openSettings, renderSettings } from './settings.js';
 import {
   digestInboxLatest, setSyncQuietSave, syncHeld, syncPendingRemote, syncReconciled, syncRef, syncUser,
@@ -25,7 +27,8 @@ import { bindDigestPrompts, digestPromptRender } from './digest-prompts.js';
    reads the last day of Gmail with a stored refresh token, and delivers
    the result to Firebase at users/<uid>/digestInbox. This file only
    • merges a delivered digest into synced state (digestInboxSeen/Flush),
-   • shows it as a Home card with the suggested-task pool (Add / Dismiss),
+   • shows it on its own tab (Digest) with the suggested-task pool (Add /
+     Dismiss), and a button on Home that opens it,
    • and can ask GitHub to run the workflow right now, from any device
      signed in to the account the token is saved to.
    Nothing here reads mail or talks to a model.
@@ -386,7 +389,8 @@ export function digestInboxFlush() {
   const at = Number(inbox.at) || 0;
   const d = digestGet();
   if (at <= digestInboxHandledAt()) return;
-  d.enabled = true;                   // a delivery means the feature is in use; show the card
+  const wasOn = d.enabled;
+  d.enabled = true;                   // a delivery means the feature is in use; show the tab
   d.last = {
     at,
     markdown: String(inbox.markdown),
@@ -397,12 +401,12 @@ export function digestInboxFlush() {
   const tasks = digestNormalizeTasks(Array.isArray(inbox.tasks) ? inbox.tasks : [], false);
   const fresh = digestMergeSuggestions(tasks, at);
   digest = normalizeDigest(digest);   // canonical shape, same as after a reload
-  digestCollapsed = false;
   digestRunDelivered(at);             // a watched GitHub run is now complete end to end
   setSyncQuietSave(true);               // pushable, but must not look like a fresh user edit
   try { saveToLocal(); } finally { setSyncQuietSave(false); }
   renderSettings();
-  renderHome();
+  if (!wasOn) applyViewVisibility();
+  digestRepaint();
   const dupes = fresh ? digestDupMap(digestGet().suggestions.filter(x => x.status === 'pending' && x.at === at)).size : 0;
   showToast(fresh
     ? `Email digest ready ✓ ${fresh} new suggestion${fresh === 1 ? '' : 's'}${dupes ? ` · ${dupes} already on your lists` : ''}`
@@ -486,16 +490,59 @@ export function decompressDigest(c) {
   });
 }
 
-/* ── device-local UI state ── */
-let digestCollapsed = false;
+/* ── device-local UI state: the newest digest this device has shown on the
+ * Digest tab, so the button on Home can say a newer one is waiting ── */
+let digestSeenAt = 0;
 export function digestUiLoad() {
-  try { digestCollapsed = !!JSON.parse(localStorage.getItem(DIGEST_UI_LS_KEY))?.collapsed; } catch(e) {}
+  try { digestSeenAt = Number(JSON.parse(localStorage.getItem(DIGEST_UI_LS_KEY))?.seenAt) || 0; } catch(e) {}
 }
-export function digestToggleCollapsed() {
-  digestCollapsed = !digestCollapsed;
-  try { localStorage.setItem(DIGEST_UI_LS_KEY, JSON.stringify({ collapsed: digestCollapsed })); } catch(e) {}
-  renderHome();
+function digestMarkSeen() {
+  const at = digestGet().last ? digestGet().last.at : 0;
+  if (!at || at <= digestSeenAt) return;
+  digestSeenAt = at;
+  try { localStorage.setItem(DIGEST_UI_LS_KEY, JSON.stringify({ seenAt: at })); } catch(e) {}
 }
+function digestUnseen() {
+  const last = digestGet().last;
+  return !!(last && last.source !== 'sample' && last.at > digestSeenAt);
+}
+
+/* The Digest tab is on while the digest is (Settings → Email Digest, or
+ * Settings → Sections): one setting, synced, so every device shows the tab. */
+export function digestOn() { return !!(digest && digest.enabled); }
+export function digestSetEnabled(on) {
+  digestGet().enabled = !!on;
+  saveToLocal();
+  applyViewVisibility();         // the tab comes or goes (and Home redraws)
+  renderSettings();              // both switches show it
+  renderDigest();
+}
+
+/* Desktop: the Digest page covers the right panel, like Home and Budget. */
+export let digestDesktopOpen = false;
+export function digestToggleDesktop(force) {
+  const want = (typeof force === 'boolean') ? force : !digestDesktopOpen;
+  if (want) {
+    if (calDesktopOpen) calToggleDesktop();
+    if (homeDesktopOpen) homeToggleDesktop(false);
+    if (budgetDesktopOpen) budgetToggleDesktop(false);
+  }
+  digestDesktopOpen = want;
+  const panel = $('digestDesktopPanel');
+  const tab   = $('digestDesktopNavTab');
+  const rp    = $('rightPanel');
+  if (panel) panel.classList.toggle('active', digestDesktopOpen);
+  if (tab)   tab.classList.toggle('active', digestDesktopOpen);
+  if (rp)    rp.style.display = digestDesktopOpen ? 'none' : '';
+  if (digestDesktopOpen) renderDigest();
+  desktopNavSync();
+}
+/* Whether the Digest page is what this device is showing right now. */
+function digestShowing() {
+  return isMobileLayout() ? currentView === 'digest' : digestDesktopOpen;
+}
+/* The Digest page and the button on Home both show the digest's state. */
+function digestRepaint() { renderDigest(); renderHome(); }
 
 /* ── "Run now": ask GitHub to start the workflow from any signed-in device ──
  * Needs a fine-grained personal access token with Actions: Read and write
@@ -541,14 +588,14 @@ export function digestGithubSeen(node) {
     ? { token: typeof node.token === 'string' ? node.token.trim() : '', updatedAt: Number(node.updatedAt) || 0 }
     : null;
   digestGithubAdopt();
-  if (digestGithubToken() + '|' + digestGithubWhere() !== before) { renderHome(); digestRenderSettings(); }
+  if (digestGithubToken() + '|' + digestGithubWhere() !== before) { digestRepaint(); digestRenderSettings(); }
 }
 /* sync.js calls this when the account goes away: signed out, or another account signing in */
 export function digestGithubForget() {
   const had = !!(digestGithubSaved && digestGithubSaved.token);   // syncUser is already cleared by now
   digestGithubSaved = undefined;
   digestGithubAdoptTried = false;
-  if (had) renderHome();
+  if (had) digestRepaint();
 }
 /* A token an older build saved on this device moves into the account once:
  * only into the account the digest is delivered to (it has an inbox), since
@@ -582,7 +629,7 @@ function digestGithubWrite(token, { quiet = false } = {}) {
                                  : 'Could not save. Try again when you are online.');
       return false;
     })
-    .finally(() => { digestGithubWriting--; renderHome(); digestRenderSettings(); });
+    .finally(() => { digestGithubWriting--; digestRepaint(); digestRenderSettings(); });
 }
 function digestGithubHeaders() {
   const token = digestGithubToken();
@@ -620,7 +667,7 @@ export async function digestRunNow() {
   if (digestRunActive()) return;
   digestRun = { requestedAt: Date.now(), status: 'queued' };
   digestRunSave();
-  renderHome(); digestRenderSettings();
+  digestRepaint(); digestRenderSettings();
   try {
     const r = await fetch(digestGithubApi(`workflows/${DIGEST_GITHUB_WORKFLOW}/dispatches`), {
       method: 'POST',
@@ -639,7 +686,7 @@ export async function digestRunNow() {
     digestRun = { requestedAt: digestRun.requestedAt, status: 'completed', error: (e && e.message) || 'Could not reach GitHub.' };
     digestRunSave();
   }
-  renderHome(); digestRenderSettings();
+  digestRepaint(); digestRenderSettings();
 }
 function digestRunPollStart() {
   clearTimeout(digestRunTimer);
@@ -650,7 +697,7 @@ export async function digestRunPoll() {
   if (!digestRunActive()) return;
   if (Date.now() - digestRun.requestedAt > DIGEST_RUN_MAX_MS) {
     digestRun = { ...digestRun, status: 'completed', error: 'Stopped watching after 100 minutes. Check the run on GitHub.' };
-    digestRunSave(); renderHome(); digestRenderSettings();
+    digestRunSave(); digestRepaint(); digestRenderSettings();
     return;
   }
   try {
@@ -671,7 +718,7 @@ export async function digestRunPoll() {
           digestRun.error = digestRun.conclusion === 'cancelled' ? 'The run was cancelled.' : 'The run failed on GitHub — open the log to see why.';
         }
         digestRunSave();
-        renderHome(); digestRenderSettings();
+        digestRepaint(); digestRenderSettings();
       }
     }
   } catch(e) { /* offline or rate-limited: try again next tick */ }
@@ -685,7 +732,7 @@ function digestRunDelivered(at) {
     digestRunSave();
   }
 }
-export function digestRunDismiss() { clearTimeout(digestRunTimer); digestRun = null; digestRunSave(); renderHome(); digestRenderSettings(); }
+export function digestRunDismiss() { clearTimeout(digestRunTimer); digestRun = null; digestRunSave(); digestRepaint(); digestRenderSettings(); }
 function digestRunLabel() {
   if (!digestRun) return '';
   if (digestRun.error) return digestRun.error;
@@ -702,18 +749,18 @@ function digestRunHtml() {
   return `<div class="dg-run ${digestRun.error ? 'err' : ''}">${escAttr(digestRunLabel())}${link}${dismiss}</div>`;
 }
 
-/* ── sample digest: shows the card without any backend ── */
+/* ── sample digest: shows the tab without any backend ── */
 export function digestLoadSample() {
   digestGet().enabled = true;
   const at = Date.now();
   digestGet().last = { at, markdown: DIGEST_SAMPLE_MD, count: 23, model: 'sample', source: 'sample' };
   digestMergeSuggestions(digestNormalizeTasks(DIGEST_SAMPLE_TASKS, true), at);
   digest = normalizeDigest(digest);   // canonical shape, same as after a reload
-  digestCollapsed = false;
   saveToLocal();
+  applyViewVisibility();
   renderSettings();
-  renderHome();
-  digestShowHome();
+  digestRepaint();
+  openDigestTab();
   showToast('Sample digest loaded');
 }
 function digestClearLast() {
@@ -725,7 +772,7 @@ function digestClearLast() {
   d.last = null;
   saveToLocal();
   renderSettings();
-  renderHome();
+  digestRepaint();
 }
 
 /* ── markdown → safe HTML (headings, lists, tables, code, links, bold) ── */
@@ -798,11 +845,7 @@ function digestRenderMd(md) {
   return out.join('');
 }
 
-function digestShowHome() {
-  if (isMobileLayout()) goTab('home', true); else homeToggleDesktop(true);
-}
-
-/* ── Home card ── */
+/* ── the Digest tab ── */
 function digestMetaLine(last) {
   const when = new Date(last.at);
   const sameDay = when.toDateString() === new Date().toDateString();
@@ -814,18 +857,24 @@ function digestMetaLine(last) {
   else if (last.model) bits.push(last.model + (last.source === 'github' ? ' · GitHub' : ''));
   return bits.join(' \u00b7 ');
 }
-export function homeDigestHtml() {
+const DG_GEAR = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M9.74 5.06L9.97 2.21A10.00 10.00 0 0 1 14.03 2.21L14.26 5.06A7.30 7.30 0 0 1 15.31 5.50L17.49 3.64A10.00 10.00 0 0 1 20.36 6.51L18.50 8.69A7.30 7.30 0 0 1 18.94 9.74L21.79 9.97A10.00 10.00 0 0 1 21.79 14.03L18.94 14.26A7.30 7.30 0 0 1 18.50 15.31L20.36 17.49A10.00 10.00 0 0 1 17.49 20.36L15.31 18.50A7.30 7.30 0 0 1 14.26 18.94L14.03 21.79A10.00 10.00 0 0 1 9.97 21.79L9.74 18.94A7.30 7.30 0 0 1 8.69 18.50L6.51 20.36A10.00 10.00 0 0 1 3.64 17.49L5.50 15.31A7.30 7.30 0 0 1 5.06 14.26L2.21 14.03A10.00 10.00 0 0 1 2.21 9.97L5.06 9.74A7.30 7.30 0 0 1 5.50 8.69L3.64 6.51A10.00 10.00 0 0 1 6.51 3.64L8.69 5.50A7.30 7.30 0 0 1 9.74 5.06ZM12 8.4a3.6 3.6 0 1 0 0 7.2a3.6 3.6 0 1 0 0-7.2z"/></svg>';
+/* Both copies of the page (the desktop panel and the phone tab). The newest
+ * digest counts as read on this device once its page has been on screen. */
+export function renderDigest() {
+  const html = digestPageHtml();
+  ['digestContainer-d', 'digestContainer-m'].forEach(id => { const el = $(id); if (el) el.innerHTML = html; });
+  if (html && digestShowing()) digestMarkSeen();
+}
+function digestPageHtml() {
   const d = digestGet();
   if (!d.enabled) return '';
   const last = d.last;
   const busy = digestRunActive();
   const hasToken = !!digestGithubToken();
   const runBtn = busy ? '' : `<button class="dg-btn" onclick="digestRunNow()" title="${hasToken ? 'Start the GitHub workflow now; the result arrives here in 15–40 minutes' : 'Add a GitHub token in Settings to run it from here'}">Run now</button>`;
-  const chevron = last ? `<button class="dg-chev ${digestCollapsed ? 'closed' : ''}" onclick="digestToggleCollapsed()" title="${digestCollapsed ? 'Expand' : 'Collapse'}" aria-label="Toggle digest">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>` : '';
+  const gear = `<button class="dg-gear" onclick="openSettings(&quot;digest&quot;)" title="Digest settings: GitHub token, prompts and sections" aria-label="Digest settings">${DG_GEAR}</button>`;
   let body;
-  if (last && !digestCollapsed) body = `${digestTasksHtml()}<div class="dg-md">${digestRenderMd(last.markdown)}</div>`;
-  else if (last) body = '';
+  if (last) body = `${digestTasksHtml()}<div class="dg-md">${digestRenderMd(last.markdown)}</div>`;
   else if (busy) body = digestTasksHtml();
   else body = `${digestTasksHtml()}
       <div class="dg-empty">
@@ -838,19 +887,50 @@ export function homeDigestHtml() {
         </div>
       </div>`;
   return `
-    <section class="home-section dg-section">
+    <div class="dg-page">
+      <div class="page-head">
+        <h1 class="page-title">Email digest</h1>
+        <p class="page-sub">The last day of your email, summed up every morning.</p>
+      </div>
       <div class="home-card dg-card">
         <div class="dg-head">
           <div class="dg-title-wrap">
-            <div class="dg-title">Email digest</div>
+            <div class="dg-title">${last ? 'Latest digest' : 'No digest yet'}</div>
             ${last ? `<div class="dg-meta">${escAttr(digestMetaLine(last))}</div>` : ''}
           </div>
-          <div class="dg-actions">${runBtn}${chevron}</div>
+          <div class="dg-actions">${runBtn}${gear}</div>
         </div>
         ${digestRunHtml()}
         ${body}
       </div>
-    </section>`;
+    </div>`;
+}
+
+/* ── Home: one button to the Digest tab, saying what is there ── */
+const DG_ENVELOPE = '<svg width="17" height="17" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="1.8" y="3.4" width="12.4" height="9.2" rx="1.9" stroke="currentColor" stroke-width="1.5"/><path d="M2.4 4.7L8 8.9l5.6-4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+export function homeDigestButtonHtml() {
+  const d = digestGet();
+  if (!d.enabled) return '';
+  const last = d.last;
+  const unseen = digestUnseen();
+  let meta;
+  if (digestRun && (digestRun.error || digestRunActive() || digestRunDelivering())) meta = digestRunLabel();
+  else if (last) {
+    const when = new Date(last.at);
+    const sameDay = when.toDateString() === new Date().toDateString();
+    const open = digestOpenSuggestions().length;
+    meta = `${sameDay ? `Today ${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : when.toLocaleDateString([], { month: 'short', day: 'numeric' })}`
+      + (open ? ` · ${open} suggested task${open === 1 ? '' : 's'}` : last.count ? ` · ${last.count} emails` : '');
+  } else meta = 'Nothing delivered yet';
+  return `
+    <button class="home-digest-btn${unseen ? ' new' : ''}${digestRun && digestRun.error ? ' err' : ''}" onclick="openDigestTab()" title="Open the email digest">
+      <span class="home-digest-ico">${DG_ENVELOPE}</span>
+      <span class="home-digest-text">
+        <span class="home-digest-title">Email digest${unseen ? '<span class="home-digest-new">New</span>' : ''}</span>
+        <span class="home-digest-meta">${escAttr(meta)}</span>
+      </span>
+      <svg class="home-digest-chev" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>`;
 }
 
 /* ── suggested tasks: the pool, rendered above the summary ──
@@ -872,6 +952,12 @@ function digestVisibleSuggestions() {
     if (t.status === 'added') return digestTaskIsAdded(t) ? t.at >= lastAt : true;   // deleted task → re-offer
     return true;
   });
+}
+/* Suggestions still waiting for Add or Dismiss that aren't already on the lists. */
+function digestOpenSuggestions() {
+  const all = digestVisibleSuggestions();
+  const dupes = digestDupMap(all);
+  return all.filter(t => !digestTaskIsAdded(t) && !dupes.has(t.id));
 }
 function digestTasksHtml() {
   const all = digestVisibleSuggestions();
@@ -927,7 +1013,7 @@ export function digestAddTask(id, opts) {
   t.at = Date.now();
   if (!(opts && opts.batch)) {
     renderDbd();
-    renderHome();
+    digestRepaint();
     saveToLocal();
     showToast(`Added to Day by Day · ${dbdLabelFor(task.due)}`);
   }
@@ -940,7 +1026,7 @@ export function digestDismissTask(id) {
   t.status = 'dismissed';
   t.dbdId = 0;
   t.at = Date.now();
-  renderHome();
+  digestRepaint();
   saveToLocal();
   return true;
 }
@@ -951,7 +1037,7 @@ export function digestAddAllTasks() {
   const dupes = digestDupMap(list);
   const n = list.reduce((c, t) => c + (!dupes.has(t.id) && digestAddTask(t.id, { batch: true }) ? 1 : 0), 0);
   renderDbd();
-  renderHome();
+  digestRepaint();
   saveToLocal();
   const skipped = dupes.size ? ` · skipped ${dupes.size} already on your lists` : '';
   showToast(n ? `Added ${n} task${n === 1 ? '' : 's'} to Day by Day${skipped}` : (dupes.size ? 'Nothing new — the rest is already on your lists' : 'Everything is already added'));
@@ -1008,19 +1094,14 @@ export function digestRenderSettings() {
   digestPromptRender();
 }
 export function bindDigest() {
-  $('digestEnabledToggle')?.addEventListener('change', e => {
-    digestGet().enabled = !!e.target.checked;
-    saveToLocal();
-    digestRenderSettings();
-    renderHome();
-  });
+  $('digestEnabledToggle')?.addEventListener('change', e => digestSetEnabled(e.target.checked));
   $('digestGithubSaveBtn')?.addEventListener('click', async () => {
     const inp = $('digestGithubToken');
     if (digestGithubToken()) {                  // Remove: from the account (every device) and from this device
       const inAccount = digestGithubWhere() === 'account';
       digestGithubLegacyDrop();
       if (inp) inp.value = '';
-      if (!inAccount) { showToast('GitHub token removed from this device'); digestRenderSettings(); renderHome(); return; }
+      if (!inAccount) { showToast('GitHub token removed from this device'); digestRenderSettings(); digestRepaint(); return; }
       if (await digestGithubWrite('')) showToast('GitHub token removed from your account, on every device');
       return;
     }
@@ -1035,7 +1116,7 @@ export function bindDigest() {
     } else if (inp) inp.value = v;              // not saved: hand it back
   });
   $('digestGithubToken')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('digestGithubSaveBtn')?.click(); } });
-  $('digestRunSettingsBtn')?.addEventListener('click', () => { closeModal('settingsModal'); digestShowHome(); digestRunNow(); });
+  $('digestRunSettingsBtn')?.addEventListener('click', () => { closeModal('settingsModal'); openDigestTab(); digestRunNow(); });
   $('digestOpenRunBtn')?.addEventListener('click', () => { if (digestRun && digestRun.url) window.open(digestRun.url, '_blank', 'noopener'); });
   $('digestSampleBtn')?.addEventListener('click', () => { closeModal('settingsModal'); digestLoadSample(); });
   $('digestClearBtn')?.addEventListener('click', digestClearLast);

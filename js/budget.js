@@ -6,6 +6,7 @@ import { dbdTodayKey } from './dbd.js';
 import { homeDesktopOpen, homeToggleDesktop, renderHome } from './home.js';
 import { desktopNavSync } from './views.js';
 import { calDesktopOpen, calShiftSources, calToggleDesktop } from './calendar.js';
+import { digestDesktopOpen, digestToggleDesktop } from './digest.js';
 import { shiftsOnDays } from './shifts.js';
 import { addDays, billsDueBetween, cashRunway, daysBetween, nextPayday, PAY_REPEATS } from './runway.js';
 import { bankBalance, bankBalanceKey, bankBudgetFollowing, bankBudgetSkip, bankBudgetStep } from './bankbudget.js';
@@ -232,6 +233,7 @@ export function budgetToggleDesktop(force) {
   if (want) {
     if (calDesktopOpen)  calToggleDesktop();
     if (homeDesktopOpen) homeToggleDesktop(false);
+    if (digestDesktopOpen) digestToggleDesktop(false);
   }
   budgetDesktopOpen = want;
   const panel = $('budgetDesktopPanel');

@@ -28,7 +28,7 @@ import {
   applyTheme, compressTheme, decompressTheme, normalizeTheme, renderThemeUI, setTheme, themeGet,
 } from './theme.js';
 import {
-  compressDigest, decompressDigest, digestRecord, normalizeDigest, setDigest,
+  compressDigest, decompressDigest, digestRecord, normalizeDigest, renderDigest, setDigest,
 } from './digest.js';
 import { normalizeShiftCals, setShiftCals, shiftCals } from './gcal.js';
 
@@ -302,6 +302,7 @@ export function renderLoadedState() {
   renderTodos();
   renderDbd();
   renderBudget();
+  renderDigest();
   applyViewVisibility();
   applyTheme();
   renderThemeUI();

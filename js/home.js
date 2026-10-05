@@ -1,5 +1,5 @@
-/* home.js — The Home page: greeting, balance, progress, insight cards, today's tasks,
- * starred lists, timers, next 4 hours. */
+/* home.js — The Home page: greeting, balance, progress, the email digest button,
+ * insight cards, today's tasks, starred lists, timers, next 4 hours. */
 import {
   $, calDateKey, calFmtTime, calMinsToStr, calTimeToMins, calToday, CHECK_SVG, escAttr, fmt,
   getRemaining, isMobileLayout, STAR_SVG,
@@ -14,7 +14,7 @@ import { gcalEvents, gcalIsConnected } from './gcal.js';
 import {
   budgetDesktopOpen, budgetToggleDesktop, money, runwayResult, todayBalance, totalBalance,
 } from './budget.js';
-import { homeDigestHtml } from './digest.js';
+import { digestDesktopOpen, digestToggleDesktop, homeDigestButtonHtml } from './digest.js';
 import { shiftsOnDays } from './shifts.js';
 import { addDays } from './runway.js';
 import { deadlineClashes, runwayWarning } from './insights.js';
@@ -29,6 +29,7 @@ export function homeToggleDesktop(force) {
   const want = (typeof force === 'boolean') ? force : !homeDesktopOpen;
   if (want && calDesktopOpen) calToggleDesktop();   // close calendar overlay first
   if (want && budgetDesktopOpen) budgetToggleDesktop(false);
+  if (want && digestDesktopOpen) digestToggleDesktop(false);
   homeDesktopOpen = want;
   const panel = $('homeDesktopPanel');
   const tab   = $('homeDesktopNavTab');
@@ -47,7 +48,6 @@ export function renderHome() {
   const html =
     homeHeroHtml() +
     homeInsightsHtml() +
-    homeDigestHtml() +
     homeDbdHtml() +
     homeStarredListsHtml(true) +   // starred Daily lists
     homeTimersHtml() +
@@ -144,6 +144,7 @@ function homeHeroHtml() {
         </div>
       </div>
       ${homeProgressHtml()}
+      ${homeDigestButtonHtml()}
     </div>`;
 }
 

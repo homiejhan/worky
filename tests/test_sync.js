@@ -137,7 +137,8 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
     eq(L.w.digestGet().last.source, 'github', 'source recorded as github');
     eq(L.w.digestGet().suggestions.length, 1, 'laptop pool has the suggestion');
     eq(P.w.digestGet().suggestions.length, 1, 'phone pool has the suggestion');
-    ok(P.d.querySelector('#homeContainer-d .dg-todo-add'), 'phone shows Add on the card');
+    ok(P.d.querySelector('#digestContainer-m .dg-todo-add'), 'phone shows Add on its Digest tab');
+    ok(P.d.querySelector('#homeContainer-m .home-digest-btn .home-digest-new'), 'and New on the Email digest button on Home');
     await sleep(1500);   // let the debounced push land
     ok(!!cloud.val.digestInbox && cloud.val.digestInbox.at === at, 'the push left the inbox in place for devices that open later');
     ok(typeof cloud.val.state === 'string' && JSON.parse(cloud.val.state).digest.last.at === at, 'cloud state now carries the digest itself');

@@ -14,15 +14,15 @@ const shown = el => el.style.display !== 'none';
 const trackIdx = (w, d) => -parseFloat(d.getElementById('swipeTrack').style.transform.replace('translateX(', '')) / get(w, 'swipeFrameWidth()');
 
 (async () => {   // the app boots asynchronously now (ES modules), so the checks run in here
-console.log('\n── 1. Mobile: six tabs, Daily has its own panel ──');
+console.log('\n── 1. Mobile: seven tabs, Daily has its own panel ──');
 {
   const { w, d } = await boot();
   const tabs = [...d.querySelectorAll('.tab-btn')].map(b => b.dataset.view);
-  eq(tabs.join(','), 'home,timers,lists,daily,calendar,budget', 'tab bar order');
+  eq(tabs.join(','), 'home,timers,lists,daily,calendar,budget,digest', 'tab bar order (Digest shows while the email digest is on)');
   const panels = [...d.querySelectorAll('.swipe-panel')].map(p => p.dataset.view);
   eq(panels.join(','), tabs.join(','), 'swipe panels match the tab bar');
   eq(get(w, 'VIEW_DEFS.map(v => v.key).join(",")'), tabs.join(','), 'VIEW_DEFS matches the DOM order');
-  eq(new Set([...d.querySelectorAll('.tab-btn')].map(b => b.id)).size, 6, 'tab ids are unique');
+  eq(new Set([...d.querySelectorAll('.tab-btn')].map(b => b.id)).size, 7, 'tab ids are unique');
 
   const listsPanel = d.querySelector('.swipe-panel[data-view="lists"]');
   const dailyPanel = d.querySelector('.swipe-panel[data-view="daily"]');

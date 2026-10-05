@@ -17,7 +17,7 @@ import {
 import { openTaskLinkModal, taskLinkFlushRename, taskLinkOpenEvent } from './tasklinks.js';
 import { homeInsightGo, homeToggleDesktop, renderHome } from './home.js';
 import {
-  applyViewVisibility, initSwipe, initViewportGuard, openBudgetTab, setSwipePanelWidths,
+  applyViewVisibility, initSwipe, initViewportGuard, openBudgetTab, openDigestTab, setSwipePanelWidths,
 } from './views.js';
 import { openSettings } from './settings.js';
 import {
@@ -35,8 +35,7 @@ import {
 import { applyTheme } from './theme.js';
 import {
   digestAddAllTasks, digestAddTask, digestDismissTask, digestLoadSample, digestRunActive,
-  digestRunDismiss, digestRunLoad, digestRunNow, digestRunPoll, digestToggleCollapsed,
-  digestUiLoad,
+  digestRunDismiss, digestRunLoad, digestRunNow, digestRunPoll, digestUiLoad, renderDigest,
 } from './digest.js';
 import { bindStatic } from './bindings.js';
 import { applyStarterProfile, tourOffer } from './onboarding.js';
@@ -47,7 +46,7 @@ import { applyStarterProfile, tourOffer } from './onboarding.js';
 Object.assign(window, {
   addDbdTask, addTask, changeTimerColor, changeTodoColor, commitEditTimer, digestAddAllTasks,
   digestAddTask, digestDismissTask, digestLoadSample, digestRunDismiss, digestRunNow,
-  digestToggleCollapsed, gcalToggleCal, homeInsightGo, openBudgetTab, openScheduleModal,
+  gcalToggleCal, homeInsightGo, openBudgetTab, openDigestTab, openScheduleModal,
   openSettings, openTaskLinkModal, refreshSyncBadges, removeDbdTask, removeFormatDaily,
   removeFormatTimer, removeTask, removeTodoList, resetTimer, retagListTask, setDbdDue,
   setDbdText, setListTaskDue, setListTitle, setTaskText, setTimerLabel, startEditTimer,
@@ -78,6 +77,9 @@ Object.assign(window, {
   budgetRollover();          // catch up any days missed while closed
   budgetUiLoad();
   renderBudget();
+  digestUiLoad();
+  digestRunLoad();
+  renderDigest();
   renderHome();
   applyViewVisibility();
   syncWakeupUI();
@@ -114,8 +116,6 @@ Object.assign(window, {
   syncHandleRedirect();
 
   /* email digest — built on GitHub, delivered through Firebase; see digest.js */
-  digestUiLoad();
-  digestRunLoad();
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && digestRunActive()) digestRunPoll(); });
 
   /* gcal */

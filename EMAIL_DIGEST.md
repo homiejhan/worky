@@ -13,7 +13,8 @@ Worky (every device) ◄────┘  digestInboxSeen → digestInboxFlush
   ├─ each device merges the inbox itself when it is newer than the digest it holds
   ├─ the inbox stays in the cloud until the next run overwrites it
   │    (state pushes use update(), so they never touch it)
-  ├─ Home card: summary + Suggested tasks (Add / Dismiss / Add all)
+  ├─ Digest tab: summary + Suggested tasks (Add / Dismiss / Add all);
+  │    a button on Home opens it
   └─ "Run now": the GitHub token saved at users/<uid>/digestGithub
        starts the workflow from any device signed in to the account
 ```
@@ -49,7 +50,8 @@ workflow are documented in [`backend/README.md`](backend/README.md).
 ## In the app
 
 **Settings → Email Digest**
-- *Show digest on Home* — the only switch. A delivery turns it on automatically.
+- *Show the Digest tab* — the only switch (Settings → Sections shows the same
+  one). A delivery turns it on automatically.
 - Status line — when the last digest arrived, how many emails, which model.
 - *Run it from any device* — paste a GitHub fine-grained token (scope: this repo,
   **Actions: Read and write**, with an expiry). It's saved to the signed-in account
@@ -58,8 +60,8 @@ workflow are documented in [`backend/README.md`](backend/README.md).
   it. Every device signed in to that account can then use Run now. **Remove**
   takes it out of the account, so off every device; signing out takes it off that
   device. Saving needs cloud sync (the digest can only arrive through it anyway).
-  With a token, **Run digest now** dispatches the workflow and the card shows the
-  run's progress (queued → running → finished → arriving) with a link to the log.
+  With a token, **Run digest now** dispatches the workflow and the Digest tab shows
+  the run's progress (queued → running → finished → arriving) with a link to the log.
   The result still arrives through Firebase like a scheduled one.
 - A token saved by an older build lives in that device's localStorage. The first
   time the device opens signed in to the account the digest is delivered to (the
@@ -70,12 +72,17 @@ workflow are documented in [`backend/README.md`](backend/README.md).
   removed token doesn't come back from an older device.
 - *Load sample* / *Clear digest* — for demos and cleanup.
 
-**Home card**
+**Digest tab** (a sidebar page on a computer, a tab on a phone)
+- The newest digest, with **Run now** and a gear for Settings → Email Digest.
 - Suggested tasks sit above the summary until you **Add** (becomes a Day by Day
   task with the digest's due date, else today) or **Dismiss** (hidden, and the same
   title isn't re-suggested for two weeks). A dismissed or added title survives
   across runs; an added task you later delete is offered again.
-- Chevron collapses the summary (device-local).
+
+**Home**
+- An *Email digest* button under the progress bar opens the tab. It shows when the
+  digest came and how many suggestions wait (or a run's progress), and **New**
+  until this device has shown the newest digest on the tab (device-local).
 
 ## State
 
@@ -87,7 +94,8 @@ Account, beside the state blob: `digestGithub {token, updatedAt}` (the Run now
 token; `{updatedAt}` alone once removed). The database rules must limit
 `users/<uid>` to its owner, as they already should for the rest of the data.
 
-Device-local (localStorage): `focus-digest-ui` (collapsed), `focus-digest-run` (the
+Device-local (localStorage): `focus-digest-ui` (`seenAt`: the newest digest this
+device has shown, for New on Home), `focus-digest-run` (the
 GitHub run being watched, so a reload keeps watching), and `focus-digest-github` (a
 token an older build saved, until it moves into the account).
 

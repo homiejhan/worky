@@ -1,7 +1,8 @@
 /* Email digest — headless tests. Run: npm test (or node --experimental-vm-modules tests/test_digest.js).
  * The digest is built on GitHub and delivered through Firebase; these tests
- * cover the app side: state, the suggestion pool, rendering, delivery merge,
- * and the GitHub "Run now" trigger against a fake GitHub API. */
+ * cover the app side: state, the suggestion pool, rendering on the Digest tab,
+ * the button on Home, delivery merge, and the GitHub "Run now" trigger against
+ * a fake GitHub API. */
 const { loadApp } = require('./load-app');
 const fs = require('fs');
 const path = require('path');
@@ -34,26 +35,26 @@ console.log('\n── 0. Sample digest carries suggested tasks ──');
   const sug = w.digestGet().suggestions;
   eq(sug.length, 4, 'sample adds 4 suggestions to the pool');
   ok(sug.every(t => /^\d{4}-\d{2}-\d{2}$/.test(t.due)), 'sample relative dates resolved to real dates');
-  eq(d.querySelectorAll('#homeContainer-d .dg-todo-add').length, 4, 'sample card shows 4 Add buttons');
-  eq(d.querySelectorAll('#homeContainer-d .dg-todo-dismiss').length, 4, 'and 4 Dismiss buttons');
+  eq(d.querySelectorAll('#digestContainer-d .dg-todo-add').length, 4, 'sample card shows 4 Add buttons');
+  eq(d.querySelectorAll('#digestContainer-d .dg-todo-dismiss').length, 4, 'and 4 Dismiss buttons');
   w.digestLoadSample();
   eq(w.digestGet().suggestions.length, 4, 'loading the sample twice does not duplicate suggestions');
   ok(w.digestDismissTask(2), 'dismiss works');
-  eq(d.querySelectorAll('#homeContainer-d .dg-todo').length, 3, 'dismissed row gone from the card');
+  eq(d.querySelectorAll('#digestContainer-d .dg-todo').length, 3, 'dismissed row gone from the card');
   eq(w.digestGet().suggestions.find(x => x.id === 2).status, 'dismissed', 'kept in the pool as dismissed');
   w.digestLoadSample();
   eq(w.digestGet().suggestions.length, 4, 'a later run does not resurrect a dismissed title');
-  eq(d.querySelectorAll('#homeContainer-d .dg-todo').length, 3, 'still hidden');
+  eq(d.querySelectorAll('#digestContainer-d .dg-todo').length, 3, 'still hidden');
   eq(w.digestSugKey('Confirm Fabrikam recruiter screen!'), w.digestSugKey('  confirm fabrikam   recruiter screen'), 'title key ignores case/punctuation/spacing');
   eq(w.digestNormalizeDue('2099-01-01'), '', 'far-future dates dropped');
   eq(w.digestNormalizeDue('tomorrow'), (() => { const x = new Date(); x.setDate(x.getDate()+1); return w.calDateKey(x); })(), 'tomorrow resolves');
   eq(w.digestNormalizeDue('whenever'), '', 'unparseable → empty');
 }
 
-console.log('\n── 1. Default boot: digest off, nothing on Home, state carries the record ──');
+console.log('\n── 1. Default boot: digest off, no Digest tab, state carries the record ──');
 {
   const { w, d } = await boot();
-  eq(d.querySelector('.dg-section'), null, 'no digest card when disabled');
+  eq(d.querySelector('.dg-page'), null, 'no digest page when disabled');
   w.saveToLocal();
   eq(savedDigest(w).enabled, false, 'saved state has digest.enabled=false');
   eq(savedDigest(w).last, null, 'saved state has digest.last=null');
@@ -61,7 +62,7 @@ console.log('\n── 1. Default boot: digest off, nothing on Home, state carrie
   eq(JSON.stringify(c.dg), '{"en":0}', 'compressed form is tiny when empty');
 }
 
-console.log('\n── 2. Settings toggle shows the card; empty state explains GitHub + offers sample ──');
+console.log('\n── 2. Settings toggle shows the Digest tab; empty state explains GitHub + offers sample ──');
 {
   const { w, d } = await boot();
   d.getElementById('settingsBtn').click();
@@ -70,8 +71,8 @@ console.log('\n── 2. Settings toggle shows the card; empty state explains Gi
   eq(d.getElementById('digestFields').style.display, 'none', 'fields hidden while off');
   tog.checked = true; tog.dispatchEvent(new w.Event('change', { bubbles: true }));
   eq(d.getElementById('digestFields').style.display, '', 'fields shown when on');
-  ok(d.querySelector('#homeContainer-d .dg-section'), 'card renders on desktop Home');
-  ok(d.querySelector('#homeContainer-m .dg-section'), 'card renders on mobile Home');
+  ok(d.querySelector('#digestContainer-d .dg-page'), 'page renders in the desktop Digest panel');
+  ok(d.querySelector('#digestContainer-m .dg-page'), 'and in the phone\'s Digest tab');
   ok(d.querySelector('.dg-empty-text').textContent.includes('GitHub'), 'empty copy explains GitHub builds it');
   ok(d.querySelector('.dg-empty button[onclick^="openSettings("]'), 'Open Settings button present (no token yet)');
   ok(d.querySelector('.dg-btn[onclick="digestRunNow()"]'), 'Run now button offered');
@@ -83,14 +84,14 @@ console.log('\n── 3. Sample digest renders every section, tables, code, task
 {
   const { w, d } = await boot();
   w.digestLoadSample();
-  const md = d.querySelector('#homeContainer-d .dg-md');
+  const md = d.querySelector('#digestContainer-d .dg-md');
   ok(md, 'markdown body rendered');
   eq(md.querySelectorAll('h2').length, 6, 'six h2 headings (overview + 5 sections; actions became suggested tasks)');
   ok(md.querySelector('table'), 'job table rendered');
   eq(md.querySelectorAll('table tbody tr').length, 3, 'three job rows');
   ok(md.querySelector('pre code'), 'ASCII diagram in code block');
   eq(md.querySelectorAll('li.dg-task').length, 0, 'no checklist items in the markdown any more');
-  eq(d.querySelectorAll('#homeContainer-d .dg-todo').length, 4, 'four suggested-task rows instead');
+  eq(d.querySelectorAll('#digestContainer-d .dg-todo').length, 4, 'four suggested-task rows instead');
   ok(md.querySelector('a[href="https://example.com/pg18-async"]'), 'markdown link rendered');
   eq(md.querySelector('a').getAttribute('target'), '_blank', 'links open in a new tab');
   ok(d.querySelector('.dg-meta').textContent.includes('sample data'), 'meta line says sample data');
@@ -138,7 +139,7 @@ console.log('\n── 6. Reload persistence + a synced copy shows up on another 
   a.w.digestLoadSample();
   const raw = a.w.localStorage.getItem('focus-app-state');
   const b = await boot({ storage: { 'focus-app-state': raw } });
-  ok(b.d.querySelector('#homeContainer-d .dg-md'), 'second device renders the digest from state alone');
+  ok(b.d.querySelector('#digestContainer-d .dg-md'), 'second device renders the digest from state alone');
   eq(b.w.digestGithubToken(), '', 'the GitHub token is not carried by state');
   ok(b.d.querySelector('.dg-btn[onclick="digestRunNow()"]'), 'Run now still offered');
 }
@@ -161,8 +162,8 @@ console.log('\n── 7. Delivered digest (users/<uid>/digestInbox) merges like 
   eq(dg.suggestions[0].due, '2026-09-22', 'valid due kept');
   eq(dg.suggestions[1].due, '', 'invalid due dropped');
   eq(dg.suggestions[1].section, 'nope', 'section ids are kept as delivered (the backend validates them against its section list)');
-  ok(d.querySelector('#homeContainer-d .dg-todo-add'), 'home card shows Add buttons');
-  ok(d.querySelector('#homeContainer-d .dg-meta').textContent.includes('GitHub'), 'meta line says GitHub');
+  ok(d.querySelector('#digestContainer-d .dg-todo-add'), 'the Digest tab shows Add buttons');
+  ok(d.querySelector('#digestContainer-d .dg-meta').textContent.includes('GitHub'), 'meta line says GitHub');
   w.digestInboxSeen(inbox(1000, 1));
   eq(w.digestGet().suggestions.length, 2, 'same inbox again is ignored');
   w.digestInboxSeen(inbox(900, 0));
@@ -207,14 +208,14 @@ console.log('\n── 8. Add / Dismiss / Add all against the pool ──');
   ok(w.digestAddTask(first.id), 'Add returns true');
   eq(w.eval('dbdTasks.length'), before + 1, 'a Day by Day task was created');
   eq(w.digestGet().suggestions[0].status, 'added', 'suggestion marked added');
-  ok(d.querySelector('#homeContainer-d .dg-todo.added .dg-todo-added'), 'row shows Added ✓');
+  ok(d.querySelector('#digestContainer-d .dg-todo.added .dg-todo-added'), 'row shows Added ✓');
   eq(w.digestAddTask(first.id), false, 'adding twice is a no-op');
   w.digestAddAllTasks();
   eq(w.digestVisibleSuggestions().filter(t => !w.digestTaskIsAdded(t)).length, 0, 'Add all clears the remaining ones');
   w.eval('dbdTasks = dbdTasks.filter(t => t.id !== ' + first.id + ' + 0 * ' + w.digestGet().suggestions[0].dbdId + ')');
   w.eval('dbdTasks = dbdTasks.filter(t => t.id !== ' + w.digestGet().suggestions[0].dbdId + ')');
-  w.renderHome();
-  ok(d.querySelector(`#homeContainer-d .dg-todo[data-dgt="${first.id}"] .dg-todo-add`), 'deleting the task re-offers the suggestion');
+  w.renderDigest();                       // (opening the Digest tab draws it again)
+  ok(d.querySelector(`#digestContainer-d .dg-todo[data-dgt="${first.id}"] .dg-todo-add`), 'deleting the task re-offers the suggestion');
 }
 
 console.log('\n── 8a. Redundancy: how two titles are scored ──');
@@ -262,7 +263,7 @@ console.log('\n── 8b. Redundancy: a suggestion that repeats an existing task
   const sug = w.digestGet().suggestions;
   eq(sug.length, 4, 'all four still enter the pool — nothing is hidden');
   ok(d.getElementById('toast').textContent.includes('2 already on your lists'), 'delivery toast says how many already exist');
-  const H = '#homeContainer-d ';
+  const H = '#digestContainer-d ';
   eq(d.querySelectorAll(H + '.dg-todo.dup').length, 2, 'two rows flagged');
   const rows = [...d.querySelectorAll(H + '.dg-todo')];
   ok(!rows[0].classList.contains('dup') && !rows[1].classList.contains('dup') && rows[2].classList.contains('dup') && rows[3].classList.contains('dup'), 'flagged rows sink below the new ones');
@@ -289,7 +290,7 @@ console.log('\n── 8b. Redundancy: a suggestion that repeats an existing task
   ok(d.querySelector(H + `.dg-todo[data-dgt="${sug[0].id}"].added`), 'and the row is Added ✓');
 
   w.eval(`todoLists.find(l => l.title === 'Bills').tasks = []`);
-  w.renderHome();
+  w.renderDigest();
   eq(d.querySelector(H + `.dg-todo[data-dgt="${sug[1].id}"].dup`), null, 'deleting the existing task clears the flag (nothing is stored)');
   eq(d.querySelector(H + `.dg-todo[data-dgt="${sug[1].id}"] .dg-todo-add`).textContent, 'Add', 'button back to Add');
   eq(savedDigest(w).suggestions.every(x => !('dup' in x) && !('match' in x)), true, 'no match data in synced state');
@@ -306,12 +307,12 @@ console.log('\n── 8c. Redundancy: finished tasks only count while they are r
     { title: 'Pay the water bill', why: '', due: '', section: 'misc' },
     { title: 'Confirm Fabrikam recruiter screen', why: '', due: '', section: 'jobs' } ] });
   const sug = w.digestGet().suggestions;
-  eq(d.querySelector(`#homeContainer-d .dg-todo[data-dgt="${sug[0].id}"].dup`), null, "last month's finished bill does not block this month's");
-  const f = d.querySelector(`#homeContainer-d .dg-todo[data-dgt="${sug[1].id}"] .dg-todo-dup`);
+  eq(d.querySelector(`#digestContainer-d .dg-todo[data-dgt="${sug[0].id}"].dup`), null, "last month's finished bill does not block this month's");
+  const f = d.querySelector(`#digestContainer-d .dg-todo[data-dgt="${sug[1].id}"] .dg-todo-dup`);
   ok(f && f.textContent.startsWith('Looks like') && f.textContent.includes('done \u2713'), "yesterday's finished task does — a loose match only says \"Looks like … done ✓\"");
   w.eval(`dbdTasks.push({ id: dbdIdCounter++, text: 'pay the water bill', due: '${day(0)}', done: true, doneOn: '${day(0)}' })`);
-  w.renderHome();
-  const g = d.querySelector(`#homeContainer-d .dg-todo[data-dgt="${sug[0].id}"] .dg-todo-dup`);
+  w.renderDigest();
+  const g = d.querySelector(`#digestContainer-d .dg-todo[data-dgt="${sug[0].id}"] .dg-todo-dup`);
   ok(g && g.textContent.startsWith('Already done:'), 'the same title ticked off today → "Already done"');
 }
 
@@ -347,10 +348,10 @@ console.log('\n── 8e. Redundancy: tagging an added task into a list keeps it
   w.tagDbdTask(first.dbdId, String(w.eval('todoLists[todoLists.length - 1].id')));
   eq(w.eval('dbdById(' + first.dbdId + ')'), undefined, 'tagging moved the task out of dbdTasks');
   ok(w.digestTaskIsAdded(first), 'still counts as added');
-  eq(d.querySelector(`#homeContainer-d .dg-todo[data-dgt="${first.id}"] .dg-todo-add`), null, 'no Add button offered for it');
+  eq(d.querySelector(`#digestContainer-d .dg-todo[data-dgt="${first.id}"] .dg-todo-add`), null, 'no Add button offered for it');
   w.eval(`todoLists[todoLists.length - 1].tasks = []`);
-  w.renderHome();
-  ok(d.querySelector(`#homeContainer-d .dg-todo[data-dgt="${first.id}"] .dg-todo-add`), 'deleting the moved task re-offers it, as before');
+  w.renderDigest();
+  ok(d.querySelector(`#digestContainer-d .dg-todo[data-dgt="${first.id}"] .dg-todo-add`), 'deleting the moved task re-offers it, as before');
 }
 
 /* ── 9a. The Run now token an older build saved on the device ── */
@@ -638,6 +639,114 @@ async function promptTests() {
   eq(w.digestNormalizeTasks([{ title: 'A', section: 'fitness' }, { title: 'B', section: 'Nope!' }], false).map(t => t.section).join(','), 'fitness,misc', 'custom section ids on tasks are kept, junk falls back to misc');
 }
 
+console.log('\n── 8f. The Digest tab, and the button on Home that opens it ──');
+{
+  const shown = el => !!el && el.style.display !== 'none';
+  const { w, d } = await boot();
+  w.eval('isMobileLayout = () => false');
+  const tab = () => d.querySelector('.tab-btn[data-view="digest"]');
+  const panelM = () => d.querySelector('.swipe-panel[data-view="digest"]');
+  const nav = () => d.getElementById('digestDesktopNavTab');
+  const homeBtn = pfx => d.querySelector(`#homeContainer-${pfx} .home-digest-btn`);
+  const open = () => w.eval('digestDesktopOpen');
+  ok(!shown(tab()) && !shown(panelM()) && !shown(nav()), 'digest off: no Digest tab, panel or sidebar entry');
+  eq(homeBtn('d'), null, 'and no button on Home');
+  eq(w.eval('VIEW_DEFS.map(v => v.key).join(",")'), 'home,timers,lists,daily,calendar,budget,digest', 'Digest is the last tab');
+
+  d.getElementById('settingsBtn').click();
+  const secTog = () => d.querySelector('[data-viewtoggle="digest"]');
+  ok(secTog() && !secTog().checked, 'Settings → Sections lists Digest, switched off');
+  secTog().checked = true; secTog().dispatchEvent(new w.Event('change', { bubbles: true }));
+  eq(w.digestGet().enabled, true, 'switching it on there turns the digest on');
+  ok(d.getElementById('digestEnabledToggle').checked, 'Settings → Email Digest shows it on too (one setting)');
+  ok(shown(tab()) && shown(panelM()) && shown(nav()), 'the tab, its panel and the sidebar entry appear');
+  ok(homeBtn('d') && homeBtn('m'), 'Home shows the button, on both layouts');
+  eq(homeBtn('d').querySelector('.home-digest-meta').textContent, 'Nothing delivered yet', 'which says nothing has come yet');
+  eq(d.querySelectorAll('#homeContainer-d .dg-page, #homeContainer-d .dg-md, #homeContainer-d .dg-todo').length, 0, 'the digest itself is no longer on Home');
+  w.closeModal('settingsModal');
+
+  homeBtn('d').click();
+  ok(open() && d.getElementById('digestDesktopPanel').classList.contains('active') && nav().classList.contains('active'), 'desktop: the button opens the Digest page');
+  ok(!w.eval('homeDesktopOpen') && d.getElementById('rightPanel').style.display === 'none', 'in place of Home, over the right panel');
+  ok(d.querySelector('#digestContainer-d .dg-page .page-title').textContent === 'Email digest', 'drawn, under its title');
+  d.getElementById('budgetDesktopNavTab').click();
+  ok(!open() && w.eval('budgetDesktopOpen') && !nav().classList.contains('active'), 'Budget closes it');
+  nav().click();
+  ok(open() && !w.eval('budgetDesktopOpen'), 'its sidebar entry opens it again, closing Budget');
+  d.getElementById('calDesktopNavTab').click();
+  ok(!open() && w.eval('calDesktopOpen'), 'Calendar closes it');
+  nav().click();
+  ok(open() && !w.eval('calDesktopOpen'), 'and the other way round');
+  d.getElementById('listsDesktopNavTab').click();
+  ok(!open() && d.getElementById('rightPanel').style.display === '' && d.getElementById('listsDesktopNavTab').classList.contains('active'), 'Lists closes it');
+  nav().click(); d.getElementById('homeDesktopNavTab').click();
+  ok(!open() && w.eval('homeDesktopOpen'), 'Home closes it');
+  nav().click(); nav().click();
+  ok(!open() && d.getElementById('rightPanel').style.display === '', 'its own entry pressed again closes it');
+
+  nav().click();
+  w.digestSetEnabled(false);
+  ok(!open() && !shown(nav()) && !shown(tab()), 'the digest switched off while its page is open: the page closes, the tab goes');
+  eq(homeBtn('d'), null, 'and the button leaves Home');
+  w.digestSetEnabled(true);
+
+  w.eval('isMobileLayout = () => true');
+  tab().click();
+  eq(w.eval('currentView'), 'digest', 'phone: tapping Digest opens its tab');
+  ok(tab().classList.contains('active'), 'highlighted in the tab bar');
+  ok(d.querySelector('#digestContainer-m .dg-page'), 'the page is drawn there too');
+  w.goTab('home', false);
+  homeBtn('m').click();
+  eq(w.eval('currentView'), 'digest', 'the button on Home goes to the tab');
+  d.getElementById('settingsBtn').click();
+  d.getElementById('digestSampleBtn').click();
+  eq(w.eval('currentView'), 'digest', 'Settings → Load sample shows it on the Digest tab');
+  w.goTab('home', false);
+  d.getElementById('settingsBtn').click();
+  d.getElementById('digestRunSettingsBtn').disabled = false;
+  d.getElementById('digestRunSettingsBtn').click();
+  eq(w.eval('currentView'), 'digest', 'Settings → Run digest now goes to the Digest tab, where the run shows');
+}
+
+console.log('\n── 8g. A new digest says so on Home until its tab has been opened ──');
+{
+  const { w, d } = await boot();
+  w.eval('isMobileLayout = () => false');
+  w.eval('syncReconciled = true');
+  const t0 = Date.now() - 60000;
+  const deliver = (at, n) => w.digestInboxSeen({ at, markdown: `## 🔝 Top of the inbox\nrun ${n}`, count: 7, model: 'qwen3.5-4b', source: 'github',
+    tasks: [{ title: `Reply to the recruiter at company ${n}`, why: '', due: '', section: 'jobs' }] });
+  const btn = () => d.querySelector('#homeContainer-d .home-digest-btn');
+  deliver(t0, 1);
+  ok(btn() && btn().querySelector('.home-digest-new'), 'a delivered digest shows New on the Home button');
+  ok(/ · 1 suggested task$/.test(btn().querySelector('.home-digest-meta').textContent), `and how many suggestions wait (${btn().querySelector('.home-digest-meta').textContent})`);
+  eq(w.localStorage.getItem('focus-digest-ui'), null, 'nothing marked read yet');
+  btn().click();
+  w.renderHome();
+  eq(btn().querySelector('.home-digest-new'), null, 'opening the Digest page marks it read');
+  eq(JSON.parse(w.localStorage.getItem('focus-digest-ui')).seenAt, t0, 'remembered on this device');
+  const again = await boot({ storage: { 'focus-app-state': w.localStorage.getItem('focus-app-state'), 'focus-digest-ui': w.localStorage.getItem('focus-digest-ui') } });
+  ok(again.d.querySelector('#homeContainer-d .home-digest-btn') && !again.d.querySelector('#homeContainer-d .home-digest-new'), 'still read after a reload');
+  const other = await boot({ storage: { 'focus-app-state': w.localStorage.getItem('focus-app-state') } });
+  ok(other.d.querySelector('#homeContainer-d .home-digest-new'), 'another device (no record of reading it) still shows New');
+  w.homeToggleDesktop(true);
+  deliver(t0 + 1000, 2);
+  ok(btn().querySelector('.home-digest-new'), 'the next digest is new again');
+  ok(/ · 2 suggested tasks$/.test(btn().querySelector('.home-digest-meta').textContent), 'counting both open suggestions');
+  w.digestToggleDesktop(true);
+  deliver(t0 + 2000, 3);
+  eq(btn().querySelector('.home-digest-new'), null, 'one that lands while the Digest page is open is read at once');
+  w.digestAddAllTasks();
+  ok(/ · 7 emails$/.test(btn().querySelector('.home-digest-meta').textContent), 'all added: the button says how many emails instead');
+  w.digestLoadSample();
+  eq(btn().querySelector('.home-digest-new'), null, 'the sample is never New');
+  w.eval('digestRun = { requestedAt: Date.now(), status: "in_progress", startedAt: Date.now() }'); w.renderHome();
+  ok(btn().querySelector('.home-digest-meta').textContent.startsWith('Running on GitHub'), 'a run in progress shows on the button');
+  w.eval('digestRun = { requestedAt: Date.now(), status: "completed", error: "The run failed on GitHub — open the log to see why." }'); w.renderHome();
+  ok(btn().classList.contains('err') && btn().querySelector('.home-digest-meta').textContent.startsWith('The run failed'), 'and a failed one, in red');
+  w.eval('digestRun = null');
+}
+
 console.log('\n── 9. Run now: token gate, dispatch, watch the run, delivery ends it ──');
 {
   const calls = [];
@@ -651,7 +760,7 @@ console.log('\n── 9. Run now: token gate, dispatch, watch the run, delivery 
   };
   const { w, d } = await boot({ fetchImpl: fakeFetch });
   w.eval('DIGEST_RUN_POLL_MS = 5');
-  w.digestGet().enabled = true; w.renderHome();
+  w.digestSetEnabled(true);
   w.digestRunNow();
   eq(calls.length, 0, 'no token → nothing dispatched');
   ok(d.getElementById('settingsModal').classList.contains('show'), 'no token → Settings opened');
@@ -695,36 +804,36 @@ console.log('\n── 9. Run now: token gate, dispatch, watch the run, delivery 
     ok(disp && disp.method === 'POST', 'workflow_dispatch POSTed');
     ok(disp && disp.url.includes('/repos/homiejhan/worky/actions/workflows/digest.yml/dispatches'), 'to the right workflow');
     eq(disp && disp.auth, 'Bearer github_pat_TEST', 'with the token');
-    ok(d.querySelector('#homeContainer-d .dg-run'), 'run status line shown on the card');
-    eq(d.querySelector('#homeContainer-d .dg-btn[onclick="digestRunNow()"]'), null, 'Run now hidden while busy');
+    ok(d.querySelector('#digestContainer-d .dg-run'), 'run status line shown on the card');
+    eq(d.querySelector('#digestContainer-d .dg-btn[onclick="digestRunNow()"]'), null, 'Run now hidden while busy');
     runsResponse = { workflow_runs: [{ status: 'in_progress', conclusion: null, html_url: 'https://github.com/homiejhan/worky/actions/runs/1', created_at: new Date(t0).toISOString(), run_started_at: new Date(t0).toISOString() }] };
     await sleep(60);
-    ok(d.querySelector('#homeContainer-d .dg-run').textContent.includes('Running on GitHub'), 'status reflects in_progress');
-    ok(d.querySelector('#homeContainer-d .dg-run a[href="https://github.com/homiejhan/worky/actions/runs/1"]'), 'link to the run');
+    ok(d.querySelector('#digestContainer-d .dg-run').textContent.includes('Running on GitHub'), 'status reflects in_progress');
+    ok(d.querySelector('#digestContainer-d .dg-run a[href="https://github.com/homiejhan/worky/actions/runs/1"]'), 'link to the run');
     ok(JSON.parse(w.localStorage.getItem('focus-digest-run')).status === 'in_progress', 'watched run persisted for reloads');
     runsResponse = { workflow_runs: [{ status: 'completed', conclusion: 'success', html_url: 'https://github.com/homiejhan/worky/actions/runs/1', created_at: new Date(t0).toISOString(), run_started_at: new Date(t0).toISOString() }] };
     await sleep(40);
-    ok(d.querySelector('#homeContainer-d .dg-run').textContent.includes('arriving'), 'success → waiting for delivery');
+    ok(d.querySelector('#digestContainer-d .dg-run').textContent.includes('arriving'), 'success → waiting for delivery');
     w.eval('syncReconciled = true');
     w.digestInboxSeen({ at: Date.now(), markdown: '## 🔝 Top of the inbox\nhi', count: 3, model: 'qwen3.5-4b', source: 'github', tasks: [] });
-    eq(d.querySelector('#homeContainer-d .dg-run'), null, 'delivery clears the run status');
+    eq(d.querySelector('#digestContainer-d .dg-run'), null, 'delivery clears the run status');
     eq(w.localStorage.getItem('focus-digest-run'), null, 'and the persisted run');
-    ok(d.querySelector('#homeContainer-d .dg-btn[onclick="digestRunNow()"]'), 'Run now back');
+    ok(d.querySelector('#digestContainer-d .dg-btn[onclick="digestRunNow()"]'), 'Run now back');
 
     /* failure path */
     runsResponse = { workflow_runs: [] };
     await w.digestRunNow();
     runsResponse = { workflow_runs: [{ status: 'completed', conclusion: 'failure', html_url: 'https://github.com/homiejhan/worky/actions/runs/2', created_at: new Date().toISOString(), run_started_at: new Date().toISOString() }] };
     await sleep(60);
-    ok(d.querySelector('#homeContainer-d .dg-run.err'), 'failed run shows an error line');
-    ok(d.querySelector('#homeContainer-d .dg-run .dg-run-x'), 'with a dismiss button');
+    ok(d.querySelector('#digestContainer-d .dg-run.err'), 'failed run shows an error line');
+    ok(d.querySelector('#digestContainer-d .dg-run .dg-run-x'), 'with a dismiss button');
     w.digestRunDismiss();
-    eq(d.querySelector('#homeContainer-d .dg-run'), null, 'dismiss clears it');
+    eq(d.querySelector('#digestContainer-d .dg-run'), null, 'dismiss clears it');
 
     /* rejected token */
     w.fetch = async (url, opts) => (/dispatches$/.test(url) ? { status: 401, ok: false, json: async () => ({}) } : { status: 200, ok: true, json: async () => ({ workflow_runs: [] }) });
     await w.digestRunNow();
-    ok(d.querySelector('#homeContainer-d .dg-run.err').textContent.includes('rejected the token'), '401 explains the token problem');
+    ok(d.querySelector('#digestContainer-d .dg-run.err').textContent.includes('rejected the token'), '401 explains the token problem');
     w.digestRunDismiss();
 
     /* remove token: from the account, so from every device */
@@ -741,7 +850,7 @@ console.log('\n── 9. Run now: token gate, dispatch, watch the run, delivery 
     eq(w.digestGithubToken(), 'github_pat_TEST', 'saved again (from another device)');
     w.eval('syncUser = null'); w.syncStop();
     eq(w.digestGithubToken(), '', 'signed out: no token on this device');
-    ok(d.querySelector('#homeContainer-d .dg-btn[onclick="digestRunNow()"]').title.startsWith('Add a GitHub token'), 'and the Home card says so');
+    ok(d.querySelector('#digestContainer-d .dg-btn[onclick="digestRunNow()"]').title.startsWith('Add a GitHub token'), 'and the Digest tab says so');
 
     await legacyTokenTests();
 
