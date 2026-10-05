@@ -95,40 +95,108 @@ console.log('\n── 4. Desktop: sidebar Daily button + right-panel pages ─�
   eq(rp.querySelectorAll('.page-head').length, 2, 'each page has its own heading');
 }
 
-console.log('\n── 5. Settings toggles ──');
+console.log('\n── 5. Settings → Sections picks the bottom bar; every tab stays reachable ──');
 {
   const { w, d } = await boot();
   d.getElementById('dailyDesktopNavTab').click();
   w.setViewEnabled('daily', false);
-  ok(!shown(d.querySelector('.tab-btn[data-view="daily"]')), 'Daily off → mobile tab hidden');
-  ok(!shown(d.querySelector('.swipe-panel[data-view="daily"]')), 'Daily off → mobile panel hidden');
-  ok(!shown(d.getElementById('dailyDesktopNavTab')), 'Daily off → sidebar button hidden');
+  ok(!shown(d.querySelector('.tab-btn[data-view="daily"]')), 'Daily off → its tab leaves the bottom bar');
+  ok(!shown(d.querySelector('.swipe-panel[data-view="daily"]')), 'and its panel the swipe track');
+  ok(d.querySelector('#sideMenuList [data-menu-view="daily"]'), 'it is still in the ☰ menu');
+  ok(shown(d.getElementById('dailyDesktopNavTab')), 'and in the sidebar on a computer');
+  eq(d.getElementById('rightPanel').dataset.page, 'daily', 'the desktop page stays on Daily');
   ok(shown(d.querySelector('.tab-btn[data-view="lists"]')), 'Lists tab unaffected');
-  ok(shown(d.getElementById('listsDesktopNavTab')), 'Lists sidebar button unaffected');
-  eq(d.getElementById('rightPanel').dataset.page, 'lists', 'desktop falls over to the Lists page');
-  eq(get(w, 'visibleViews().map(v => v.key).join(",")'), 'home,timers,lists,calendar,budget', 'swipe order skips Daily');
+  eq(get(w, 'trackViews().join(",")'), 'home,timers,lists,calendar,budget', 'swipe order skips Daily');
 
   w.setViewEnabled('lists', false);
-  ok(!shown(d.getElementById('listsDesktopNavTab')), 'Lists off → sidebar button hidden');
-  ok(get(w, 'homeDesktopOpen'), 'both off → desktop goes Home instead of a blank panel');
+  ok(shown(d.getElementById('listsDesktopNavTab')) && !get(w, 'homeDesktopOpen'), 'both off the bar: the computer keeps both pages, no jump to Home');
+  eq([...d.querySelectorAll('.tab-btn')].filter(shown).map(b => b.dataset.view).join(','), 'home,timers,calendar,budget', 'the bar holds the rest');
 
   w.setViewEnabled('daily', true);
-  ok(shown(d.querySelector('.tab-btn[data-view="daily"]')), 'Daily back on → tab returns');
-  eq(d.getElementById('rightPanel').dataset.page, 'daily', 'right panel now points at Daily (the only enabled page)');
+  ok(shown(d.querySelector('.tab-btn[data-view="daily"]')), 'Daily back on → its tab returns');
 
   w.goTab('daily', false);
   w.setViewEnabled('daily', false);
-  eq(get(w, 'currentView'), 'home', 'disabling the panel you are on sends mobile Home');
+  eq(get(w, 'currentView'), 'daily', 'taking the tab you are on off the bar leaves you on it');
+  ok(shown(d.querySelector('.swipe-panel[data-view="daily"]')), 'its panel stays while it is showing');
+  ok(!d.querySelector('.tab-btn.active') || !shown(d.querySelector('.tab-btn.active')), 'no tab on the bar lights up for it');
+  w.goTab('home', false);
+  ok(!shown(d.querySelector('.swipe-panel[data-view="daily"]')), 'once you leave it, it leaves the track');
+
+  w.goTab('timers', false);
+  w.goTab('daily', true);
+  eq(get(w, 'trackViews().join(",")'), 'home,timers,daily,calendar,budget', 'opened from the menu: in the track, in tab order, while it shows');
+  eq(trackIdx(w, d), 2, 'and the track slides to it');
+  ok(shown(d.querySelector('.swipe-panel[data-view="timers"]')), 'the tab it came from stays for the slide');
 }
 
-console.log('\n── 6. Persisted: a saved "daily off" still hides the tab after reload ──');
+console.log('\n── 6. Persisted: a saved "daily off" keeps it off the bar after reload ──');
 {
   const a = await boot();
   a.w.setViewEnabled('daily', false);
   const saved = a.w.localStorage.getItem('focus-app-state');
   const b = await boot({ 'focus-app-state': saved });
-  ok(!shown(b.d.querySelector('.tab-btn[data-view="daily"]')), 'tab hidden after reload');
-  ok(!shown(b.d.getElementById('dailyDesktopNavTab')), 'sidebar button hidden after reload');
+  ok(!shown(b.d.querySelector('.tab-btn[data-view="daily"]')), 'tab off the bar after reload');
+  ok(shown(b.d.getElementById('dailyDesktopNavTab')), 'sidebar button still there');
+  ok(b.d.querySelector('#sideMenuList [data-menu-view="daily"]'), 'and the ☰ menu entry');
+}
+
+console.log('\n── 6b. The ☰ menu, the logo and the toolbar ──');
+{
+  const { w, d } = await boot();
+  const menu = d.getElementById('sideMenu');
+  const btn = d.getElementById('menuBtn');
+  ok(btn && !menu.classList.contains('open') && btn.getAttribute('aria-expanded') === 'false', 'a ☰ button, the menu closed');
+  btn.click();
+  ok(menu.classList.contains('open') && d.getElementById('sideMenuScrim').classList.contains('open'), '☰ opens the menu over a scrim');
+  eq(btn.getAttribute('aria-expanded'), 'true', 'aria-expanded says so');
+  eq([...menu.querySelectorAll('.side-menu-item')].map(b => b.dataset.menuView).join(','), 'home,timers,lists,daily,calendar,budget', 'every tab (no Digest while the digest is off)');
+  ok(menu.querySelector('.side-menu-item.active').dataset.menuView === 'home', 'the one showing is marked');
+  menu.querySelector('[data-menu-view="calendar"]').click();
+  eq(get(w, 'currentView'), 'calendar', 'tapping one opens it');
+  ok(!menu.classList.contains('open'), 'and closes the menu');
+  btn.click();
+  ok(menu.querySelector('.side-menu-item.active').dataset.menuView === 'calendar', 'now Calendar is marked');
+  d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape' }));
+  ok(!menu.classList.contains('open'), 'Escape closes it');
+  btn.click(); d.getElementById('sideMenuScrim').click();
+  ok(!menu.classList.contains('open'), 'so does a tap beside it');
+  btn.click(); btn.click();
+  ok(!menu.classList.contains('open'), 'and ☰ again');
+  w.digestSetEnabled(true);
+  ok(menu.querySelector('[data-menu-view="digest"]'), 'with the digest on, Digest joins the menu');
+
+  w.eval('isMobileLayout = () => true');
+  w.goTab('budget', false);
+  btn.click();
+  d.getElementById('sideMenuBrand').click();
+  ok(get(w, 'currentView') === 'home' && !menu.classList.contains('open'), 'the logo in the menu goes Home');
+  w.goTab('calendar', false);
+  d.getElementById('brandHomeBtn-m').click();
+  eq(get(w, 'currentView'), 'home', 'phone: the logo in the top bar goes Home');
+  w.eval('isMobileLayout = () => false');
+  d.getElementById('budgetDesktopNavTab').click();
+  d.getElementById('brandHomeBtn-d').click();
+  ok(get(w, 'homeDesktopOpen') && !get(w, 'budgetDesktopOpen'), 'computer: the logo in the sidebar goes Home');
+
+  eq(d.getElementById('moreBtn'), null, 'no ⋯ menu any more');
+  ok(!d.getElementById('dataBar').querySelector('#exportBtn, #importBtn'), 'Export and Import are not in the toolbar');
+  d.getElementById('resetAllBtn').click();
+  ok(d.getElementById('confirmOverlay').classList.contains('show'), 'Reset the day is its own button, asking first');
+  w.closeModal('confirmOverlay');
+
+  d.getElementById('settingsBtn').click();
+  d.querySelector('[data-settings-nav="data"]').click();
+  const dataSec = d.querySelector('[data-settings-section="data"]');
+  ok(dataSec.querySelector('#exportBtn') && dataSec.querySelector('#importBtn') && dataSec.querySelector('#clearStorageBtn'), 'Settings → Data has Export, Import and Clear storage');
+  d.getElementById('exportBtn').click();
+  ok(!d.getElementById('settingsModal').classList.contains('show') && d.getElementById('exportModal').classList.contains('show'), 'Export closes Settings and opens the export dialog');
+  eq(w.decompressState(JSON.parse(d.getElementById('exportTextarea').value)).version, 1, 'with the data in it');
+  w.closeModal('exportModal');
+  d.getElementById('settingsBtn').click();
+  d.getElementById('importBtn').click();
+  ok(!d.getElementById('settingsModal').classList.contains('show') && d.getElementById('importModal').classList.contains('show'), 'Import opens the import dialog');
+  ok(d.getElementById('importModal').contains(d.getElementById('fileInput')), 'its file picker sits with it');
 }
 
 console.log('\n── 7. Daily empty states ──');

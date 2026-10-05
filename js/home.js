@@ -8,7 +8,7 @@ import { timers } from './timers.js';
 import { todoLists } from './lists.js';
 import { dbdAllEntries, dbdCompare, dbdLabelFor, dbdTasks, dbdTodayKey } from './dbd.js';
 import { taskLinkEventTitle, taskLinkHomeChipHtml } from './tasklinks.js';
-import { desktopNavSync, goTab, openBudgetTab, viewEnabled } from './views.js';
+import { desktopNavSync, goTab, openBudgetTab } from './views.js';
 import { calDesktopOpen, calEvents, calShiftSources, calToggleDesktop } from './calendar.js';
 import { gcalEvents, gcalIsConnected } from './gcal.js';
 import {
@@ -301,7 +301,6 @@ function homeStarredListsHtml(daily) {
 
 /* ── timers: compact remaining-time chips (tickAll keeps .tdisp-N live) ── */
 function homeTimersHtml() {
-  if (!viewEnabled('timers')) return '';   // the one Home section that follows its toggle
   if (!timers.length) return '';
   const chips = timers.map(t => `
     <div class="home-timer-chip hchip-${t.id}">

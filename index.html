@@ -35,10 +35,10 @@
 <div class="desktop-app" id="desktopApp">
 
   <aside class="left-panel" id="leftPanel">
-    <div class="brand brand-desktop">
+    <button class="brand brand-desktop" id="brandHomeBtn-d" title="Home" aria-label="Focus: go to Home">
       <span class="brand-mark" aria-hidden="true"></span>
       <span class="brand-name">Focus</span>
-    </div>
+    </button>
 
     <div class="wakeup-row" id="wakeupRow-d">
       <div class="wakeup-box" id="wakeupBox-d">
@@ -402,10 +402,13 @@
 
 <!-- ════════ TOOLBAR (desktop: bottom of the sidebar · mobile: top bar) ════════ -->
 <footer class="data-bar" id="dataBar">
-  <div class="brand brand-mobile">
+  <button class="data-btn icon-btn menu-btn" id="menuBtn" title="All tabs" aria-label="All tabs" aria-expanded="false" aria-controls="sideMenu">
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M3 5h12M3 9h12M3 13h12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+  </button>
+  <button class="brand brand-mobile" id="brandHomeBtn-m" title="Home" aria-label="Focus: go to Home">
     <span class="brand-mark" aria-hidden="true"></span>
     <span class="brand-name">Focus</span>
-  </div>
+  </button>
   <button class="fmt-btn" id="fmtBtn">Formats</button>
   <button class="data-btn fmt-tpl-btn" id="fmtTplBtn" title="Load a template">
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1.2" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="2" width="5" height="5" rx="1.2" stroke="currentColor" stroke-width="1.5"/><rect x="2" y="9" width="5" height="5" rx="1.2" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="9" width="5" height="5" rx="1.2" stroke="currentColor" stroke-width="1.5"/></svg>
@@ -419,25 +422,20 @@
   </button>
   <span class="fmt-banner">Editing defaults</span>
   <div class="data-spacer"></div>
-  <div class="data-more" id="dataMore">
-    <button class="data-btn" id="exportBtn" title="Export data">
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2.5v8M4.8 7.3L8 10.5l3.2-3.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 12.5h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-      <span class="lbl">Export data</span>
-    </button>
-    <button class="data-btn accent" id="importBtn" title="Import data">
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 10.5v-8M4.8 5.7L8 2.5l3.2 3.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 12.5h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-      <span class="lbl">Import data</span>
-    </button>
-    <input type="file" id="fileInput" accept=".json" style="display:none">
-    <button class="data-btn danger" id="resetAllBtn" title="Reset the day">
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2.5 8a5.5 5.5 0 1 0 1.8-4.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M2.5 2.5v3.8h3.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <span class="lbl">Reset the day</span>
-    </button>
-  </div>
-  <button class="data-btn icon-btn more-btn" id="moreBtn" title="More" aria-label="More actions" aria-expanded="false">
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="3.5" cy="8" r="1.4" fill="currentColor"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><circle cx="12.5" cy="8" r="1.4" fill="currentColor"/></svg>
+  <button class="data-btn icon-btn danger" id="resetAllBtn" title="Reset the day" aria-label="Reset the day">
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2.5 8a5.5 5.5 0 1 0 1.8-4.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M2.5 2.5v3.8h3.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
   </button>
 </footer>
+
+<!-- ════════ ☰ MENU (phone): every tab ════════ -->
+<div class="side-menu-scrim" id="sideMenuScrim"></div>
+<nav class="side-menu" id="sideMenu" aria-label="All tabs">
+  <button class="brand side-menu-brand" id="sideMenuBrand" title="Home" aria-label="Focus: go to Home">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-name">Focus</span>
+  </button>
+  <div class="side-menu-list" id="sideMenuList"></div>
+</nav>
 
 <!-- ════════ SETTINGS MODAL ════════ -->
 <!-- Master–detail: #settingsNav lists the sections (rendered by renderSettingsNav),
@@ -462,7 +460,7 @@
       </div>
 
       <section class="settings-section" data-settings-section="views">
-        <div class="modal-sub">Choose which sections appear. Home is always on.</div>
+        <div class="modal-sub">Choose the tabs on your phone's bottom bar. Every tab is always in the ☰ menu at the top left, and in the sidebar on a computer.</div>
         <div class="settings-view-list" id="settingsViewList"></div>
       </section>
 
@@ -567,6 +565,11 @@
       </section>
 
       <section class="settings-section" data-settings-section="data">
+        <div class="modal-sub">Save a copy of everything to move it to another device or keep as a backup, or bring one back in.</div>
+        <div class="theme-bg-actions">
+          <button class="modal-file-btn" id="exportBtn">Export data</button>
+          <button class="modal-file-btn" id="importBtn">Import data</button>
+        </div>
         <div class="modal-sub">Wipes all saved data on this device and starts fresh.</div>
         <button class="modal-file-btn settings-danger-btn" id="clearStorageBtn">Clear storage</button>
       </section>
@@ -601,6 +604,7 @@
     </div>
     <div class="modal-divider">or</div>
     <button class="modal-file-btn" id="importFileBtn">Load from file</button>
+    <input type="file" id="fileInput" accept=".json" style="display:none">
   </div>
 </div>
 

@@ -7,7 +7,7 @@ import {
 import { commitFormatMode, formatMode } from './formats.js';
 import { dbdTodayKey, nextDbdId, setDbdIdCounter, setDbdTasks } from './dbd.js';
 import { homeToggleDesktop } from './home.js';
-import { goTab, normalizeViews, setViews, showDesktopPage, viewEnabled } from './views.js';
+import { closeSideMenu, goTab, normalizeViews, setViews, showDesktopPage, viewExists } from './views.js';
 import {
   calDesktopOpen, calEnsureDay, calEvents, calSave, calToggleDesktop, nextCalEventId,
   setCalEventIdCtr, setCalEvents, setCalTemplates,
@@ -127,6 +127,7 @@ const TOUR_ICONS = {
   calendar: '<svg viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 6.5h12" stroke="currentColor" stroke-width="1.5"/><path d="M5 1.5v3M11 1.5v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   budget:   '<svg viewBox="0 0 16 16" fill="none"><rect x="1.5" y="4" width="13" height="9.5" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M1.5 7h13" stroke="currentColor" stroke-width="1.5"/><circle cx="11" cy="10.4" r="1.1" fill="currentColor"/></svg>',
   formats:  '<svg viewBox="0 0 16 16" fill="none"><path d="M3 12.5l1-3.5L11.2 1.8a1.4 1.4 0 0 1 2 2L6 11l-3 1.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M9.5 3.5l3 3" stroke="currentColor" stroke-width="1.5"/></svg>',
+  tabs:     '<svg viewBox="0 0 16 16" fill="none"><path d="M2.5 4h11M2.5 8h11M2.5 12h11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   settings: '<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.2" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   data:     '<svg viewBox="0 0 16 16" fill="none"><ellipse cx="8" cy="4" rx="5.5" ry="2.2" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 4v8c0 1.2 2.5 2.2 5.5 2.2s5.5-1 5.5-2.2V4" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 8c0 1.2 2.5 2.2 5.5 2.2s5.5-1 5.5-2.2" stroke="currentColor" stroke-width="1.5"/></svg>',
   finish:   '<svg viewBox="0 0 16 16" fill="none"><path d="M8 1.8l1.8 3.7 4 .6-2.9 2.8.7 4L8 11l-3.6 1.9.7-4L2.2 6.1l4-.6L8 1.8z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
@@ -134,13 +135,16 @@ const TOUR_ICONS = {
 const TOUR_HUES = {
   home: 'var(--accent)', timers: 'var(--hue-timers)', daily: 'var(--hue-daily)', dbd: 'var(--hue-lists)',
   lists: 'var(--hue-lists)', calendar: 'var(--hue-calendar)', budget: 'var(--hue-budget)',
-  formats: 'var(--accent)', settings: 'var(--accent-2)', data: 'var(--accent-3)', finish: 'var(--accent)',
+  tabs: 'var(--accent)', formats: 'var(--accent)', settings: 'var(--accent-2)', data: 'var(--accent-3)', finish: 'var(--accent)',
 };
 
 const TOUR_STEPS = [
   { key: 'home', view: 'home', title: 'Home',
     body: 'Your whole day on one page: progress so far, what\'s due, timers, the next few hours of your calendar and any list you\'ve starred. Everything here is live — tap a task to check it off without leaving Home.',
     target: { d: '#homeContainer-d .home-hero', m: '#homeContainer-m .home-hero' } },
+  { key: 'tabs', view: 'home', title: 'Getting around',
+    body: 'Every tab is in the ☰ menu at the top left on a phone, and in the sidebar on a computer. Tap the Focus logo to come back Home. Settings → Sections picks the tabs on the phone\'s bottom bar.',
+    target: { d: '.side-nav', m: ['#menuBtn', '#brandHomeBtn-m'] } },
   { key: 'timers', view: 'timers', title: 'Timers',
     body: 'Time budgets for what you want to spend the day on. Press play to start one, tap the time to edit it, and the bar shows how much is left. Mark "Woke up" to see when you\'ll finish everything.',
     target: { d: '#timersSection-d', m: ['#wakeupRow-m', '#timerStack-m'] } },
@@ -163,13 +167,13 @@ const TOUR_STEPS = [
     body: 'Formats is where you edit your defaults: which timers exist and how long they run, which Daily lists there are, and the weekly calendar templates. Not sure where to start? Templates has ready-made setups to build on; you started from Working student. Press Done to save. Reset returns the day to whatever you set here.',
     target: { d: '#fmtBtn', m: '#fmtBtn' } },
   { key: 'settings', title: 'Settings',
-    body: 'Hide sections you don\'t use, pick a theme or build your own, connect Google Calendar or a bank, and sign in to sync across your devices. Help has how-tos with pictures, the privacy policy, and this tour again.',
+    body: 'Pick the tabs on the bottom bar, choose a theme or build your own, connect Google Calendar or a bank, and sign in to sync across your devices. Help has how-tos with pictures, the privacy policy, and this tour again.',
     target: { d: '#settingsBtn', m: '#settingsBtn' } },
   { key: 'data', title: 'Your data',
-    body: 'Everything lives on this device unless you turn on cloud sync. Export saves a copy you can import anywhere; Reset starts a fresh day without touching your lists.',
-    target: { d: ['#exportBtn', '#resetAllBtn'], m: '#moreBtn' } },
+    body: 'Everything lives on this device unless you turn on cloud sync. Export and Import are in Settings → Data: a copy you can bring anywhere. Reset (↺) starts a fresh day without touching your lists.',
+    target: { d: '#resetAllBtn', m: '#resetAllBtn' } },
   { key: 'finish', view: 'home', title: 'That\'s the tour',
-    body: 'The starter setup is only a starting point. Rename the timers, replace the lists, clear the calendar, or wipe it all from Settings → Clear storage. Have a good day.',
+    body: 'The starter setup is only a starting point. Rename the timers, replace the lists, clear the calendar, or wipe it all from Settings → Data → Clear storage. Have a good day.',
     target: null },
 ];
 
@@ -205,7 +209,7 @@ function tourStart() {
   document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
   if (formatMode) commitFormatMode();
   tourMarkSeen();
-  tourSteps = TOUR_STEPS.filter(s => !s.view || viewEnabled(s.view));
+  tourSteps = TOUR_STEPS.filter(s => !s.view || viewExists(s.view));
   tourIdx = 0;
   tourActive = true;
   $('tourOverlay')?.classList.add('show');
@@ -275,7 +279,7 @@ function tourTargets(step) {
 function tourShowStep() {
   const step = tourSteps[tourIdx];
   if (!step) { tourEnd(); return; }
-  $('dataBar')?.classList.remove('open');
+  closeSideMenu();
   tourGoView(step.view);
 
   const total = tourSteps.length;

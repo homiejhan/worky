@@ -655,11 +655,18 @@ console.log('\n── 8f. The Digest tab, and the button on Home that opens it �
 
   d.getElementById('settingsBtn').click();
   const secTog = () => d.querySelector('[data-viewtoggle="digest"]');
-  ok(secTog() && !secTog().checked, 'Settings → Sections lists Digest, switched off');
-  secTog().checked = true; secTog().dispatchEvent(new w.Event('change', { bubbles: true }));
-  eq(w.digestGet().enabled, true, 'switching it on there turns the digest on');
-  ok(d.getElementById('digestEnabledToggle').checked, 'Settings → Email Digest shows it on too (one setting)');
+  eq(secTog(), null, 'digest off: Settings → Sections has no Digest row (there is no such tab)');
+  const onTog = d.getElementById('digestEnabledToggle');
+  onTog.checked = true; onTog.dispatchEvent(new w.Event('change', { bubbles: true }));
+  eq(w.digestGet().enabled, true, 'Settings → Email Digest turns the digest on');
   ok(shown(tab()) && shown(panelM()) && shown(nav()), 'the tab, its panel and the sidebar entry appear');
+  ok(secTog() && secTog().checked, 'and Settings → Sections lists it, on the bottom bar');
+  ok(d.querySelector('#sideMenuList [data-menu-view="digest"]'), 'it is in the ☰ menu');
+  secTog().checked = false; secTog().dispatchEvent(new w.Event('change', { bubbles: true }));
+  ok(!shown(tab()) && w.digestGet().enabled, 'off the bottom bar there: the tab leaves the bar, the digest stays on');
+  ok(shown(nav()) && d.querySelector('#sideMenuList [data-menu-view="digest"]'), 'still in the sidebar and the ☰ menu');
+  secTog().checked = true; secTog().dispatchEvent(new w.Event('change', { bubbles: true }));
+  ok(shown(tab()), 'back on the bar');
   ok(homeBtn('d') && homeBtn('m'), 'Home shows the button, on both layouts');
   eq(homeBtn('d').querySelector('.home-digest-meta').textContent, 'Nothing delivered yet', 'which says nothing has come yet');
   eq(d.querySelectorAll('#homeContainer-d .dg-page, #homeContainer-d .dg-md, #homeContainer-d .dg-todo').length, 0, 'the digest itself is no longer on Home');

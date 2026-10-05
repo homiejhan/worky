@@ -12,7 +12,9 @@ import {
   openExportModal, openImportModal, resetAll,
 } from './io.js';
 import { homeToggleDesktop } from './home.js';
-import { goTab, setSwipePanelWidths, showDesktopDaily, showDesktopLists } from './views.js';
+import {
+  bindSideMenu, goHome, goTab, setSwipePanelWidths, showDesktopDaily, showDesktopLists,
+} from './views.js';
 import { openSettings, settingsBack, settingsShow, setViewEnabled } from './settings.js';
 import {
   calNavDay, calRenderShiftUI, calSendToGcal, calToggleDesktop, calToggleShift,
@@ -73,23 +75,16 @@ export function bindStatic() {
   $('addListBtn-d')?.addEventListener('click', addTodoList);
   $('addListBtn-m')?.addEventListener('click', addTodoList);
 
-  /* data bar — on phones Export / Import / Reset live behind the ⋯ button */
-  const dataBar = $('dataBar'), moreBtn = $('moreBtn');
-  const setMore = open => {
-    if (!dataBar) return;
-    dataBar.classList.toggle('open', open);
-    if (moreBtn) moreBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-  };
-  moreBtn?.addEventListener('click', e => { e.stopPropagation(); setMore(!dataBar.classList.contains('open')); });
-  document.addEventListener('click', e => {
-    if (dataBar?.classList.contains('open') && !e.target.closest('#dataMore')) setMore(false);
-  });
-  $('dataMore')?.addEventListener('click', e => { if (e.target.closest('button')) setMore(false); });
+  /* toolbar: the ☰ menu (phones), the logo (Home), Formats, Settings, Reset the day */
+  bindSideMenu();
+  $('brandHomeBtn-d')?.addEventListener('click', goHome);
+  $('brandHomeBtn-m')?.addEventListener('click', goHome);
   $('fmtBtn')?.addEventListener('click', toggleFormatMode);
   $('fmtTplBtn')?.addEventListener('click', openFormatTemplates);
-  $('exportBtn')?.addEventListener('click', openExportModal);
-  $('importBtn')?.addEventListener('click', openImportModal);
   $('resetAllBtn')?.addEventListener('click', () => $('confirmOverlay').classList.add('show'));
+  /* Settings → Data: Export and Import open their own dialogs */
+  $('exportBtn')?.addEventListener('click', () => { closeModal('settingsModal'); openExportModal(); });
+  $('importBtn')?.addEventListener('click', () => { closeModal('settingsModal'); openImportModal(); });
   $('clearStorageBtn')?.addEventListener('click', confirmClearStorage);
   $('syncConnectBtn')?.addEventListener('click', syncBtnClick);
   $('syncImportBtn')?.addEventListener('click', syncChooseImport);

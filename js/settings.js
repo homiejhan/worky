@@ -1,11 +1,11 @@
 /* settings.js — The Settings modal. */
 import { $ } from './util.js';
 import { saveToLocal } from './persistence.js';
-import { applyViewVisibility, VIEW_DEFS, viewEnabled, views } from './views.js';
+import { applyViewVisibility, VIEW_DEFS, viewEnabled, viewExists, views } from './views.js';
 import { gcalIsConnected, gcalUpdateBtn } from './gcal.js';
 import { syncUpdateUI } from './sync.js';
 import { renderThemePresets } from './theme.js';
-import { digestRenderSettings, digestSetEnabled } from './digest.js';
+import { digestRenderSettings } from './digest.js';
 import { bankRenderSettings } from './bank.js';
 
 /* ── Settings ──
@@ -16,7 +16,7 @@ import { bankRenderSettings } from './bank.js';
  * open section ('detail'), with a back button — CSS decides which applies,
  * so JS never needs to know the breakpoint. */
 const SETTINGS_SECTIONS = [
-  { key: 'views',      label: 'Sections',        desc: 'Show or hide tabs',
+  { key: 'views',      label: 'Sections',        desc: 'Tabs on the bottom bar',
     icon: '<rect x="2.2" y="2.2" width="4.8" height="4.8" rx="1.3" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="2.2" width="4.8" height="4.8" rx="1.3" stroke="currentColor" stroke-width="1.5"/><rect x="2.2" y="9" width="4.8" height="4.8" rx="1.3" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="9" width="4.8" height="4.8" rx="1.3" stroke="currentColor" stroke-width="1.5"/>' },
   { key: 'appearance', label: 'Appearance',      desc: 'Theme, colors and fonts',
     icon: '<circle cx="8" cy="8" r="5.6" stroke="currentColor" stroke-width="1.5"/><path d="M8 2.4a5.6 5.6 0 0 1 0 11.2z" fill="currentColor"/>' },
@@ -30,7 +30,7 @@ const SETTINGS_SECTIONS = [
     icon: '<rect x="1.8" y="3.4" width="12.4" height="9.2" rx="1.9" stroke="currentColor" stroke-width="1.5"/><path d="M2.4 4.7L8 8.9l5.6-4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' },
   { key: 'help',       label: 'Help',            desc: 'How-tos, tour and privacy',
     icon: '<circle cx="8" cy="8" r="5.8" stroke="currentColor" stroke-width="1.5"/><path d="M6.4 6.4a1.7 1.7 0 1 1 2.5 1.5c-.6.35-.9.7-.9 1.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.3" r="0.85" fill="currentColor"/>' },
-  { key: 'data',       label: 'Data',            desc: 'Clear storage on this device',
+  { key: 'data',       label: 'Data',            desc: 'Export, import or clear',
     icon: '<ellipse cx="8" cy="4" rx="5.5" ry="2.2" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 4v8c0 1.2 2.5 2.2 5.5 2.2s5.5-1 5.5-2.2V4" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 8c0 1.2 2.5 2.2 5.5 2.2s5.5-1 5.5-2.2" stroke="currentColor" stroke-width="1.5"/>' },
 ];
 let settingsSection = 'views';     // last section shown; desktop reopens on it
@@ -78,7 +78,7 @@ export function settingsBack() {
 export function renderSettings() {
   const list = $('settingsViewList');
   if (list) {
-    list.innerHTML = VIEW_DEFS.map(v => {
+    list.innerHTML = VIEW_DEFS.filter(v => viewExists(v.key)).map(v => {
       const locked = v.key === 'home';
       return `
         <div class="settings-view-row">
@@ -102,9 +102,9 @@ export function renderSettings() {
   digestRenderSettings();
 }
 
+/* Put a tab on the phone's bottom bar or take it off (it stays in the ☰ menu). */
 export function setViewEnabled(key, on) {
   if (key === 'home') return;
-  if (key === 'digest') { digestSetEnabled(on); return; }   // the tab is the digest's own switch
   views[key] = !!on;
   saveToLocal();
   applyViewVisibility();

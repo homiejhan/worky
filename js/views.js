@@ -1,16 +1,16 @@
-/* views.js — Which views are on, mobile tabs and swipe, desktop panel navigation, the
- * touch-offset guard. */
+/* views.js — Which tabs are on the phone's bottom bar, the ☰ menu with every tab, mobile
+ * tabs and swipe, desktop panel navigation, the touch-offset guard. */
 import { $, isMobileLayout } from './util.js';
 import { homeDesktopOpen, homeToggleDesktop, renderHome } from './home.js';
 import { calDesktopOpen, calRenderMobile, calToggleDesktop } from './calendar.js';
 import { budgetDesktopOpen, budgetToggleDesktop, renderBudget } from './budget.js';
 import { digestDesktopOpen, digestOn, digestToggleDesktop, renderDigest } from './digest.js';
 
-/* view visibility — which sections appear in the UI, in tab-bar order.
- * 'home' is always on and is not stored; 'digest' is on while the email
- * digest is (digest.enabled, digest.js), so it isn't stored here either. On
- * mobile every view is one swipe panel, and currentView holds the key of the
- * one showing. */
+/* The tabs, in tab-bar order. Every one of them is always reachable: on a
+ * phone through the ☰ menu (and the bottom bar), on a computer through the
+ * sidebar. The one exception is Digest, which exists while the email digest
+ * is on (digest.enabled, digest.js). On mobile every tab is one swipe panel,
+ * and currentView holds the key of the one showing. */
 export const VIEW_DEFS = [
   { key: 'home',     label: 'Home' },
   { key: 'timers',   label: 'Timers' },
@@ -20,7 +20,9 @@ export const VIEW_DEFS = [
   { key: 'budget',   label: 'Budget' },
   { key: 'digest',   label: 'Digest' },
 ];
-export let views = { timers: true, daily: true, lists: true, calendar: true, budget: true };
+/* views — which tabs sit on the phone's bottom bar (Settings → Sections).
+ * Home always does, so it isn't stored. Synced with the state. */
+export let views = { timers: true, daily: true, lists: true, calendar: true, budget: true, digest: true };
 export function setViews(v) { views = v; }
 export let currentView = 'home';
 
@@ -52,14 +54,10 @@ export function showDesktopPage(page) {
 export function showDesktopLists() { showDesktopPage('lists'); }
 export function showDesktopDaily() { showDesktopPage('daily'); }
 
-/* ───────────────────────── VIEWS + MOBILE TABS ─────────────────────────
- * A disabled view disappears from the tab bar (mobile) and the left nav /
- * right panel (desktop). Nothing about its data or behaviour changes — the
- * Home page keeps showing day-by-day tasks, the balance, starred lists and
- * the agenda regardless. Timers is the one section Home drops when off. */
+/* ───────────────────────── VIEWS + MOBILE TABS ───────────────────────── */
 export function normalizeViews(v) {
-  const out = { timers: true, daily: true, lists: true, calendar: true, budget: true };
-  if (Array.isArray(v)) {                       // compressed form: list of disabled keys
+  const out = { timers: true, daily: true, lists: true, calendar: true, budget: true, digest: true };
+  if (Array.isArray(v)) {                       // compressed form: list of keys off the bar
     v.forEach(k => { if (k in out) out[k] = false; });
   } else if (v && typeof v === 'object') {
     Object.keys(out).forEach(k => { if (v[k] === false) out[k] = false; });
@@ -70,37 +68,31 @@ export function viewsOffList(v) {
   const n = normalizeViews(v);
   return Object.keys(n).filter(k => !n[k]);
 }
+/* Is there such a tab at all (in the ☰ menu, the sidebar, a panel to show)? */
+export function viewExists(key) {
+  if (!VIEW_DEFS.some(v => v.key === key)) return false;
+  return key === 'digest' ? digestOn() : true;
+}
+/* Is it on the phone's bottom bar? (Settings → Sections) */
 export function viewEnabled(key) {
   if (!key) return true;
-  if (key === 'home') return true;              // Home can never be turned off
-  if (key === 'digest') return digestOn();
-  return views[key] !== false;
+  if (key === 'home') return true;              // Home always is
+  return viewExists(key) && views[key] !== false;
 }
-function visibleViews() { return VIEW_DEFS.filter(v => viewEnabled(v.key)); }
-/* Mobile: is there a swipe panel showing for this key? Unlike viewEnabled,
- * a key that isn't a view at all counts as off. */
-function panelEnabled(key) { return VIEW_DEFS.some(v => v.key === key) && viewEnabled(key); }
 
-/* Show/hide every element tagged with data-view, close any desktop overlay
- * whose view was just disabled, and rebuild the mobile tab strip. */
+/* Show/hide every element tagged with data-view (only Digest can be gone),
+ * close the Digest page if the digest was switched off, and rebuild the
+ * mobile tab strip and the ☰ menu. */
 export function applyViewVisibility() {
   document.querySelectorAll('[data-view]').forEach(el => {
     if (el.classList.contains('swipe-panel') || el.classList.contains('tab-btn')) return;
-    el.style.display = viewEnabled(el.dataset.view) ? '' : 'none';
+    el.style.display = viewExists(el.dataset.view) ? '' : 'none';
   });
-  if (!viewEnabled('calendar') && calDesktopOpen)   calToggleDesktop();
-  if (!viewEnabled('budget')   && budgetDesktopOpen) budgetToggleDesktop(false);
-  if (!viewEnabled('digest')   && digestDesktopOpen) digestToggleDesktop(false);
-  /* The right panel shows Lists or Daily. If the page it is on was just
-   * switched off, fall over to the other one — or Home when both are off. */
-  if (!viewEnabled(desktopPage)) {
-    const other = desktopPage === 'lists' ? 'daily' : 'lists';
-    if (viewEnabled(other)) desktopPage = other;
-    else if (!homeDesktopOpen && !calDesktopOpen && !budgetDesktopOpen && !digestDesktopOpen) homeToggleDesktop(true);
-  }
+  if (!viewExists('digest') && digestDesktopOpen) digestToggleDesktop(false);
   desktopNavSync();
-  if (!panelEnabled(currentView)) currentView = 'home';
+  if (!viewExists(currentView)) currentView = 'home';
   setSwipePanelWidths();
+  renderSideMenu();
   renderHome();
 }
 
@@ -109,57 +101,128 @@ function swipeFrameWidth() {
   return (c && c.clientWidth) || window.innerWidth;
 }
 
-export function setSwipePanelWidths() {
+/* Mobile: the swipe track holds the bottom bar's tabs, the one showing (it
+ * may have come from the ☰ menu), and while a slide runs, the two it runs
+ * between. Swiping moves through it in tab order. */
+let keepInTrack = [];
+let slideTimer = null;
+function trackViews() {
+  return VIEW_DEFS.map(v => v.key).filter(k => viewExists(k) && (viewEnabled(k) || k === currentView || keepInTrack.includes(k)));
+}
+function placeTrack(showKey, animate) {
   const w = swipeFrameWidth();
+  const keys = trackViews();
   const track = $('swipeTrack');
   document.querySelectorAll('.swipe-panel').forEach(p => {
-    const on = panelEnabled(p.dataset.view);
+    const on = keys.includes(p.dataset.view);
     p.style.display = on ? '' : 'none';
     if (on) p.style.width = w + 'px';
   });
   document.querySelectorAll('.tab-btn').forEach(b => {
-    const on = panelEnabled(b.dataset.view);
-    b.style.display = on ? '' : 'none';
+    b.style.display = viewEnabled(b.dataset.view) ? '' : 'none';
     b.classList.toggle('active', b.dataset.view === currentView);
   });
-  const vis = visibleViews();
-  const idx = Math.max(0, vis.findIndex(v => v.key === currentView));
   if (track) {
-    track.style.width = (w * vis.length) + 'px';
-    track.style.transition = 'none';
-    track.style.transform = `translateX(${-idx * w}px)`;
+    track.style.width = (w * keys.length) + 'px';
+    track.style.transition = animate ? 'transform 0.32s cubic-bezier(0.3,0.7,0.4,1)' : 'none';
+    track.style.transform = `translateX(${-Math.max(0, keys.indexOf(showKey)) * w}px)`;
   }
 }
+export function setSwipePanelWidths() { placeTrack(currentView, false); }
 
-/* Mobile: slide to a view's panel (Home when that view is off). */
+/* Mobile: go to a tab (Home when there is no such tab). */
 export function goTab(key, animate) {
-  if (!panelEnabled(key)) key = 'home';
+  if (!viewExists(key)) key = 'home';
+  const from = currentView;
   currentView = key;
-  const idx = Math.max(0, visibleViews().findIndex(v => v.key === key));
-  const w = swipeFrameWidth();
+  clearTimeout(slideTimer);
   const track = $('swipeTrack');
-  if (track) {
-    track.style.transition = animate === false ? 'none' : 'transform 0.32s cubic-bezier(0.3,0.7,0.4,1)';
-    track.style.transform = `translateX(${-idx * w}px)`;
+  if (animate !== false && from !== key && track) {
+    keepInTrack = [from, key];                    // both in the track, still on `from`…
+    placeTrack(from, false);
+    void track.offsetWidth;                       // (start position committed)
+    placeTrack(key, true);                        // …then slide
+    slideTimer = setTimeout(() => { keepInTrack = []; placeTrack(currentView, false); }, 360);
+  } else {
+    keepInTrack = [];
+    placeTrack(key, false);
   }
-  document.querySelectorAll('.tab-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.view === key);
-  });
+  renderSideMenu();
   if (key === 'calendar') calRenderMobile({ fresh: true });   // opening the tab starts at 7am
   if (key === 'home')     renderHome();
   if (key === 'budget')   renderBudget();
   if (key === 'digest')   renderDigest();
 }
 
+/* Home, from the logo, on whichever layout is showing. */
+export function goHome() {
+  closeSideMenu();
+  if (isMobileLayout()) goTab('home', true);
+  else homeToggleDesktop(true);
+}
+
+/* ── the ☰ menu (phones): every tab, in a panel from the left ── */
+let sideMenuOpen = false;
+export function renderSideMenu() {
+  const list = $('sideMenuList');
+  if (!list) return;
+  list.innerHTML = VIEW_DEFS.filter(v => viewExists(v.key)).map(v => {
+    const ico = document.querySelector(`.tab-btn[data-view="${v.key}"] .tab-ico`);
+    const on = v.key === currentView;
+    return `
+      <button class="side-menu-item tab-${v.key}${on ? ' active' : ''}" data-menu-view="${v.key}"${on ? ' aria-current="page"' : ''}>
+        <span class="side-menu-ico" aria-hidden="true">${ico ? ico.innerHTML : ''}</span>
+        <span class="side-menu-label">${v.label}</span>
+      </button>`;
+  }).join('');
+}
+export function openSideMenu() {
+  if (sideMenuOpen) return;
+  sideMenuOpen = true;
+  renderSideMenu();
+  $('sideMenu')?.classList.add('open');
+  $('sideMenuScrim')?.classList.add('open');
+  $('menuBtn')?.setAttribute('aria-expanded', 'true');
+  ($('sideMenu')?.querySelector('.side-menu-item.active') || $('sideMenu')?.querySelector('.side-menu-item'))?.focus();
+}
+export function closeSideMenu(refocus) {
+  if (!sideMenuOpen) return;
+  sideMenuOpen = false;
+  $('sideMenu')?.classList.remove('open');
+  $('sideMenuScrim')?.classList.remove('open');
+  $('menuBtn')?.setAttribute('aria-expanded', 'false');
+  if (refocus) $('menuBtn')?.focus();
+}
+export function toggleSideMenu() { if (sideMenuOpen) closeSideMenu(true); else openSideMenu(); }
+export function bindSideMenu() {
+  $('menuBtn')?.addEventListener('click', toggleSideMenu);
+  $('sideMenuScrim')?.addEventListener('click', () => closeSideMenu(true));
+  $('sideMenuBrand')?.addEventListener('click', goHome);
+  $('sideMenuList')?.addEventListener('click', e => {
+    const b = e.target.closest('[data-menu-view]');
+    if (!b) return;
+    closeSideMenu();
+    goTab(b.dataset.menuView, false);
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && sideMenuOpen) closeSideMenu(true); });
+  /* a swipe to the left closes it, like the panel it is */
+  const menu = $('sideMenu');
+  let sx = 0, sy = 0;
+  menu?.addEventListener('touchstart', e => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
+  menu?.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
+    if (dx < -40 && Math.abs(dx) > Math.abs(dy)) closeSideMenu();
+  }, { passive: true });
+}
+
 /* Total-balance chip on Home opens Budget on whichever layout is active. */
 export function openBudgetTab() {
-  if (!viewEnabled('budget')) return;
   if (isMobileLayout()) goTab('budget', true);
   else budgetToggleDesktop(true);
 }
 /* So does the Email digest button, the Digest tab. */
 export function openDigestTab() {
-  if (!viewEnabled('digest')) return;
+  if (!viewExists('digest')) return;
   if (isMobileLayout()) goTab('digest', true);
   else digestToggleDesktop(true);
 }
@@ -192,10 +255,10 @@ export function initSwipe() {
     const dx = e.changedTouches[0].clientX - sx;
     const dy = e.changedTouches[0].clientY - sy;
     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
-      const vis = visibleViews();
-      const at = Math.max(0, vis.findIndex(v => v.key === currentView));
-      const next = dx < 0 ? Math.min(at + 1, vis.length - 1) : Math.max(at - 1, 0);
-      goTab(vis[next].key, true);
+      const keys = trackViews();
+      const at = Math.max(0, keys.indexOf(currentView));
+      const next = keys[dx < 0 ? Math.min(at + 1, keys.length - 1) : Math.max(at - 1, 0)];
+      if (next !== currentView) goTab(next, true);
     }
     sx = 0; swiping = false;
   }, { passive: true });
