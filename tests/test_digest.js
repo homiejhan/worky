@@ -727,7 +727,7 @@ console.log('\n── 8f. The Digest tab, and the button on Home that opens it �
 
   d.getElementById('settingsBtn').click();
   const secTog = () => d.querySelector('[data-viewtoggle="digest"]');
-  eq(secTog(), null, 'digest off: Settings → Sections has no Digest row (there is no such tab)');
+  ok(secTog() && !secTog().checked, 'digest off: Settings → Sections still lists Digest, off');
   const onTog = d.getElementById('digestEnabledToggle');
   onTog.checked = true; onTog.dispatchEvent(new w.Event('change', { bubbles: true }));
   eq(w.digestGet().enabled, true, 'Settings → Email Digest turns the digest on');
@@ -785,6 +785,90 @@ console.log('\n── 8f. The Digest tab, and the button on Home that opens it �
   d.getElementById('digestRunSettingsBtn').disabled = false;
   d.getElementById('digestRunSettingsBtn').click();
   eq(w.eval('currentView'), 'digest', 'Settings → Run digest now goes to the Digest tab, where the run shows');
+}
+
+console.log('\n── 8f2. Off the bottom bar (Settings → Sections), the digest is still a tap away on Home ──');
+{
+  const shown = el => !!el && el.style.display !== 'none';
+  const { w, d } = await boot();
+  w.eval('syncReconciled = true');
+  w.eval('isMobileLayout = () => true');
+  const tab = () => d.querySelector('.tab-btn[data-view="digest"]');
+  const homeBtn = () => d.querySelector('#homeContainer-m .home-digest-btn');
+  const secTog = () => d.querySelector('[data-viewtoggle="digest"]');
+  const flip = (el, on) => { el.checked = on; el.dispatchEvent(new w.Event('change', { bubbles: true })); };
+  const deliver = at => w.digestInboxSeen({ at, markdown: '## 🔝 Top of the inbox\nhi', count: 3, model: 'm', source: 'github', tasks: [] });
+  deliver(Date.now() - 5000);
+  ok(w.digestGet().enabled && shown(tab()), 'a delivered digest: on, and on the bottom bar');
+
+  d.getElementById('settingsBtn').click();
+  flip(secTog(), false);
+  w.closeModal('settingsModal');
+  ok(!shown(tab()) && w.digestGet().enabled && w.eval('views.digest') === false, 'Sections → Digest off: off the bar, the digest itself stays on');
+  ok(homeBtn(), 'the Email digest button is still on Home');
+  homeBtn().click();
+  eq(w.eval('currentView'), 'digest', 'and it opens the Digest page');
+  ok(!shown(tab()), 'without Digest joining the bottom bar…');
+  eq([...d.querySelectorAll('.tab-btn.active')].filter(shown).length, 0, '…or any tab on the bar lighting up for it');
+  ok(d.querySelector('#digestContainer-m .dg-page'), 'the page is drawn');
+  w.goTab('home', false);
+  ok(!shown(tab()), 'back on Home: still not on the bar');
+  w.goTab('budget', false);
+  d.getElementById('menuBtn').click();
+  d.querySelector('#sideMenuList [data-menu-view="digest"]').click();
+  ok(w.eval('currentView') === 'digest' && !shown(tab()), 'the ☰ menu opens it the same way');
+  deliver(Date.now());
+  ok(!shown(tab()) && w.eval('views.digest') === false, 'the next digest arriving does not put it back on the bar');
+  const again = await boot({ storage: { 'focus-app-state': w.localStorage.getItem('focus-app-state') } });
+  again.w.eval('isMobileLayout = () => true');
+  ok(again.d.querySelector('#homeContainer-m .home-digest-btn') && !shown(again.d.querySelector('.tab-btn[data-view="digest"]')), 'after a reload: the button on Home, nothing on the bar');
+
+  d.getElementById('settingsBtn').click();
+  flip(secTog(), true);
+  ok(shown(tab()), 'Sections → Digest on: back on the bar');
+  flip(d.getElementById('digestEnabledToggle'), false);
+  ok(!w.digestGet().enabled && !homeBtn() && !shown(tab()) && w.eval('views.digest') === false
+    && !d.querySelector('#sideMenuList [data-menu-view="digest"]'), 'Settings → Email Digest off: gone from Home, the ☰ menu and the bar');
+  ok(secTog() && !secTog().checked, 'Sections shows it off');
+  flip(secTog(), true);
+  ok(w.digestGet().enabled && shown(tab()) && homeBtn(), 'and switching it on there turns the digest back on, on the bar');
+  flip(d.getElementById('digestEnabledToggle'), false);
+  flip(d.getElementById('digestEnabledToggle'), true);
+  ok(shown(tab()), 'Email Digest on again puts it back on the bar too');
+  w.closeModal('settingsModal');
+  w.eval('isMobileLayout = () => false');
+}
+
+console.log('\n── 8f3. A copy saved while Sections still switched the whole digest off ──');
+{
+  /* the old Sections switch wrote digest.enabled = false and never views.digest */
+  const shown = el => !!el && el.style.display !== 'none';
+  const base = await boot();
+  base.w.digestLoadSample();
+  const st = JSON.parse(base.w.localStorage.getItem('focus-app-state'));
+  const oldCopy = JSON.stringify({ ...st, digest: { ...st.digest, enabled: false }, views: { timers: true, daily: true, lists: true, calendar: true, budget: true } });
+  const { w, d } = await boot({ storage: { 'focus-app-state': oldCopy } });
+  w.eval('isMobileLayout = () => true'); w.renderHome();
+  ok(w.digestGet().enabled && w.eval('views.digest') === false, 'opened: the digest is on again, just off the bottom bar');
+  ok(d.querySelector('#homeContainer-m .home-digest-btn'), 'so the Email digest button is back on Home');
+  ok(!shown(d.querySelector('.tab-btn[data-view="digest"]')), 'and Digest stays off the bar');
+  d.getElementById('settingsBtn').click();
+  ok(d.querySelector('[data-viewtoggle="digest"]') && !d.querySelector('[data-viewtoggle="digest"]').checked, 'Sections shows Digest off, as it was left');
+  w.closeModal('settingsModal');
+  eq(JSON.parse(w.localStorage.getItem('focus-app-state')).views.digest, false, 'and saves it that way');
+
+  const fresh = await boot();
+  ok(!fresh.w.digestGet().enabled && !fresh.d.querySelector('#homeContainer-d .home-digest-btn'), 'a digest never used stays off');
+  const turnedOff = JSON.stringify({ ...st, digest: { ...st.digest, enabled: false }, views: { ...st.views, digest: false } });
+  const off = await boot({ storage: { 'focus-app-state': turnedOff } });
+  ok(!off.w.digestGet().enabled && !off.d.querySelector('#homeContainer-d .home-digest-btn'), 'one switched off in Settings → Email Digest stays off');
+
+  const viaCloud = await boot();
+  viaCloud.w.loadStateString(oldCopy);
+  ok(viaCloud.w.digestGet().enabled && viaCloud.w.eval('views.digest') === false, 'the same for an old copy arriving from the cloud');
+  const viaImport = await boot();
+  viaImport.w.applyState(JSON.parse(oldCopy));
+  ok(viaImport.w.digestGet().enabled && viaImport.w.eval('views.digest') === false, 'or through Import');
 }
 
 console.log('\n── 8g. A new digest says so on Home until its tab has been opened ──');

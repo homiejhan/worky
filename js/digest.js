@@ -11,7 +11,7 @@ import { saveToLocal } from './persistence.js';
 import { todoLists } from './lists.js';
 import { dbdById, dbdLabelFor, dbdTasks, dbdTodayKey, nextDbdId, renderDbd } from './dbd.js';
 import { homeDesktopOpen, homeToggleDesktop, renderHome } from './home.js';
-import { applyViewVisibility, currentView, desktopNavSync, openDigestTab } from './views.js';
+import { applyViewVisibility, currentView, desktopNavSync, openDigestTab, views } from './views.js';
 import { calDesktopOpen, calToggleDesktop } from './calendar.js';
 import { budgetDesktopOpen, budgetToggleDesktop } from './budget.js';
 import { openSettings, renderSettings } from './settings.js';
@@ -507,15 +507,34 @@ function digestUnseen() {
   return !!(last && last.source !== 'sample' && last.at > digestSeenAt);
 }
 
-/* The Digest tab is on while the digest is (Settings → Email Digest, or
- * Settings → Sections): one setting, synced, so every device shows the tab. */
+/* The digest is on (its button on Home, the Digest tab in the ☰ menu and the
+ * sidebar) while digest.enabled is: Settings → Email Digest, or a delivery.
+ * Synced, so every device shows it. Settings → Sections only decides whether
+ * it is on a phone's bottom bar too (views.digest). */
 export function digestOn() { return !!(digest && digest.enabled); }
+/* Settings → Email Digest: the digest on or off everywhere (Home, the ☰
+ * menu, the sidebar). Off takes it off the phone's bottom bar too, and on
+ * puts it back there; Settings → Sections can then take it off the bar alone. */
 export function digestSetEnabled(on) {
   digestGet().enabled = !!on;
+  views.digest = !!on;
   saveToLocal();
   applyViewVisibility();         // the tab comes or goes (and Home redraws)
   renderSettings();              // both switches show it
   renderDigest();
+}
+
+/* Before Sections only picked the bottom bar, its Digest switch turned the
+ * whole digest off, Home button and all. A copy from then (the digest in use
+ * but off, and still on the bar, which an off digest never is now) gets what
+ * that switch means today: the digest stays, just not on the bottom bar.
+ * Run on every copy that is loaded (hydrateState). */
+export function digestFromOldSwitch() {
+  const d = digestGet();
+  if (d.enabled || views.digest === false || !(d.last || d.suggestions.length)) return false;
+  d.enabled = true;
+  views.digest = false;
+  return true;
 }
 
 /* Desktop: the Digest page covers the right panel, like Home and Budget. */
@@ -751,7 +770,7 @@ function digestRunHtml() {
 
 /* ── sample digest: shows the tab without any backend ── */
 export function digestLoadSample() {
-  digestGet().enabled = true;
+  if (!digestOn()) { digestGet().enabled = true; views.digest = true; }   // like switching it on
   const at = Date.now();
   digestGet().last = { at, markdown: DIGEST_SAMPLE_MD, count: 23, model: 'sample', source: 'sample' };
   digestMergeSuggestions(digestNormalizeTasks(DIGEST_SAMPLE_TASKS, true), at);

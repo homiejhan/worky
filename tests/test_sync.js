@@ -77,8 +77,18 @@ const fpOf = w => w.eval('syncFingerprint(gatherState())');
   A.w.digestAddTask(2); await sleep(2500);
   eq(B.w.eval('dbdTasks.length'), A.w.eval('dbdTasks.length'), 'added task reached B');
   ok(B.w.digestGet().suggestions[1].status === 'added' && B.w.dbdById(B.w.digestGet().suggestions[1].dbdId), 'B shows it as added');
-  B.w.digestGet().enabled = false; B.w.saveToLocal(); await sleep(2500);
+  B.w.digestSetEnabled(false); await sleep(2500);
   eq(A.w.digestGet().enabled, false, 'B → A works too');
+  eq(A.w.eval('views.digest'), false, 'off the bottom bar with it');
+  B.w.digestSetEnabled(true); await sleep(2500);
+  ok(A.w.digestGet().enabled && A.w.eval('views.digest') === true, 'and back on, on the bar');
+  /* what Settings → Sections did before it only picked the bottom bar (a
+   * device still on that version): the digest off, the bar left alone */
+  B.w.digestGet().enabled = false; B.w.saveToLocal(); await sleep(2500);
+  ok(A.w.digestGet().enabled && A.w.eval('views.digest') === false, 'such a copy reaches A as the digest on, off the bar');
+  ok(await until(() => B.w.digestGet().enabled && B.w.eval('views.digest') === false, 5000), 'A sends that back once, and B settles on the same');
+  const cloudSt = JSON.parse(cloud.val.state);
+  ok(cloudSt.digest.enabled && cloudSt.views.digest === false, 'so does the cloud');
   const w1 = cloud.writes; await sleep(2500);
   eq(cloud.writes, w1, 'idle: no further cloud writes');
 

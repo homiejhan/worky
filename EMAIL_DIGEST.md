@@ -50,9 +50,15 @@ workflow are documented in [`backend/README.md`](backend/README.md).
 ## In the app
 
 **Settings → Email Digest**
-- *Show the Digest tab* — the only switch: the tab (in the ☰ menu and the
-  sidebar) and the button on Home. A delivery turns it on automatically.
-  Settings → Sections only decides whether it also sits on a phone's bottom bar.
+- *Show the email digest* — the digest on or off everywhere: the button on Home,
+  the tab in the ☰ menu and the sidebar. Off also takes it off a phone's bottom
+  bar, on puts it back there. A delivery turns it on automatically.
+- Settings → Sections only decides whether Digest sits on a phone's bottom bar
+  (`views.digest`); off there, the button on Home and the ☰ menu still open it.
+  Sections lists Digest even while the digest is off, and switching it on there
+  turns the digest on. (Before, that switch turned the whole digest off; a copy
+  saved then — the digest in use but off, and never taken off the bar — opens
+  with the digest on and off the bar: `digestFromOldSwitch`.)
 - Status line — when the last digest arrived, how many emails, which model.
 - *Run it from any device* — paste a GitHub fine-grained token (scope: this repo,
   **Actions: Read and write**, with an expiry). It's saved to the signed-in account

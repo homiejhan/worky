@@ -28,7 +28,7 @@ import {
   applyTheme, compressTheme, decompressTheme, normalizeTheme, renderThemeUI, setTheme, themeGet,
 } from './theme.js';
 import {
-  compressDigest, decompressDigest, digestRecord, normalizeDigest, renderDigest, setDigest,
+  compressDigest, decompressDigest, digestFromOldSwitch, digestRecord, normalizeDigest, renderDigest, setDigest,
 } from './digest.js';
 import { normalizeShiftCals, setShiftCals, shiftCals } from './gcal.js';
 
@@ -281,6 +281,7 @@ function hydrateState(st) {
   setViews(normalizeViews(st.views));
   setTheme(normalizeTheme(st.theme));
   setDigest(normalizeDigest(st.digest));
+  digestFromOldSwitch();                          // a copy from before Sections only picked the bar
   setShiftCals(normalizeShiftCals(st.shiftCals));
   setRunway(normalizeRunway(st.runway));
   setBankBudget(normalizeBankBudget(st.bankBudget));

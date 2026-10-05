@@ -1,11 +1,11 @@
 /* settings.js — The Settings modal. */
 import { $ } from './util.js';
 import { saveToLocal } from './persistence.js';
-import { applyViewVisibility, VIEW_DEFS, viewEnabled, viewExists, views } from './views.js';
+import { applyViewVisibility, VIEW_DEFS, viewEnabled, views } from './views.js';
 import { gcalIsConnected, gcalUpdateBtn } from './gcal.js';
 import { syncUpdateUI } from './sync.js';
 import { renderThemePresets } from './theme.js';
-import { digestRenderSettings } from './digest.js';
+import { digestOn, digestRenderSettings, digestSetEnabled } from './digest.js';
 import { bankRenderSettings } from './bank.js';
 
 /* ── Settings ──
@@ -78,7 +78,7 @@ export function settingsBack() {
 export function renderSettings() {
   const list = $('settingsViewList');
   if (list) {
-    list.innerHTML = VIEW_DEFS.filter(v => viewExists(v.key)).map(v => {
+    list.innerHTML = VIEW_DEFS.map(v => {             // Digest too, even while the digest is off
       const locked = v.key === 'home';
       return `
         <div class="settings-view-row">
@@ -105,6 +105,7 @@ export function renderSettings() {
 /* Put a tab on the phone's bottom bar or take it off (it stays in the ☰ menu). */
 export function setViewEnabled(key, on) {
   if (key === 'home') return;
+  if (key === 'digest' && on && !digestOn()) { digestSetEnabled(true); return; }   // on the bar means on
   views[key] = !!on;
   saveToLocal();
   applyViewVisibility();
