@@ -42,7 +42,8 @@ export function setRunway(v) { runway = v; }
 /* Budget following the bank (the rules are in bankbudget.js), synced with the state
  *   on     — follow the account's banks (Settings → Bank accounts): the total
  *            balance is the bank's, and new transactions are logged
- *   items  — per bank connection: { since: the sync point, seen: what has been counted }
+ *   items  — per bank connection: { since: the sync point, seen: what has been counted,
+ *            acc: the accounts the sync point covers }
  *   log    — the latest moves of the balance from the bank outside today's
  *            purchases, newest first: [{ d: date, n: name, a: amount (+ = money in) }].
  *            Every device that logs a transaction writes the same thing, so they never disagree.
@@ -107,7 +108,9 @@ export function purchaseRecord(p) {
 export function normalizeBankBudget(b) {
   const items = {};
   Object.entries(b && typeof b.items === 'object' && b.items ? b.items : {}).forEach(([id, e]) => {
-    if (e && typeof e.since === 'string' && e.seen && typeof e.seen === 'object') items[id] = { since: e.since, seen: e.seen };
+    if (e && typeof e.since === 'string' && e.seen && typeof e.seen === 'object') {
+      items[id] = { since: e.since, seen: e.seen, ...(Array.isArray(e.acc) ? { acc: e.acc.filter(x => typeof x === 'string') } : {}) };
+    }
   });
   const log = Array.isArray(b?.log) ? b.log.filter(l => l && typeof l.d === 'string' && Number.isFinite(l.a))
     .map(l => ({ d: l.d, n: String(l.n || '').slice(0, 60), a: round2(l.a) })).slice(0, BANK_LOG_MAX) : [];
@@ -410,10 +413,10 @@ function fmtStamp(ms) {
  * newest one can be hours old, and this says so. */
 function bankStatusHtml() {
   const how = budgetBankBalance() !== null
-    ? 'Your total balance is your bank\'s balance (available: pending charges taken off). Money out is logged under Purchases today on the day it reaches your bank\'s list, with its date if the bank dates it earlier; money in is listed here.'
-    : 'Money out is logged under Purchases today on the day it reaches your bank\'s list, with its date if the bank dates it earlier; money in is listed here, in your total balance.';
+    ? 'Your total balance is your bank\'s: what\'s in your checking accounts (available: pending charges taken off), less what you owe on your credit cards. Money out is logged under Purchases today on the day it reaches your bank\'s list, with its date if the bank dates it earlier; money in is listed here. Paying a card is neither.'
+    : 'Money out is logged under Purchases today on the day it reaches your bank\'s list, with its date if the bank dates it earlier; money in is listed here, in your total balance. Paying a card is neither.';
   const banks = bankBudgetFollowing(bankBudget.items, bankSeen);
-  if (!banks.length) return `<div class="budget-bank-note">New transactions from your checking account are logged for you. ${how}</div>`;
+  if (!banks.length) return `<div class="budget-bank-note">New transactions from your checking accounts and credit cards are logged for you. ${how}</div>`;
   const notes = banks.map(f => {
     const bank = escAttr(f.bank);
     const item = bankSeen.find(i => i.id === f.id) || {};
@@ -423,7 +426,7 @@ function bankStatusHtml() {
       const accounts = f.accounts.map(a => `${escAttr(a.name)}${a.mask ? ` ••${escAttr(a.mask)}` : ''}`).join(', ');
       return `Following ${accounts} at ${bank} since ${f.since === dbdTodayKey() ? 'today' : fmtDay(f.since)}.${fresh}`;
     }
-    if (f.state === 'none') return `${bank} has no checking account connected, so nothing from it is logged: Budget follows checking accounts only, since a credit card's purchases would be counted again when you pay the card.`;
+    if (f.state === 'none') return `${bank} has no checking account or credit card connected, so nothing from it is logged: Budget follows those, not savings.`;
     if (f.state === 'waiting') return `Plaid is still gathering ${bank}'s transactions. Budget starts following it once they are in.`;
     return `${bank} needs attention: ${escAttr(f.error.code === 'ITEM_LOGIN_REQUIRED' ? 'log in to it again' : f.error.message || 'see Settings')} (Settings → Bank accounts).`;
   });

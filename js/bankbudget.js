@@ -2,13 +2,14 @@
  * tests import this file directly and budget.js applies the result.
  *
  * The balance. Budget's total balance is the bank's own balance over the
- * accounts it follows (bankBalance), so it can't drift from the bank's, and the
- * day starts from what that balance was when the day began (budget.js).
+ * accounts it follows (bankBalance): what's in the checking accounts, less what
+ * is owed on the credit cards. So it can't drift from the bank's, and the day
+ * starts from what that balance was when the day began (budget.js).
  *
  * The transactions say what the day's spending is. The first time Budget sees a
  * bank connection whose history Plaid has finished gathering (the sync point),
  * every transaction it can see then counts as already in the balance. From then
- * on each new transaction on a spending (checking) account is logged on the day
+ * on each new transaction on a checking account or a credit card is logged on the day
  * Budget first sees it, as the balance moves, whatever day the bank dates it
  * (banks hand Plaid a day's charges hours or a day late, and the app may not
  * have looked since):
@@ -23,11 +24,13 @@
  *     below).
  * A pending charge that posts is the same purchase: only a change in the amount
  * (a tip) is logged, as a purchase today if more went out. A pending charge the
- * bank dropped is given back.
+ * bank dropped is given back. A payment to a credit card is neither (cardPayment).
  *
  * What has been counted is remembered per transaction (`seen`) in the synced
  * state, next to the budget it changed, so a transaction is logged once however
- * many devices see it. Amounts keep Plaid's sign: positive is money out. */
+ * many devices see it, and which accounts the sync point covers (`acc`): an
+ * account Budget starts following later (the credit cards, when it began to
+ * follow them) gets a sync point of its own the first time it's seen. Amounts keep Plaid's sign: positive is money out. */
 import { addDays } from './runway.js';
 
 const HISTORY_DAYS = 3;          // new rows dated this long before the sync point are late history, not new money
@@ -36,21 +39,28 @@ const round2 = n => Math.round((Number(n) || 0) * 100) / 100;
 const canon = v => (Array.isArray(v) ? v.map(canon)
   : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k => [k, canon(v[k])])) : v);   // key order is not a change
 
-/* The accounts Budget follows: where day-to-day money comes and goes. */
-export function bankSpendingAccount(a) { return !!a && a.type === 'depository' && SPENDING.has(a.subtype); }
+/* The accounts Budget follows: where day-to-day money comes and goes (cash:
+ * checking and the like), and the credit cards it's spent with. */
+export function bankCashAccount(a) { return !!a && a.type === 'depository' && SPENDING.has(a.subtype); }
+export function bankCardAccount(a) { return !!a && a.type === 'credit'; }
+export function bankSpendingAccount(a) { return bankCashAccount(a) || bankCardAccount(a); }
 
 /* The balance Budget's total follows: the bank's own, over the accounts it
- * follows, each one's available balance (pending charges taken off, as the bank
- * counts what you can spend), or its current balance where the bank gives no
- * available one. null while no followed account has a balance. */
+ * follows. Each cash account's available balance (pending charges taken off, as
+ * the bank counts what you can spend), or its current balance where the bank
+ * gives no available one; less what's owed on each card, pending charges too
+ * (its limit less the credit available), or its current balance where the bank
+ * gives no limit or no available credit. null while no followed cash account
+ * has a balance: with cards alone Budget keeps its own total, and their
+ * purchases come off it. */
 const accountBalance = a => (Number.isFinite(a.available) ? a.available : Number.isFinite(a.current) ? a.current : null);
+const cardOwed = a => (Number.isFinite(a.limit) && Number.isFinite(a.available) ? a.limit - a.available : Number.isFinite(a.current) ? a.current : null);
 export function bankBalance(items = []) {
   let sum = 0, any = false;
   for (const item of items) {
     for (const a of (item && item.accounts) || []) {
-      if (!bankSpendingAccount(a) || accountBalance(a) === null) continue;
-      sum += accountBalance(a);
-      any = true;
+      if (bankCashAccount(a) && accountBalance(a) !== null) { sum += accountBalance(a); any = true; }
+      else if (bankCardAccount(a) && cardOwed(a) !== null) sum -= cardOwed(a);
     }
   }
   return any ? round2(sum) : null;
@@ -59,7 +69,22 @@ export function bankBalance(items = []) {
  * disconnected), the start of the day is taken again. */
 export function bankBalanceKey(items = []) {
   return items.flatMap(item => ((item && item.accounts) || [])
-    .filter(a => bankSpendingAccount(a) && accountBalance(a) !== null).map(a => `${item.id}/${a.id}`)).sort().join(',');
+    .filter(a => (bankCashAccount(a) && accountBalance(a) !== null) || (bankCardAccount(a) && cardOwed(a) !== null))
+    .map(a => `${item.id}/${a.id}`)).sort().join(',');
+}
+
+/* A payment to a credit card moves money between accounts Budget follows, or
+ * pays the card from another bank: it isn't spending, and it isn't money in.
+ * Plaid files it as LOAN_PAYMENTS (some cards say TRANSFER_IN for the payment
+ * received); without a category, its name says so. On a checking account it
+ * only counts as one with a card followed: otherwise paying the card is the
+ * only sign of what was spent on it, and is spending. */
+const PAYMENT_NAME = /\b(payment|pymt|pmt|autopay|auto pay|epay|e-payment)\b/i;
+const CARD_NAME = /\b(card|crd|credit|visa|amex|american express|discover|mastercard|capital one|citi|chase)\b/i;
+function cardPayment(t, account, cards) {
+  const name = String(t.name || '');
+  if (bankCardAccount(account)) return t.amount < 0 && (t.category ? ['LOAN_PAYMENTS', 'TRANSFER_IN'].includes(t.category) : PAYMENT_NAME.test(name));
+  return cards && t.amount > 0 && (t.category ? t.category === 'LOAN_PAYMENTS' : PAYMENT_NAME.test(name) && CARD_NAME.test(name));
 }
 
 /* Plaid has gathered the history the sync point should hold. */
@@ -83,7 +108,7 @@ function rec(t, prev, logged) {
 }
 
 /* One pass over the connections.
- *   tracked   { <item id>: { since, seen } } from the last pass (the synced state)
+ *   tracked   { <item id>: { since, seen, acc } } from the last pass (the synced state)
  *   items     the account's connections: [{ id, accounts, transactions, updatedAt, status }]
  *   purchases today's purchases: [{ id, title, amount, bank?, pending?, on? }]
  *   typed     purchases typed by hand on the last few days that the bank hasn't
@@ -115,12 +140,13 @@ export function bankBudgetStep({ tracked = {}, items = [], purchases = [], typed
   };
   const listed = new Set(items.filter(i => i && i.id).map(i => i.id));
   Object.keys(tracked).forEach(id => { if (!listed.has(id)) res.tracked[id] = tracked[id]; });
+  const cards = items.some(i => i && (i.accounts || []).some(bankCardAccount));   // (a card at another bank is paid from this one's checking)
 
   for (const item of items) {
     if (!item || !item.id) continue;
-    const accounts = new Set((item.accounts || []).filter(bankSpendingAccount).map(a => a.id));
+    const accounts = new Map((item.accounts || []).filter(bankSpendingAccount).map(a => [a.id, a]));
     const all = item.transactions || [];
-    const txs = all.filter(t => t && t.id && accounts.has(t.account))
+    const txs = all.filter(t => t && t.id && accounts.has(t.account) && !cardPayment(t, accounts.get(t.account), cards))
       .sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? -1 : 1));     // oldest first: log in order
     const before = tracked[item.id];
     if (!before || !before.since || !before.seen) {
@@ -133,15 +159,21 @@ export function bankBudgetStep({ tracked = {}, items = [], purchases = [], typed
         const e = t.pending_id && entryFor(t.pending_id);
         if (e) { e.bank = t.id; if (t.pending) e.pending = true; else delete e.pending; }
       });
-      res.tracked[item.id] = { since: today, seen };
+      res.tracked[item.id] = { since: today, seen, acc: [...accounts.keys()].sort() };
       continue;
     }
     const seen = { ...before.seen };
+    /* accounts the sync point didn't cover (a sync point from before Budget
+     * followed cards covers the checking accounts): what they show the first
+     * time is already in the balance, as for a new connection */
+    const covered = new Set(Array.isArray(before.acc) ? before.acc : [...accounts.values()].filter(bankCashAccount).map(a => a.id));
+    const fresh = new Set([...accounts.keys()].filter(id => !covered.has(id)));
     const present = new Set(txs.map(t => t.id));
     const superseded = new Set(txs.map(t => t.pending_id).filter(Boolean));     // pending charges whose posted copy is here
 
     for (const t of txs) {
       if (superseded.has(t.id)) continue;                                        // counted with its posted copy
+      if (fresh.has(t.account) && !seen[t.id]) { seen[t.id] = rec(t); continue; }   // a newly followed account's history
       const known = seen[t.id];
       if (known) {                                                               // Plaid changed a transaction we counted
         const delta = round2(t.amount - known.a);
@@ -207,7 +239,7 @@ export function bankBudgetStep({ tracked = {}, items = [], purchases = [], typed
       else toBalance(-s.a, s.d, s.n || 'A pending charge');
       res.logged++;
     }
-    res.tracked[item.id] = { since: before.since, seen };
+    res.tracked[item.id] = { since: before.since, seen, acc: [...new Set([...covered, ...accounts.keys()])].sort() };   // (never shrinks: a copy can lag)
   }
 
   res.changed = res.balance !== 0 || res.nextId !== nextId
@@ -217,14 +249,14 @@ export function bankBudgetStep({ tracked = {}, items = [], purchases = [], typed
 
 /* What Budget does with each connection, for Budget to say so:
  *   { id, bank, accounts: [{ name, mask }], state, since }
- * state: 'following' (its checking accounts are logged from `since`), 'none'
- * (it has no checking account, so nothing to log), 'waiting' (no sync point
- * yet: Plaid is still gathering its history) or 'error' (it needs attention in
- * Settings → Bank accounts; `error` says why). */
+ * state: 'following' (its checking accounts and cards are logged from `since`),
+ * 'none' (it has neither, so nothing to log), 'waiting' (no sync point yet: Plaid
+ * is still gathering its history) or 'error' (it needs attention in Settings →
+ * Bank accounts; `error` says why). */
 export function bankBudgetFollowing(tracked = {}, items = []) {
   return items.filter(i => i && i.id).map(item => {
     const t = tracked[item.id];
-    const accounts = (item.accounts || []).filter(bankSpendingAccount).map(a => ({ name: a.name || 'Checking', mask: a.mask || null }));
+    const accounts = (item.accounts || []).filter(bankSpendingAccount).map(a => ({ name: a.name || (bankCardAccount(a) ? 'Credit card' : 'Checking'), mask: a.mask || null }));
     const state = item.error ? 'error' : !(t && t.since) ? 'waiting' : accounts.length ? 'following' : 'none';
     return { id: item.id, bank: (item.institution && item.institution.name) || 'Your bank', accounts, state,
       since: t && t.since ? t.since : null, ...(item.error ? { error: item.error } : {}) };

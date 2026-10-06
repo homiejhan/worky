@@ -6,7 +6,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
 const { loadApp, ROOT } = require('./load-app');
-const { createFakePlaid } = require('./fake-plaid');
+const { createFakePlaid, sandboxAccounts, sandboxTransactions } = require('./fake-plaid');
 const { createFakeFirebaseKeys } = require('./fake-firebase-keys');
 const { createFakeFirebase } = require('./fake-firebase');
 
@@ -596,13 +596,15 @@ async function sealV1(payload) {
     L.signIn('user-c');
     L.w.openSettings('bank');
     ok(await until(() => status(L.d) === 'No banks connected.'), 'a new account, no banks yet');
+    W.plaid.state.nextItem = { accounts: sandboxAccounts().map(a => (a.type === 'credit' ? { ...a, balances: { ...a.balances, current: 0 } } : a)),
+      transactions: sandboxTransactions() };                              // (the card owes nothing here: cards are section 12)
     L.d.querySelector('[data-bank="connect"]').click();
     ok(await until(() => L.d.querySelectorAll('#bankPanel .bank-tx').length > 0), 'connect a bank');
     ok(await until(() => Object.keys(L.w.eval('bankBudget.items')).length === 1), 'its first refresh is the sync point');
     const itemId = Object.keys(L.w.eval('bankBudget.items'))[0];
     const tracked = () => L.w.eval('bankBudget.items')[itemId];
     eq(tracked().since, today, 'dated today');
-    eq(Object.keys(tracked().seen).sort().join(), 'tx-1,tx-2,tx-4,tx-6', 'counting what the checking account shows as already in the balance');
+    eq(Object.keys(tracked().seen).sort().join(), 'tx-1,tx-2,tx-3,tx-4,tx-5,tx-6', 'counting what the checking account and the card show as already in the balance');
     ok(L.w.eval('totalBalance()') === 100 && L.w.eval('budget.initial') === 100 && purchases(L).length === 0,
       'the total balance becomes the bank\'s ($100 available in checking, not the $500 typed), and the day starts from it');
     ok(L.w.eval('budgetFollowsBank()') && !/Logged/.test(toast(L.d)), 'it follows the bank from now on, with nothing logged');
@@ -616,9 +618,8 @@ async function sealV1(payload) {
       tx('n-target', 30, yesterday, 'Target'),
       tx('n-pay', -500, today, 'Campus Café payroll'),
       tx('n-save', 20, today, 'Transfer to savings', { account_id: 'acc-saving' }),
-      tx('n-card', 55, today, 'Amazon', { account_id: 'acc-credit' }),
     ] });
-    W.plaid.setBalances(access, { 'acc-checking': { available: 557.5, current: 580 }, 'acc-saving': { available: 180, current: 190 }, 'acc-credit': { current: 465 } });
+    W.plaid.setBalances(access, { 'acc-checking': { available: 557.5, current: 580 }, 'acc-saving': { available: 180, current: 190 } });
     await refresh(L);
     ok(await until(() => purchases(L).length === 2), 'Refresh brings new transactions into Budget');
     const chip = purchases(L).find(p => p.bank === 'n-chipotle');
@@ -630,7 +631,7 @@ async function sealV1(payload) {
     const sub = () => bud(L).querySelector('.budget-figure-sub').textContent;
     ok(/^\$100\.00 at the start of today − \$42\.50 spent today \+ \$500\.00 in at your bank$/.test(sub()), `under it, how the day got there: "${sub()}"`);
     ok(/Logged 3 bank transactions in Budget/.test(toast(L.d)), `a toast says so: "${toast(L.d)}"`);
-    ok(!purchases(L).some(p => /savings|Amazon/.test(p.title)) && L.w.eval('totalBalance()') === 557.5, 'savings and the credit card are left out, of the purchases and of the balance');
+    ok(!purchases(L).some(p => /savings/.test(p.title)) && L.w.eval('totalBalance()') === 557.5, 'savings is left out, of the purchases and of the balance');
     const tagOf = p => bud(L).querySelector(`.budget-purchase-row.from-bank[data-purchase-id="${p.id}"] .budget-bank-tag`);
     ok(tagOf(chip) && tagOf(chip).textContent === 'pending', 'on the Budget screen it is marked as from the bank, pending');
     const day = L.w.eval(`calKeyToDate('${yesterday}').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })`);
@@ -777,7 +778,7 @@ async function sealV1(payload) {
     /* what From your bank says */
     await refresh(L);
     const note = () => [...bud(L).querySelectorAll('.budget-bank-note')].map(n => n.textContent.replace(/\s+/g, ' ').trim()).join(' | ');
-    ok(/Following Plaid Checking ••0000 at First Platypus Bank since today\./.test(note()), `From your bank says which account it follows, since when: "${note()}"`);
+    ok(/Following Plaid Checking ••0000, Plaid Credit Card ••3333 at First Platypus Bank since today\./.test(note()), `From your bank says which accounts it follows (checking and the card, not savings), since when: "${note().slice(0, 120)}"`);
     ok(/Checked at \d{1,2}:\d\d [AP]M; Plaid last heard from First Platypus Bank (at|on) [^.]*\d:\d\d [AP]M\./.test(note()), 'when Focus last checked, and when Plaid last heard from the bank');
     ok(/a purchase can take a few hours to show up/.test(note()), 'and that a purchase can take hours to reach Plaid');
     eq(L.w.eval('bankItems()[0].checkedAt'), Date.parse('2026-09-30T06:12:00Z'), 'the relay\'s checked_at is kept with the connection');
@@ -828,9 +829,9 @@ async function sealV1(payload) {
     await refresh(L);
     ok(await until(() => purchases(L).some(p => p.bank === 'n-hotel' && p.on === twoDaysAgo && p.pending)), 'a pending hold dated two days ago, first seen today, is spent today');
     const held = L.w.eval('budget.initial');
-    W.plaid.changeTransactions(access, { added: Array.from({ length: 55 }, (_, i) => tx(`n-card-${i}`, 2, yesterday, `Card ${i}`, { account_id: 'acc-credit' })) });
+    W.plaid.changeTransactions(access, { added: Array.from({ length: 55 }, (_, i) => tx(`n-sav-${i}`, 2, yesterday, `Savings ${i}`, { account_id: 'acc-saving' })) });
     await refresh(L);
-    ok(L.w.eval('bankItems()[0].transactions.some(t => t.id === "n-hotel")'), 'fifty-five newer credit card rows: the pending hold stays in the list (every pending one does)');
+    ok(L.w.eval('bankItems()[0].transactions.some(t => t.id === "n-hotel")'), 'fifty-five newer savings rows: the pending hold stays in the list (every pending one does)');
     W.plaid.changeTransactions(access, { removed: ['n-hotel'], added: [tx('n-hotel-posted', 80, today, 'Hotel', { pending_transaction_id: 'n-hotel' })] });
     await refresh(L);
     await sleep(100);
@@ -854,6 +855,70 @@ async function sealV1(payload) {
     L.d.querySelector(`[data-bank="disconnect"][data-item="${itemId}"]`).click();
     ok(await until(() => !L.w.eval('bankBudget.items')[itemId], 3000), 'Disconnect drops the bank\'s sync point');
     ok(await until(() => !P.w.eval('bankBudget.items')[itemId], 4000), 'on every device');
+  }
+
+  console.log('\n── 12. A credit card: what is spent on it is spending, what is owed comes off the total, paying it is neither ──');
+  {
+    const W = bankWorld();
+    const tx = W.plaid.transaction;
+    const L = await device(W, { transform: withRelay(RELAY) });
+    const today = L.w.eval('dbdTodayKey()');
+    const bud = app => app.d.getElementById('budgetContainer-d');
+    const purchases = app => JSON.parse(app.w.eval('JSON.stringify(budget.purchases)'));
+    const refresh = async app => {
+      const before = W.plaid.state.calls.filter(c => c.path === '/transactions/sync').length;
+      app.w.openSettings('bank');
+      app.d.querySelector('[data-bank="refresh"]').click();
+      await until(() => W.plaid.state.calls.filter(c => c.path === '/transactions/sync').length > before && !app.d.querySelector('.bank-item [disabled]'), 3000);
+      await sleep(100);
+    };
+    L.w.eval(`budget.initial = 0; budget.daily = 40; budget.purchases = []; budget.lastDate = '${today}'; saveToLocal();`);
+    const account = (account_id, name, mask, type, subtype, balances) => ({ account_id, name, official_name: null, mask, type, subtype, balances: { limit: null, iso_currency_code: 'USD', ...balances } });
+    W.plaid.state.nextItem = { accounts: [
+      account('chk', 'Total Checking', '1111', 'depository', 'checking', { available: 1200, current: 1200 }),
+      account('card', 'Freedom', '2222', 'credit', 'credit card', { available: 1500, current: 480, limit: 2000 }),
+    ], transactions: [tx('c-old', 12, today, 'Earlier today', { account_id: 'card' })] };
+    L.signIn('user-d');
+    L.w.openSettings('bank');
+    ok(await until(() => status(L.d) === 'No banks connected.'), 'an account with no banks yet');
+    L.d.querySelector('[data-bank="connect"]').click();
+    ok(await until(() => Object.keys(L.w.eval('bankBudget.items')).length === 1, 4000), 'connect a bank with checking and a credit card');
+    eq(L.w.eval('totalBalance()'), 700, 'the total is checking ($1,200) less what is owed on the card, pending too ($2,000 limit − $1,500 available)');
+    const id12 = Object.keys(L.w.eval('bankBudget.items'))[0];
+    eq(L.w.eval('bankBudget.items')[id12].acc.join(), 'card,chk', 'the sync point says which accounts it covers');
+    const reopened = await loadApp({ storage: { 'focus-tour-done': '1', 'focus-app-state': L.w.localStorage.getItem('focus-app-state') }, transform: noRelay });
+    eq(reopened.w.eval('bankBudget.items')[id12] && reopened.w.eval('bankBudget.items')[id12].acc.join(), 'card,chk', 'kept in the saved state');
+    reopened.w.applyState(JSON.parse(L.w.eval('JSON.stringify(compressState(gatherState()))')));
+    eq(reopened.w.eval('bankBudget.items')[id12].acc.join(), 'card,chk', 'and through Export and Import');
+    ok(L.w.eval('budget.initial') === 700 && purchases(L).length === 0, 'the day starts from it, and what the card shows already is taken as spent');
+    const note = () => [...bud(L).querySelectorAll('.budget-bank-note')].map(n => n.textContent.replace(/\s+/g, ' ').trim()).join(' | ');
+    ok(/Following Total Checking ••1111, Freedom ••2222 at First Platypus Bank since today\./.test(note()), `From your bank says it follows both: "${note().slice(0, 90)}"`);
+    ok(/less what you owe on your credit cards/.test(note()) && /Paying a card is neither/.test(note()), 'and how the card counts');
+    ok(/From checking accounts and credit cards/.test(L.d.getElementById('bankPanel').textContent), 'Settings says so too');
+
+    const access = [...W.plaid.state.items.keys()].pop();
+    W.plaid.changeTransactions(access, { added: [tx('c-lunch', 18.25, today, 'Kiin Di', { account_id: 'card', pending: true, personal_finance_category: { primary: 'FOOD_AND_DRINK' } })] });
+    W.plaid.setBalances(access, { card: { available: 1481.75 } });
+    await refresh(L);
+    ok(await until(() => purchases(L).some(p => p.bank === 'c-lunch' && p.amount === 18.25 && p.pending)), 'a purchase on the card is a purchase today');
+    eq(L.w.eval('todayBalance()'), 21.75, 'off today\'s balance ($40 − $18.25)');
+    eq(L.w.eval('totalBalance()'), 681.75, 'and off the total, as what is owed on the card goes up');
+    eq(bud(L).querySelector('.budget-figure-sub').textContent, '$700.00 at the start of today − $18.25 spent today', 'the line under it adds up');
+
+    W.plaid.changeTransactions(access, { added: [
+      tx('c-pay-out', 300, today, 'CHASE CREDIT CRD AUTOPAY', { account_id: 'chk', personal_finance_category: { primary: 'LOAN_PAYMENTS' } }),
+      tx('c-pay-in', -300, today, 'AUTOMATIC PAYMENT - THANK YOU', { account_id: 'card', personal_finance_category: { primary: 'LOAN_PAYMENTS' } }),
+    ] });
+    W.plaid.setBalances(access, { chk: { available: 900, current: 900 }, card: { available: 1781.75, current: 180 } });
+    await refresh(L);
+    ok(purchases(L).length === 1 && L.w.eval('bankBudget.log').length === 0, 'paying the card from checking is not spending, and the payment is not money in');
+    ok(L.w.eval('totalBalance()') === 681.75 && L.w.eval('todayBalance()') === 21.75, 'the total stays put (checking −$300, owed −$300), and so does today\'s balance');
+
+    W.plaid.changeTransactions(access, { added: [tx('c-refund', -25, today, 'Target', { account_id: 'card', personal_finance_category: { primary: 'GENERAL_MERCHANDISE' } })] });
+    W.plaid.setBalances(access, { card: { available: 1806.75, current: 155 } });
+    await refresh(L);
+    ok(await until(() => L.w.eval('bankBudget.log').some(l => l.n === 'Target' && l.a === 25)), 'a refund on the card is money in, under From your bank');
+    eq(L.w.eval('totalBalance()'), 706.75, 'and the total goes up with it');
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

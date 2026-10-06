@@ -8,7 +8,8 @@
  * without an available balance, one bank or two. After every step the app is
  * held to them:
  *   • the total balance is the bank's balance over the accounts Budget follows
- *     (available, or current where there is none), as last fetched, less what
+ *     (checking: available, or current where there is none; less what is owed
+ *     on the credit cards, pending charges too), as last fetched, less what
  *     was typed today that the bank hasn't shown;
  *   • today's purchases are the money out Budget first saw at the bank today,
  *     whatever day the bank dates it, since Budget started following it (one
@@ -137,16 +138,17 @@ async function runCase(seed) {
     if (spec.credit) accts.push({ id: `${spec.prefix}-cc`, name: 'Card', type: 'credit', subtype: 'credit card', current: cents(0, 600), pending: new Map(), noAvail: false, limit: 2000 });
     return { spec, accts, txs: new Map(), lin: [], token: null, itemId: null, connected: false, fetched: null, since: null };
   });
-  const followedAcct = a => a.type === 'depository' && ['checking', 'paypal'].includes(a.subtype);
+  const followedAcct = a => (a.type === 'depository' && ['checking', 'paypal'].includes(a.subtype)) || a.type === 'credit';
+  const pendingOf = a => [...a.pending.values()].reduce((s, x) => s + x, 0);
   const balanceOf = a => (a.type === 'credit'
-    ? { available: round2(a.limit - a.current), current: a.current }
+    ? { available: round2(a.limit - a.current - pendingOf(a)), current: a.current }
     : { available: a.noAvail ? null : round2(a.current - [...a.pending.values()].reduce((s, x) => s + x, 0)), current: a.current });
   const plaidAccounts = b => b.accts.map(a => ({ account_id: a.id, name: a.name, official_name: null, mask: a.id.slice(-4),
     type: a.type, subtype: a.subtype, balances: { ...balanceOf(a), limit: a.limit ?? null, iso_currency_code: 'USD' } }));
-  const newTx = (b, a, amount, name, { pending = false, date = today(), of = null } = {}) => ({
+  const newTx = (b, a, amount, name, { pending = false, date = today(), of = null, category = null } = {}) => ({
     transaction_id: `${b.spec.prefix}-t${++txn}`, account_id: a.id, date, authorized_date: date, name, merchant_name: name,
     amount: round2(amount), iso_currency_code: 'USD', pending, pending_transaction_id: of,
-    personal_finance_category: { primary: amount < 0 ? 'INCOME' : 'GENERAL_MERCHANDISE' } });
+    personal_finance_category: { primary: category || (amount < 0 ? 'INCOME' : 'GENERAL_MERCHANDISE') } });
   const publish = (b, { added = [], removed = [] }) => {
     removed.forEach(id => b.txs.delete(id));
     added.forEach(t => b.txs.set(t.transaction_id, t));
@@ -170,7 +172,7 @@ async function runCase(seed) {
       const p = curTx(l);
       const t = newTx(l.b, l.a, p.amount + tip, p.name.toUpperCase(), { of: p.transaction_id });
       l.a.pending.delete(p.transaction_id);
-      l.a.current = round2(l.a.current - t.amount);
+      l.a.current = round2(l.a.type === 'credit' ? l.a.current + t.amount : l.a.current - t.amount);
       l.cur = t.transaction_id;
       publish(l.b, { removed: [p.transaction_id], added: [t] });
     },
@@ -180,14 +182,14 @@ async function runCase(seed) {
       l.dropped = true;
       publish(l.b, { removed: [p.transaction_id] });
     },
-    debit(b, a, amount, name, date) {
-      const t = newTx(b, a, amount, name, { date });
+    debit(b, a, amount, name, date, category = null) {
+      const t = newTx(b, a, amount, name, { date, category });
       a.current = round2(a.type === 'credit' ? a.current + amount : a.current - amount);
       publish(b, { added: [t] });
       return lineage(b, a, t);
     },
-    credit(b, a, amount, name) {
-      const t = newTx(b, a, -amount, name);
+    credit(b, a, amount, name, category = null) {
+      const t = newTx(b, a, -amount, name, { category });
       a.current = round2(a.type === 'credit' ? a.current - amount : a.current + amount);
       publish(b, { added: [t] });
       return lineage(b, a, t);
@@ -219,6 +221,12 @@ async function runCase(seed) {
     for (const b of banks.filter(x => x.connected && x.fetched)) {
       for (const a of b.fetched.accounts) {
         if (!followedAcct(a)) continue;
+        if (a.type === 'credit') {                                          // what's owed, pending charges too
+          const owed = Number.isFinite(a.balances.limit) && Number.isFinite(a.balances.available) ? a.balances.limit - a.balances.available
+            : Number.isFinite(a.balances.current) ? a.balances.current : null;
+          if (owed !== null) sum -= owed;
+          continue;
+        }
         const v = Number.isFinite(a.balances.available) ? a.balances.available : Number.isFinite(a.balances.current) ? a.balances.current : null;
         if (v !== null) { sum += v; any = true; }
       }
@@ -252,7 +260,7 @@ async function runCase(seed) {
     if (!M.following) return;
     for (const l of b.lin) {
       const t = b.fetched.txs.get(l.cur) || null;
-      if (!followedAcct(l.a)) continue;
+      if (!followedAcct(l.a) || l.payment) continue;                       // paying a card: neither spending nor money in
       if (l.seen === undefined) {
         if (!t) continue;
         l.seenAmount = t.amount;
@@ -500,8 +508,8 @@ async function runCase(seed) {
         what = `${b.spec.prefix}: ${money(amount)} out, posted at once`;
         did('posted charge');
       } else if (r < 0.49) {
-        const a = pick(b.accts.filter(followedAcct));
         const amount = chance(0.5) ? cents(200, 900) : cents(3, 40);
+        const a = pick(b.accts.filter(x => followedAcct(x) && (amount <= 100 || x.type !== 'credit')));   // (a paycheck goes to checking)
         bank.credit(b, a, amount, amount > 100 ? 'Payroll' : 'Refund');
         what = `${b.spec.prefix}: ${money(amount)} in (${amount > 100 ? 'paycheck' : 'refund'})`;
         did(amount > 100 ? 'paycheck' : 'refund');
@@ -523,8 +531,8 @@ async function runCase(seed) {
         if (chance(0.5)) { bank.debit(b, cc, cents(5, 80), 'Card ' + pick(NAMES), today()); what = `${b.spec.prefix}: a credit card purchase`; did('credit card purchase'); }
         else {
           const amount = round2(Math.min(cc.current, cents(20, 300)) || 10);
-          bank.debit(b, b.accts[0], amount, 'Card payment', today());
-          bank.credit(b, cc, amount, 'Payment received');
+          bank.debit(b, b.accts[0], amount, 'Card payment', today(), 'LOAN_PAYMENTS').payment = true;
+          bank.credit(b, cc, amount, 'Payment received', 'LOAN_PAYMENTS').payment = true;
           what = `${b.spec.prefix}: ${money(amount)} paid to the credit card`;
           did('credit card paid');
         }

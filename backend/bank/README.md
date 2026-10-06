@@ -29,9 +29,10 @@ Disconnect ───────────────────────
 
 The app refreshes a bank on its own once what it has is half an hour old, and,
 with **Budget follows your bank** on (the default), Budget's total balance is
-the checking accounts' balance from `/accounts`, each day starts from it, and
-each new transaction from a checking account is logged in Budget
-(`js/bankbudget.js` has the rules).
+the checking accounts' balance from `/accounts` less what is owed on the credit
+cards, each day starts from it, and each new transaction from a checking account
+or a credit card is logged in Budget on the day it shows up, payments to a card
+left out by their `category` (`js/bankbudget.js` has the rules).
 A posted transaction carries `pending_id`, the pending one it replaces, so a
 charge that posts stays one purchase, and `/accounts` says when Plaid last got
 transactions from the bank (`checked_at`, from `/item/get`): banks send Plaid new

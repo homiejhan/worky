@@ -39,8 +39,8 @@ const item = (transactions, more = {}) => ({ id: 'item-1', accounts: ACCOUNTS, t
 
   console.log('\n── 1. Which accounts, and the sync point ──');
   {
-    ok(B.bankSpendingAccount(ACCOUNTS[0]) && !B.bankSpendingAccount(ACCOUNTS[1]) && !B.bankSpendingAccount(ACCOUNTS[2]),
-      'Budget follows checking, not savings or a credit card');
+    ok(B.bankSpendingAccount(ACCOUNTS[0]) && !B.bankSpendingAccount(ACCOUNTS[1]) && B.bankSpendingAccount(ACCOUNTS[2]),
+      'Budget follows checking and credit cards, not savings');
     ok(B.bankSpendingAccount({ type: 'depository', subtype: 'cash management' }) && B.bankSpendingAccount({ type: 'depository', subtype: 'prepaid' }),
       'nor other spending accounts: cash management, prepaid');
     ok(!B.bankItemReady({ updatedAt: 0, transactions: [] }), 'a connection not refreshed yet is not ready');
@@ -54,7 +54,7 @@ const item = (transactions, more = {}) => ({ id: 'item-1', accounts: ACCOUNTS, t
     ok(!r.changed && !w.tracked['item-1'], 'nothing happens before the connection is ready');
     r = w.pass([item(history)]);
     ok(r.changed && w.tracked['item-1'].since === TODAY, 'ready: the sync point is today');
-    eq(Object.keys(w.tracked['item-1'].seen).sort().join(), 'h1,h2,h3', 'what the checking account shows now counts as already in the balance');
+    eq(Object.keys(w.tracked['item-1'].seen).sort().join(), 'c1,h1,h2,h3', 'what the checking account and the card show now counts as already in the balance');
     ok(w.balance === 0 && w.purchases.length === 1 && w.log.length === 0 && r.logged === 0, 'and nothing is logged: the balance is taken to match the bank');
     r = w.pass([item(history)]);
     ok(!r.changed, 'the same connection again: nothing changes');
@@ -73,7 +73,7 @@ const item = (transactions, more = {}) => ({ id: 'item-1', accounts: ACCOUNTS, t
       tx('n6', 3.1, '2026-09-10', 'Late history'),
     ];
     const r = w.pass([item(more)]);
-    eq(r.logged, 3, 'three new checking transactions are logged');
+    eq(r.logged, 4, 'three new checking transactions and a card purchase are logged');
     const chip = w.purchases.find(p => p.bank === 'n1');
     ok(chip && chip.title === 'Chipotle' && chip.amount === 12.5 && chip.pending === true && !chip.on,
       'money out today → a purchase today, marked as from the bank, and pending');
@@ -82,11 +82,12 @@ const item = (transactions, more = {}) => ({ id: 'item-1', accounts: ACCOUNTS, t
       'money out the bank dates yesterday, seen today → a purchase today too, with its day (logged oldest first)');
     eq(w.balance, 500, 'today\'s payroll (+500) goes to the total balance');
     eq(w.log.map(l => `${l.d} ${l.n} ${l.a}`).join(' | '), '2026-09-29 Payroll 500', 'with a line under From your bank');
-    ok(!w.purchases.some(p => p.bank === 'n4' || p.bank === 'n5') && w.log.length === 1, 'savings and the credit card are left out');
+    ok(!w.purchases.some(p => p.bank === 'n4') && w.log.length === 1, 'savings is left out');
+    ok(w.purchases.some(p => p.bank === 'n5' && p.amount === 55 && p.title === 'Amazon'), 'a purchase on the credit card is a purchase today');
     ok(w.tracked['item-1'].seen.n6 && !w.log.some(l => l.n === 'Late history') && !w.purchases.some(p => p.bank === 'n6'),
       'a row dated well before the sync point is late history: counted, not logged');
     const again = w.pass([item(more)]);
-    ok(!again.changed && w.purchases.length === 3, 'seen again (the next refresh, another device): not logged twice');
+    ok(!again.changed && w.purchases.length === 4, 'seen again (the next refresh, another device): not logged twice');
   }
 
   console.log('\n── 3. A pending charge posts, changes, or is dropped ──');
@@ -266,26 +267,86 @@ const item = (transactions, more = {}) => ({ id: 'item-1', accounts: ACCOUNTS, t
     ok(s.purchases.length === 1 && s.typed.length === 2, 'a charge dated today is not matched to one typed on an earlier day');
   }
 
+  console.log('\n── 6b. Credit cards: what is spent on them counts, paying them does not ──');
+  {
+    const w = budgetWorld();
+    w.pass([item(history)]);
+    const r = w.pass([item([...history,
+      tx('cp1', 300, TODAY, 'CHASE CREDIT CRD AUTOPAY', { category: 'LOAN_PAYMENTS' }),
+      tx('cp2', -300, TODAY, 'Payment Thank You', { account: 'cc', category: 'LOAN_PAYMENTS' }),
+      tx('cc2', 18.25, TODAY, 'Chipotle', { account: 'cc', pending: true, category: 'FOOD_AND_DRINK' }),
+      tx('cc3', -20, TODAY, 'Amazon refund', { account: 'cc', category: 'GENERAL_MERCHANDISE' }),
+    ])]);
+    ok(w.purchases.length === 1 && w.purchases[0].bank === 'cc2' && w.purchases[0].amount === 18.25 && w.purchases[0].pending, 'a card purchase is a purchase today (pending, like any)');
+    ok(!w.purchases.some(p => p.bank === 'cp1') && !w.log.some(l => /Payment|AUTOPAY/i.test(l.n)), 'paying the card from checking is not spending, and the payment it receives is not money in');
+    ok(w.log.length === 1 && w.log[0].n === 'Amazon refund' && w.log[0].a === 20 && w.balance === 20, 'a refund on the card is money in');
+    eq(r.logged, 2, 'two transactions logged');
+    ok(!w.tracked['item-1'].seen.cp1 && !w.tracked['item-1'].seen.cp2, 'the payment isn\'t even kept as counted');
+
+    const n = budgetWorld();
+    n.pass([item(history)]);
+    n.pass([item([...history, tx('np1', 120, TODAY, 'DISCOVER E-PAYMENT 8124'), tx('np2', -120, TODAY, 'INTERNET PAYMENT - THANK YOU', { account: 'cc' })])]);
+    ok(n.purchases.length === 0 && n.log.length === 0, 'without a category, the names say it is paying a card');
+    n.pass([item([...history, tx('np3', 40, TODAY, 'Rent payment portal')])]);
+    ok(n.purchases.some(p => p.bank === 'np3'), 'a payment from checking that doesn\'t name a card is spending');
+
+    const chkOnly = ts => ({ ...item(ts), accounts: [ACCOUNTS[0], ACCOUNTS[1]] });
+    const o = budgetWorld();
+    o.pass([chkOnly(history)]);
+    o.pass([chkOnly([...history, tx('op1', 250, TODAY, 'CITI CARD PAYMENT', { category: 'LOAN_PAYMENTS' })])]);
+    ok(o.purchases.some(p => p.bank === 'op1'), 'with no card followed, paying one from checking is the only sign of what was spent on it: spending');
+
+    const chk = ts => ({ ...item(ts), accounts: [ACCOUNTS[0]] });
+    const card = ts => ({ ...item(ts), id: 'item-2', accounts: [ACCOUNTS[2]] });
+    const two = budgetWorld();
+    two.pass([chk(history), card([])]);
+    two.pass([chk([...history, tx('tp1', 75, TODAY, 'AMEX EPAYMENT', { category: 'LOAN_PAYMENTS' })]), card([tx('tc1', 9.5, TODAY, 'Bus', { account: 'cc' })])]);
+    ok(two.purchases.length === 1 && two.purchases[0].bank === 'tc1', 'a card at another bank: its purchases count, and paying it from this one\'s checking does not');
+  }
+
+  console.log('\n── 6c. A sync point from before Budget followed cards ──');
+  {
+    /* checking only was counted then: the card's list is history the first time, new card charges after that count */
+    const card = [tx('oc1', 85.5, '2026-09-27', 'Soupleaf Hot Pot', { account: 'cc', pending: true }), tx('oc2', 24.93, '2026-09-28', 'Fresh Bowl', { account: 'cc', pending: true })];
+    const old = { 'item-1': { since: '2026-09-20', seen: { h1: { a: 4.33, d: '2026-09-28', p: 1 }, h2: { a: 6.33, d: '2026-09-27' }, h3: { a: -232.5, d: '2026-09-25' } } } };
+    let s = B.bankBudgetStep({ tracked: old, items: [item([...history, ...card])], purchases: [], today: TODAY, nextId: 1 });
+    ok(s.purchases.length === 0 && s.balance === 0 && s.logged === 0, 'what the card shows the first time is already in the balance: nothing comes off today');
+    ok(s.tracked['item-1'].seen.oc1 && s.tracked['item-1'].seen.oc2 && s.tracked['item-1'].seen.c1, 'it is counted as seen');
+    eq(s.tracked['item-1'].acc.join(), 'cc,chk', 'and the sync point covers the card from now on');
+    ok(s.changed, '(a change, so it is saved)');
+    const later = tx('oc3', 11.9, TODAY, '7-Eleven', { account: 'cc', pending: true });
+    s = B.bankBudgetStep({ tracked: s.tracked, items: [item([...history, ...card, later])], purchases: [], today: TODAY, nextId: 1 });
+    ok(s.purchases.length === 1 && s.purchases[0].bank === 'oc3', 'a card charge after that is a purchase');
+    const s2 = B.bankBudgetStep({ tracked: s.tracked, items: [item([...history, ...card, later], { accounts: [ACCOUNTS[0]] })], purchases: s.purchases, today: TODAY, nextId: s.nextId });
+    eq(s2.tracked['item-1'].acc.join(), 'cc,chk', 'a copy that lists fewer accounts doesn\'t shrink what the sync point covers');
+  }
+
   console.log('\n── 7. What Budget says it follows ──');
   {
-    const tracked = { 'item-1': { since: TODAY, seen: {} }, 'item-2': { since: TODAY, seen: {} } };
+    const tracked = { 'item-1': { since: TODAY, seen: {} }, 'item-2': { since: TODAY, seen: {} }, 'item-5': { since: TODAY, seen: {} } };
     const banks = B.bankBudgetFollowing(tracked, [
-      item(history, { institution: { name: 'Chase' }, accounts: [{ id: 'chk', type: 'depository', subtype: 'checking', name: 'Total Checking', mask: '1234' }, ACCOUNTS[2]] }),
-      item([], { id: 'item-2', institution: { name: 'Discover' }, accounts: [ACCOUNTS[2]] }),
+      item(history, { institution: { name: 'Chase' }, accounts: [{ id: 'chk', type: 'depository', subtype: 'checking', name: 'Total Checking', mask: '1234' }, ACCOUNTS[1], ACCOUNTS[2]] }),
+      item([], { id: 'item-2', institution: { name: 'Ally' }, accounts: [ACCOUNTS[1]] }),
       item([], { id: 'item-3', institution: { name: 'UFCU' }, status: 'NOT_READY' }),
       item([], { id: 'item-4', institution: { name: 'Wells Fargo' }, error: { code: 'ITEM_LOGIN_REQUIRED', message: 'log in' } }),
+      item([], { id: 'item-5', institution: { name: 'Discover' }, accounts: [{ ...ACCOUNTS[2], name: 'Discover it', mask: '7788' }] }),
     ]);
-    eq(banks.map(b => b.state).join(), 'following,none,waiting,error', 'following a checking account, a bank with none, one Plaid is still gathering, one needing a login');
-    ok(banks[0].accounts.length === 1 && banks[0].accounts[0].name === 'Total Checking' && banks[0].accounts[0].mask === '1234' && banks[0].since === TODAY,
-      'naming the checking account and since when');
+    eq(banks.map(b => b.state).join(), 'following,none,waiting,error,following', 'following checking and a card, a bank with savings only, one Plaid is still gathering, one needing a login, a card alone');
+    ok(banks[0].accounts.length === 2 && banks[0].accounts[0].name === 'Total Checking' && banks[0].accounts[0].mask === '1234' && banks[0].accounts[1].name === 'Credit card' && banks[0].since === TODAY,
+      'naming the checking account and the card (savings left out), and since when');
+    ok(banks[4].accounts.length === 1 && banks[4].accounts[0].name === 'Discover it' && banks[4].accounts[0].mask === '7788', 'a card alone is followed too');
   }
 
   console.log('\n── 8. The balance Budget\'s total is ──');
   {
     const acct = (id, subtype, available, current, type = 'depository') => ({ id, type, subtype, available, current });
     const bank = (id, accounts) => ({ id, accounts, transactions: [], updatedAt: 1 });
-    eq(B.bankBalance([bank('b1', [acct('chk', 'checking', 120.5, 130), acct('sav', 'savings', 900, 900), acct('cc', 'credit card', null, 410, 'credit')])]), 120.5,
-      'the checking account\'s available balance: savings and the credit card are left out');
+    eq(B.bankBalance([bank('b1', [acct('chk', 'checking', 120.5, 130), acct('sav', 'savings', 900, 900), acct('cc', 'credit card', null, 410, 'credit')])]), -289.5,
+      'the checking account\'s available balance, less what\'s owed on the card (its current balance, with no available credit given); savings left out');
+    eq(B.bankBalance([bank('b1', [acct('chk', 'checking', 1000, 1000), { ...acct('cc', 'credit card', 1560, 410, 'credit'), limit: 2000 }])]), 560,
+      'with a limit and the credit available, what\'s owed counts pending card charges too ($2,000 − $1,560 = $440)');
+    eq(B.bankBalance([bank('b1', [{ ...acct('cc', 'credit card', 1560, 410, 'credit'), limit: 2000 }])]), null, 'a card alone gives no balance: Budget keeps its own');
+    eq(B.bankBalanceKey([bank('b1', [acct('chk', 'checking', 1, 1), acct('cc', 'credit card', null, 410, 'credit')])]), 'b1/cc,b1/chk', 'and the card is one of the accounts the day\'s start is taken over');
     eq(B.bankBalance([bank('b1', [acct('chk', 'checking', null, 130)])]), 130, 'its current balance where the bank gives no available one');
     eq(B.bankBalance([bank('b1', [acct('chk', 'checking', 0, 130)])]), 0, 'an available balance of $0 is a balance');
     eq(B.bankBalance([bank('b1', [acct('chk', 'checking', 20.1, 0)]), bank('b2', [acct('chk', 'checking', 10.2, 0), acct('pp', 'paypal', 5, 5)])]), 35.3,
