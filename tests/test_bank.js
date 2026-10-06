@@ -620,19 +620,23 @@ async function sealV1(payload) {
     ] });
     W.plaid.setBalances(access, { 'acc-checking': { available: 557.5, current: 580 }, 'acc-saving': { available: 180, current: 190 }, 'acc-credit': { current: 465 } });
     await refresh(L);
-    ok(await until(() => purchases(L).length === 1), 'Refresh brings new transactions into Budget');
-    const chip = purchases(L)[0];
-    ok(chip.title === 'Chipotle' && chip.amount === 12.5 && chip.pending === true && chip.bank === 'n-chipotle', "today's spending is a purchase today, still pending");
+    ok(await until(() => purchases(L).length === 2), 'Refresh brings new transactions into Budget');
+    const chip = purchases(L).find(p => p.bank === 'n-chipotle');
+    ok(chip && chip.title === 'Chipotle' && chip.amount === 12.5 && chip.pending === true && !chip.on, "today's spending is a purchase today, still pending");
+    const target = purchases(L).find(p => p.bank === 'n-target');
+    ok(target && target.title === 'Target' && target.amount === 30 && target.on === yesterday, "yesterday's Target, first seen today, is spent today too, with its day");
     eq(L.w.eval('totalBalance()'), 557.5, "the total balance is the bank's new one: today's payroll (+500) in, yesterday's Target (−30) and the pending Chipotle out");
-    ok(L.w.eval('budget.initial') === 100 && L.w.eval('todayBalance()') === 7.5, 'the day still starts from $100, and today\'s envelope is $20 − $12.50');
+    ok(L.w.eval('budget.initial') === 100 && L.w.eval('todayBalance()') === -22.5, 'the day still starts from $100, and today\'s envelope is $20 − $12.50 − $30');
     const sub = () => bud(L).querySelector('.budget-figure-sub').textContent;
-    ok(/^\$100\.00 at the start of today − \$12\.50 spent today \+ \$470\.00 in at your bank$/.test(sub()), `under it, how the day got there: "${sub()}"`);
+    ok(/^\$100\.00 at the start of today − \$42\.50 spent today \+ \$500\.00 in at your bank$/.test(sub()), `under it, how the day got there: "${sub()}"`);
     ok(/Logged 3 bank transactions in Budget/.test(toast(L.d)), `a toast says so: "${toast(L.d)}"`);
     ok(!purchases(L).some(p => /savings|Amazon/.test(p.title)) && L.w.eval('totalBalance()') === 557.5, 'savings and the credit card are left out, of the purchases and of the balance');
-    const tag = bud(L).querySelector('.budget-purchase-row.from-bank .budget-bank-tag');
-    ok(tag && tag.textContent === 'pending', 'on the Budget screen it is marked as from the bank, pending');
+    const tagOf = p => bud(L).querySelector(`.budget-purchase-row.from-bank[data-purchase-id="${p.id}"] .budget-bank-tag`);
+    ok(tagOf(chip) && tagOf(chip).textContent === 'pending', 'on the Budget screen it is marked as from the bank, pending');
+    const day = L.w.eval(`calKeyToDate('${yesterday}').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })`);
+    ok(tagOf(target) && tagOf(target).textContent === `bank · ${day}` && /dated .*reached your bank's list today/.test(tagOf(target).title), `and the Target with its day: "${tagOf(target) && tagOf(target).textContent}"`);
     const lines = [...bud(L).querySelectorAll('.budget-bank-list .bank-tx')].map(r => r.textContent.replace(/\s+/g, ' ').trim());
-    ok(lines.length === 2 && /Campus Café payroll \+\$500\.00$/.test(lines[0]) && /Target -\$30\.00$/.test(lines[1]), `From your bank lists the rest: ${lines.join(' | ')}`);
+    ok(lines.length === 1 && /Campus Café payroll \+\$500\.00$/.test(lines[0]), `From your bank lists the money in: ${lines.join(' | ')}`);
     ok(/What you let yourself spend a day/.test(bud(L).textContent) && /Your bank balance when today began/.test(bud(L).textContent)
       && bud(L).querySelector('[data-bfield="initial"]').readOnly, 'the daily budget is spending, and the initial balance follows the bank (it can\'t be typed over)');
     L.w.eval('setBudgetField("initial", "9999")');
@@ -645,18 +649,19 @@ async function sealV1(payload) {
     P.signIn('user-c');
     ok(await until(() => P.d.querySelectorAll('#bankPanel .bank-item').length === 1 || P.w.eval('bank.items.length') === 1), 'the phone signs in to the same account');
     await sleep(200);
-    ok(purchases(P).length === 1 && P.w.eval('totalBalance()') === 557.5 && P.w.eval('budget.initial') === 100, 'and has the same budget: nothing logged twice');
+    ok(purchases(P).length === 2 && P.w.eval('totalBalance()') === 557.5 && P.w.eval('budget.initial') === 100, 'and has the same budget: nothing logged twice');
 
     W.plaid.changeTransactions(access, { removed: ['n-chipotle'],
       added: [tx('n-chipotle-posted', 14, today, 'CHIPOTLE 1234', { pending_transaction_id: 'n-chipotle' })] });
     W.plaid.setBalances(access, { 'acc-checking': { available: 556, current: 566 } });
     await refresh(P);
-    ok(await until(() => purchases(P)[0] && purchases(P)[0].amount === 14), 'the charge posts with a tip: Refresh on the phone updates the purchase');
-    ok(purchases(P).length === 1 && !purchases(P)[0].pending && purchases(P)[0].bank === 'n-chipotle-posted', 'the same purchase, posted, not a second one');
+    const chipOf = app => purchases(app).find(p => p.title === 'Chipotle');
+    ok(await until(() => chipOf(P) && chipOf(P).amount === 14), 'the charge posts with a tip: Refresh on the phone updates the purchase');
+    ok(purchases(P).length === 2 && !chipOf(P).pending && chipOf(P).bank === 'n-chipotle-posted', 'the same purchase, posted, not a second one');
     ok(await until(() => P.w.eval('totalBalance()') === 556 && L.w.eval('totalBalance()') === 556, 3000), 'and the total follows the bank, the tip taken off, on both devices');
-    ok(await until(() => purchases(L)[0] && purchases(L)[0].amount === 14, 4000), 'the laptop has it too');
+    ok(await until(() => chipOf(L) && chipOf(L).amount === 14, 4000), 'the laptop has it too');
     await sleep(1500);
-    ok(purchases(L).length === 1 && purchases(P).length === 1, 'and neither logs it again');
+    ok(purchases(L).length === 2 && purchases(P).length === 2, 'and neither logs it again');
 
     W.plaid.changeTransactions(access, { added: [tx('n-hold', 45, today, 'Shell gas hold', { pending: true })] });
     W.plaid.setBalances(access, { 'acc-checking': { available: 511 } });
@@ -821,7 +826,7 @@ async function sealV1(payload) {
     const twoDaysAgo = L.w.eval('addDays(dbdTodayKey(), -2)');
     W.plaid.changeTransactions(access, { added: [tx('n-hotel', 80, twoDaysAgo, 'Hotel hold', { pending: true })] });
     await refresh(L);
-    ok(await until(() => L.w.eval('bankBudget.log').some(l => l.n === 'Hotel hold')), 'a pending hold dated two days ago is logged in the balance');
+    ok(await until(() => purchases(L).some(p => p.bank === 'n-hotel' && p.on === twoDaysAgo && p.pending)), 'a pending hold dated two days ago, first seen today, is spent today');
     const held = L.w.eval('budget.initial');
     W.plaid.changeTransactions(access, { added: Array.from({ length: 55 }, (_, i) => tx(`n-card-${i}`, 2, yesterday, `Card ${i}`, { account_id: 'acc-credit' })) });
     await refresh(L);
@@ -829,7 +834,8 @@ async function sealV1(payload) {
     W.plaid.changeTransactions(access, { removed: ['n-hotel'], added: [tx('n-hotel-posted', 80, today, 'Hotel', { pending_transaction_id: 'n-hotel' })] });
     await refresh(L);
     await sleep(100);
-    ok(L.w.eval('budget.initial') === held && !purchases(L).some(p => p.bank === 'n-hotel-posted'), 'so when it posts it is the same charge, not counted again');
+    ok(L.w.eval('budget.initial') === held && purchases(L).filter(p => /Hotel/.test(p.title)).length === 1 && purchases(L).some(p => p.bank === 'n-hotel-posted' && !p.pending),
+      'so when it posts it is the same purchase, not counted again');
 
     /* a connection whose first refresh never finished */
     const node0 = cloud.at(`users/user-c/bank/items/${itemId}`);

@@ -10,10 +10,12 @@
  *   • the total balance is the bank's balance over the accounts Budget follows
  *     (available, or current where there is none), as last fetched, less what
  *     was typed today that the bank hasn't shown;
- *   • today's purchases are today's money out at the bank since Budget started
- *     following it (one purchase however it posts, with its final amount; a
- *     pending one the bank drops goes; one typed for the same amount is matched,
- *     not counted twice; one taken out with × stays out), and what was typed;
+ *   • today's purchases are the money out Budget first saw at the bank today,
+ *     whatever day the bank dates it, since Budget started following it (one
+ *     purchase however it posts, with its final amount, or only the tip when it
+ *     posts after its day; a pending one the bank drops goes; one typed for the
+ *     same amount is matched, not counted twice, also when the bank shows it a
+ *     day late; one taken out with × stays out), and what was typed;
  *   • a new day starts from the bank's balance as last fetched, and within a
  *     day the start stays put, unless the banks followed change;
  *   • turned off, the total stays where it was and the bank no longer moves it;
@@ -157,9 +159,9 @@ async function runCase(seed) {
   const lineage = (b, a, t) => { const l = { b, a, cur: t.transaction_id, name: t.name }; b.lin.push(l); return l; };
   const curTx = l => l.b.txs.get(l.cur) || null;
   const bank = {
-    pending(b, amount, name) {
+    pending(b, amount, name, date = today()) {
       const a = pick(b.accts.filter(followedAcct));
-      const t = newTx(b, a, amount, name, { pending: true });
+      const t = newTx(b, a, amount, name, { pending: true, date });
       a.pending.set(t.transaction_id, t.amount);
       publish(b, { added: [t] });
       return lineage(b, a, t);
@@ -224,10 +226,15 @@ async function runCase(seed) {
     return any ? round2(sum) : null;
   };
   const typedToday = () => M.typed.filter(p => p.day === today() && !p.removed);
-  const rowsToday = () => banks.flatMap(b => b.lin).filter(l => l.row && l.rowDay === today() && !l.removed);
+  /* today's purchases from the bank: a lineage's purchase (`row`, the day it was
+   * first seen), or what more it came to when it posted after that day (`extra`) */
+  const rowsToday = () => banks.flatMap(b => b.lin).filter(l => !l.removed).flatMap(l => [
+    ...(l.row && l.rowDay === today() ? [{ l, row: l.row, bank: l.appCur }] : []),
+    ...(l.extra && l.extra.day === today() ? [{ l, row: l.extra, bank: l.extra.bank }] : []),
+  ]);
   const expectedPurchases = () => [
     ...typedToday().map(p => ({ title: p.title, amount: p.lin ? p.lin.row.amount : p.amount, bank: p.lin ? p.lin.appCur : null })),
-    ...rowsToday().filter(l => !l.row.typed).map(l => ({ title: null, amount: l.row.amount, bank: l.appCur })),
+    ...rowsToday().filter(x => !x.row.typed).map(x => ({ title: null, amount: x.row.amount, bank: x.bank })),
   ];
   const spentExpected = () => round2(expectedPurchases().reduce((s, p) => s + p.amount, 0));
   const totalExpected = () => {
@@ -237,9 +244,10 @@ async function runCase(seed) {
   };
 
   /* Budget's pass over a bank's list as just fetched (bankbudget.js, from the
-   * books' side): the first time it sees a charge, today's money out is a
-   * purchase (or the typed one for the same amount); after that a new amount
-   * moves that purchase, and a pending one dropped takes it away. */
+   * books' side): the first time it sees a charge, money out is a purchase today
+   * whatever its date (or the one typed for the same amount: today, or within a
+   * day of an earlier date); after that a new amount moves that purchase (after
+   * its day: more out is spent today), and a pending one dropped takes it away. */
   const pass = (b, syncPoint) => {
     if (!M.following) return;
     for (const l of b.lin) {
@@ -255,6 +263,11 @@ async function runCase(seed) {
           const typed = typedToday().find(p => !p.lin && round2(p.amount) === round2(t.amount));
           if (typed) { typed.lin = l; l.row = { amount: typed.amount, typed }; } else l.row = { amount: t.amount };
           l.rowDay = today();
+        } else if (t.amount > 0) {                                          // dated an earlier day: spent today, unless typed then
+          const carried = M.typed.find(p => p.carried && !p.lin && !p.removed && p.day < today() && p.day >= addDays(today(), -3)
+            && p.day >= addDays(t.date, -1) && p.day <= addDays(t.date, 1) && round2(p.amount) === round2(t.amount));
+          if (carried) carried.lin = l;
+          else { l.row = { amount: t.amount }; l.rowDay = today(); }
         }
         continue;
       }
@@ -266,7 +279,11 @@ async function runCase(seed) {
       l.appCur = l.cur;
       if (l.seen === 'gone') continue;
       const delta = round2(t.amount - l.seenAmount);
-      if (delta && !l.removed && l.row && l.rowDay === today()) l.row.amount = round2(l.row.amount + delta);
+      if (delta && !l.removed) {
+        if (l.row && l.rowDay === today()) l.row.amount = round2(l.row.amount + delta);
+        else if (l.extra && l.extra.day === today()) l.extra.amount = round2(l.extra.amount + delta);
+        else if (delta > 0) l.extra = { amount: delta, day: today(), bank: l.cur };   // more out after its day: spent today
+      }
       l.seenAmount = t.amount;
     }
   };
@@ -347,7 +364,7 @@ async function runCase(seed) {
       if (M.following && M.initial !== null && round2(initial) !== M.initial) problems.push(`${where}: the day starts from ${money(initial)}, should be ${money(M.initial)}`);
       if (M.following && M.anchorFromLog) {
         const inToday = app.w.eval(`bankBudget.log.reduce((s, l) => s + (l.d === ${JSON.stringify(today())} ? l.a : 0), 0)`);
-        const want0 = round2(expectedBalance() + rowsToday().reduce((s, l) => s + l.row.amount, 0) - inToday);
+        const want0 = round2(expectedBalance() + rowsToday().reduce((s, x) => s + x.row.amount, 0) - inToday);
         if (round2(initial) !== want0) problems.push(`${where}: taken again, the day starts from ${money(initial)}, should be ${money(want0)}`);
       }
       if (!M.following && round2(initial) !== M.offInitial) problems.push(`${where}: turned off, the initial balance is ${money(initial)}, should stay ${money(M.offInitial)}`);
@@ -400,6 +417,7 @@ async function runCase(seed) {
   for (let day = 0; day < days && !problems.length; day++) {
     if (day > 0) {
       const offTotal = M.following ? null : totalExpected();
+      for (const p of M.typed) if (p.day === today() && !p.lin && !p.removed) p.carried = M.following;   // kept for the bank's late copy
       dayRef.today = addDays(today(), 1);
       for (const app of devices()) { app.w.__today = today(); app.w.eval('budgetTickDay()'); }
       if (M.following) M.initial = expectedBalance();
@@ -440,11 +458,13 @@ async function runCase(seed) {
           M.offInitial = round2(totalExpected() + spentExpected());
           appNow.d.querySelector('#bankPanel [data-bank="budget"]').click();
           M.following = false;
+          M.typed.forEach(p => { p.carried = false; });                   // (turned off, Budget forgets what it kept)
           what = `${appNow.name} turns following off`;
           did('turned off');
         } else {
           appNow.d.querySelector('#bankPanel [data-bank="budget"]').click();
           M.following = true;
+          M.typed.forEach(p => { p.carried = false; });
           for (const x of banks.filter(y => y.connected && y.fetched)) {      // the sync point: the lists as last fetched
             x.since = today();
             for (const l of x.lin.filter(y => followedAcct(y.a) && y.seen !== 'gone')) {
@@ -523,28 +543,41 @@ async function runCase(seed) {
           did('typed (cash)');
         }
       } else if (r < 0.70 && rowsToday().length) {
-        const l = pick(rowsToday());
-        const el = rowEl(appNow, p => p.bank === l.appCur);
+        const x = pick(rowsToday());
+        const el = rowEl(appNow, p => p.bank === x.bank);
         if (el) {
           el.querySelector('[data-pact="del"]').click();
-          l.removed = true;
-          if (l.row.typed) l.row.typed.removed = true;
-          l.row = null;
-          what = `${appNow.name} takes ${l.name} out of Budget (×)`;
+          x.l.removed = true;
+          if (x.row.typed) x.row.typed.removed = true;
+          x.l.row = null; x.l.extra = null;
+          what = `${appNow.name} takes ${x.l.name}${x.row === x.l.extra ? ' (posted higher)' : ''} out of Budget (×)`;
           did('taken out with ×');
         }
       } else if (r < 0.73 && rowsToday().length) {
-        const l = pick(rowsToday());
-        const el = rowEl(appNow, p => p.bank === l.appCur);
+        const x = pick(rowsToday());
+        const el = rowEl(appNow, p => p.bank === x.bank);
         if (el) {
           const amount = cents(1, 30);
           const input = el.querySelector('[data-pact="amount"]');
           input.value = amount.toFixed(2);
           input.dispatchEvent(new appNow.w.Event('change', { bubbles: true }));
-          l.row.amount = amount;
-          if (l.row.typed) l.row.typed.amount = amount;
-          what = `${appNow.name} changes ${l.name} to ${money(amount)}`;
+          x.row.amount = amount;
+          if (x.row.typed) x.row.typed.amount = amount;
+          what = `${appNow.name} changes ${x.l.name} to ${money(amount)}`;
           did('amount changed');
+        }
+      } else if (r < 0.79) {                                           // a bank that hands Plaid yesterday's charges only today
+        const yesterday = addDays(today(), -1);
+        const typedYesterday = M.typed.find(p => p.carried && !p.lin && !p.removed && p.day === yesterday);
+        if (typedYesterday && chance(0.6)) {
+          bank.pending(b, typedYesterday.amount, typedYesterday.title.replace(' (typed)', ' at the till'), yesterday);
+          what = `${b.spec.prefix}: ${typedYesterday.title} ${money(typedYesterday.amount)}, typed yesterday, reaches Plaid only today`;
+          did('typed yesterday, at the bank today');
+        } else {
+          const amount = cents(2, 70);
+          const l = bank.pending(b, amount, 'Late ' + pick(NAMES), yesterday);
+          what = `${b.spec.prefix}: yesterday's ${l.name} ${money(amount)} reaches Plaid only today`;
+          did('pending from yesterday, seen today');
         }
       }
       if (!what || chance(0.55)) {                                     // a refresh: a device fetches the bank

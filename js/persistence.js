@@ -48,8 +48,8 @@ import { normalizeShiftCals, setShiftCals, shiftCals } from './gcal.js';
  *     shift→sh wage→wg             (paid shift and its hourly wage, see shifts.js)
  *   shiftCals→sc  { calId: { shift, wage } } per Google calendar (see gcal.js)
  *   runway→rw {p: payday, r: repeat, b: bills [{i: id, n: name, a: amount, d: day}]} (see budget.js)
- *   purchase: id→i title→t amount→a bank→b pending→pd   (a purchase logged from the bank)
- *   bankBudget→bb {o: on (0 = off), i: items, l: log, a: anchor {d: day, k: key, s: start}}    (Budget following the bank, see budget.js)
+ *   purchase: id→i title→t amount→a bank→b pending→pd on→o   (a purchase logged from the bank)
+ *   bankBudget→bb {o: on (0 = off), i: items, l: log, a: anchor {d: day, k: key, s: start}, t: typed}    (Budget following the bank, see budget.js)
  *   digest: enabled→en last→l {at, md, n, m, s} clearedAt→ca   (see digest.js)
  */
 export function compressState(st) {
@@ -65,7 +65,7 @@ export function compressState(st) {
     if (b.todayAllowance !== null && b.todayAllowance !== undefined) o.ta = b.todayAllowance;
     if (b.lastDate) o.ld = b.lastDate;
     if (b.purchases && b.purchases.length) {
-      o.p = b.purchases.map(p => ({ i: p.id, t: p.title, a: p.amount, ...(p.bank ? { b: p.bank } : {}), ...(p.pending ? { pd: 1 } : {}) }));
+      o.p = b.purchases.map(p => ({ i: p.id, t: p.title, a: p.amount, ...(p.bank ? { b: p.bank } : {}), ...(p.pending ? { pd: 1 } : {}), ...(p.on ? { o: p.on } : {}) }));
     }
     return o;
   };
@@ -113,7 +113,8 @@ export function compressState(st) {
       : {}),
     ...(st.bankBudget && (!st.bankBudget.on || Object.keys(st.bankBudget.items).length || st.bankBudget.log.length || st.bankBudget.anchor)
       ? { bb: { o: st.bankBudget.on ? 1 : 0, i: st.bankBudget.items, l: st.bankBudget.log,
-        ...(st.bankBudget.anchor ? { a: { d: st.bankBudget.anchor.day, k: st.bankBudget.anchor.key, s: st.bankBudget.anchor.start } } : {}) } }
+        ...(st.bankBudget.anchor ? { a: { d: st.bankBudget.anchor.day, k: st.bankBudget.anchor.key, s: st.bankBudget.anchor.start } } : {}),
+        ...(st.bankBudget.typed && st.bankBudget.typed.length ? { t: st.bankBudget.typed } : {}) } }
       : {}),
     cal: { ce: cEvents, ct: (st.calendar.calTemplates||[]).map(cCalEv), cec: st.calendar.calEventIdCtr },
   };
@@ -143,7 +144,7 @@ function decompressState(c) {
     initial: b?.ib || 0,
     daily:   b?.dy || 0,
     todayAllowance: (b && b.ta !== undefined) ? b.ta : null,
-    purchases: (b?.p || []).map(p => ({ id: p.i, title: p.t, amount: p.a, ...(p.b ? { bank: p.b } : {}), ...(p.pd ? { pending: true } : {}) })),
+    purchases: (b?.p || []).map(p => ({ id: p.i, title: p.t, amount: p.a, ...(p.b ? { bank: p.b } : {}), ...(p.pd ? { pending: true } : {}), ...(p.o ? { on: p.o } : {}) })),
     lastDate: b?.ld || null,
   });
   const dEvents = {};
@@ -165,7 +166,7 @@ function decompressState(c) {
     digest: decompressDigest(c.dg),
     shiftCals: normalizeShiftCals(c.sc),
     runway: normalizeRunway(c.rw ? { payday: c.rw.p, repeat: c.rw.r, bills: (c.rw.b || []).map(b => ({ id: b.i, name: b.n, amount: b.a, day: b.d })) } : null),
-    bankBudget: normalizeBankBudget(c.bb ? { on: c.bb.o !== 0, items: c.bb.i, log: c.bb.l, anchor: c.bb.a ? { day: c.bb.a.d, key: c.bb.a.k, start: c.bb.a.s } : null } : null),
+    bankBudget: normalizeBankBudget(c.bb ? { on: c.bb.o !== 0, items: c.bb.i, log: c.bb.l, anchor: c.bb.a ? { day: c.bb.a.d, key: c.bb.a.k, start: c.bb.a.s } : null, typed: c.bb.t } : null),
     calendar: { calEvents: dEvents, calTemplates: (c.cal.ct||[]).map(dCalEv), calEventIdCtr: c.cal.cec || 1 },
   };
 }
@@ -250,7 +251,8 @@ export function gatherState() {
     digest: digestRecord(),
     shiftCals: normalizeShiftCals(shiftCals),
     runway: normalizeRunway(runway),
-    bankBudget: { on: bankBudget.on, items: bankBudget.items, log: bankBudget.log, ...(bankBudget.anchor ? { anchor: bankBudget.anchor } : {}) },
+    bankBudget: { on: bankBudget.on, items: bankBudget.items, log: bankBudget.log, ...(bankBudget.anchor ? { anchor: bankBudget.anchor } : {}),
+      ...(bankBudget.typed.length ? { typed: bankBudget.typed } : {}) },
     calendar: { calEvents, calTemplates, calEventIdCtr },
   };
 }

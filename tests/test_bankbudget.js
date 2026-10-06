@@ -75,14 +75,18 @@ const item = (transactions, more = {}) => ({ id: 'item-1', accounts: ACCOUNTS, t
     const r = w.pass([item(more)]);
     eq(r.logged, 3, 'three new checking transactions are logged');
     const chip = w.purchases.find(p => p.bank === 'n1');
-    ok(chip && chip.title === 'Chipotle' && chip.amount === 12.5 && chip.pending === true && chip.id === 100,
+    ok(chip && chip.title === 'Chipotle' && chip.amount === 12.5 && chip.pending === true && !chip.on,
       'money out today → a purchase today, marked as from the bank, and pending');
-    eq(w.balance, 470, 'yesterday\'s Target (−30) and today\'s payroll (+500) go to the total balance');
-    eq(w.log.map(l => `${l.d} ${l.n} ${l.a}`).join(' | '), '2026-09-28 Target -30 | 2026-09-29 Payroll 500', 'each with a line under From your bank');
-    ok(!w.purchases.some(p => p.bank === 'n4' || p.bank === 'n5') && w.log.length === 2, 'savings and the credit card are left out');
-    ok(w.tracked['item-1'].seen.n6 && !w.log.some(l => l.n === 'Late history'), 'a row dated well before the sync point is late history: counted, not logged');
+    const target = w.purchases.find(p => p.bank === 'n2');
+    ok(target && target.title === 'Target' && target.amount === 30 && target.on === '2026-09-28' && target.id === 100,
+      'money out the bank dates yesterday, seen today → a purchase today too, with its day (logged oldest first)');
+    eq(w.balance, 500, 'today\'s payroll (+500) goes to the total balance');
+    eq(w.log.map(l => `${l.d} ${l.n} ${l.a}`).join(' | '), '2026-09-29 Payroll 500', 'with a line under From your bank');
+    ok(!w.purchases.some(p => p.bank === 'n4' || p.bank === 'n5') && w.log.length === 1, 'savings and the credit card are left out');
+    ok(w.tracked['item-1'].seen.n6 && !w.log.some(l => l.n === 'Late history') && !w.purchases.some(p => p.bank === 'n6'),
+      'a row dated well before the sync point is late history: counted, not logged');
     const again = w.pass([item(more)]);
-    ok(!again.changed && w.purchases.length === 2, 'seen again (the next refresh, another device): not logged twice');
+    ok(!again.changed && w.purchases.length === 3, 'seen again (the next refresh, another device): not logged twice');
   }
 
   console.log('\n── 3. A pending charge posts, changes, or is dropped ──');
@@ -124,7 +128,18 @@ const item = (transactions, more = {}) => ({ id: 'item-1', accounts: ACCOUNTS, t
     z.pass([item([...history, { ...hold, id: 'p4', amount: 18 }])], '2026-09-28');
     z.purchases = [];
     z.pass([item([...history, tx('t4', 21, TODAY, 'Hotel', { pending_id: 'p4' })])], TODAY);
-    ok(z.balance === -3 && z.log.at(-1).a === -3, 'posted after the day ended with another amount: only the difference (−3) moves the balance');
+    const more = z.purchases.find(p => p.bank === 't4');
+    ok(more && more.amount === 3 && more.title === 'Hotel (posted higher)' && z.balance === 0,
+      'posted after the day ended for more (a tip): only the difference ($3) is spent today, as a purchase');
+    z.pass([item([...history, tx('t4', 23, TODAY, 'Hotel', { pending_id: 'p4' })])], TODAY);
+    ok(z.purchases.filter(p => p.bank === 't4').length === 1 && more && z.purchases.find(p => p.bank === 't4').amount === 5,
+      'changed again the same day: that purchase follows');
+    const v = budgetWorld();
+    v.pass([item(history)], '2026-09-28');
+    v.pass([item([...history, { ...hold, id: 'p6', amount: 100 }])], '2026-09-28');
+    v.purchases = [];
+    v.pass([item([...history, tx('t6', 45, TODAY, 'Gas', { pending_id: 'p6' })])], TODAY);
+    ok(v.balance === 55 && v.log.at(-1).a === 55 && v.purchases.length === 0, 'posted for less (a hold released): the difference comes back to the balance, not today\'s spending');
 
     /* a bank that doesn't link a posted charge to its pending one: dropped + new, which comes to the same */
     const u = budgetWorld();
@@ -144,7 +159,8 @@ const item = (transactions, more = {}) => ({ id: 'item-1', accounts: ACCOUNTS, t
     w.pass([item([...history, tx('k2', 4.75, TODAY, 'STARBUCKS 123', { pending_id: 'k1' })])]);
     ok(w.purchases[0].bank === 'k2' && !w.purchases[0].pending && w.purchases.length === 2, 'and follows it when it posts');
     w.pass([item([...history, tx('k2', 4.75, TODAY, 'STARBUCKS 123', { pending_id: 'k1' }), tx('k3', 20, '2026-09-28', 'Books')])]);
-    ok(w.purchases.find(p => p.id === 2).bank === undefined && w.balance === -20, 'the same amount dated another day is not a match: it goes to the balance');
+    ok(w.purchases.find(p => p.id === 2).bank === undefined && w.purchases.some(p => p.bank === 'k3' && p.on === '2026-09-28') && w.balance === 0,
+      'the same amount dated another day is not matched to one typed today: a purchase of its own, with its day');
 
     const x = budgetWorld();
     x.pass([item(history)]);
@@ -184,11 +200,11 @@ const item = (transactions, more = {}) => ({ id: 'item-1', accounts: ACCOUNTS, t
     const w = budgetWorld();
     w.pass([item(history)]);
     w.pass([item([...history, tx('x1', 30, '2026-09-28', 'Target')])]);
-    eq(w.balance, -30, 'a new transaction dated yesterday is logged');
+    ok(w.purchases.some(p => p.bank === 'x1'), 'a new transaction dated yesterday is logged');
     w.pass([item(history)]);
-    ok(w.balance === -30 && w.tracked['item-1'].seen.x1, 'a copy of the list saved before it came: it stays counted');
+    ok(w.purchases.some(p => p.bank === 'x1') && w.balance === 0 && w.tracked['item-1'].seen.x1, 'a copy of the list saved before it came: it stays counted');
     w.pass([item([...history, tx('x1', 30, '2026-09-28', 'Target')])]);
-    ok(w.balance === -30 && w.last.logged === 0, 'and is not counted again when the newer copy comes back');
+    ok(w.purchases.filter(p => p.bank === 'x1').length === 1 && w.last.logged === 0, 'and is not counted again when the newer copy comes back');
 
     const m = budgetWorld([{ id: 7, title: 'Chipotle', amount: 12.5, bank: 'p1', pending: true }]);
     m.pass([item(history)]);
@@ -209,6 +225,45 @@ const item = (transactions, more = {}) => ({ id: 'item-1', accounts: ACCOUNTS, t
     z.pass([item(history)]);
     z.pass([item([...history, tx('z1', 6, '2026-09-30', 'Late-night tacos', { pending: true })])]);
     ok(z.purchases.some(p => p.bank === 'z1') && z.balance === 0, 'a bank a time zone ahead dates it tomorrow: still today\'s purchase');
+  }
+
+  console.log('\n── 6a. The day Budget sees a charge is the day it is spent ──');
+  {
+    /* the bank hands Plaid a day's charges late, or the app wasn't opened */
+    const w = budgetWorld();
+    w.pass([item(history)], '2026-09-27');
+    w.purchases = [];
+    const late = [tx('l1', 47.62, '2026-09-28', 'Kiin Di', { pending: true }), tx('l2', 7.61, '2026-09-28', 'Snack Milktea', { pending: true })];
+    w.pass([item([...history, ...late])], TODAY);
+    eq(w.purchases.map(p => `${p.title} ${p.amount} ${p.on || 'today'}${p.pending ? ' pending' : ''}`).join(' | '),
+      'Kiin Di 47.62 2026-09-28 pending | Snack Milktea 7.61 2026-09-28 pending', 'yesterday\'s charges, first seen today, are today\'s purchases, with their day');
+    ok(w.balance === 0 && w.log.length === 0, 'not lines under From your bank');
+    w.pass([item([...history, tx('l1-posted', 55.62, '2026-09-28', 'KIIN DI', { pending_id: 'l1' }), late[1]])], TODAY);
+    ok(w.purchases.length === 2 && w.purchases[0].bank === 'l1-posted' && w.purchases[0].amount === 55.62 && !w.purchases[0].pending,
+      'posting the same day with a tip: the same purchase, with the tip');
+
+    /* typed by hand on its day, the bank's copy a day later */
+    const y = budgetWorld();
+    y.pass([item(history)], '2026-09-27');
+    y.purchases = [];
+    const r = y.pass([item([...history, tx('m1', 12.5, '2026-09-28', 'CHIPOTLE', { pending: true })])], TODAY);
+    ok(y.purchases.length === 1, '(nothing typed: counted today)');
+    const t = budgetWorld();
+    t.pass([item(history)], '2026-09-27');
+    t.purchases = [];
+    const typed = [{ d: '2026-09-28', a: 12.5 }, { d: '2026-09-28', a: 3 }];
+    let s = B.bankBudgetStep({ tracked: t.tracked, items: [item([...history, tx('m1', 12.5, '2026-09-28', 'CHIPOTLE', { pending: true })])], purchases: [], typed, today: TODAY, nextId: 1 });
+    ok(s.purchases.length === 0 && s.changed && s.logged === 0, 'typed yesterday for the same amount: counted then, not again today');
+    eq(JSON.stringify(s.typed), '[{"d":"2026-09-28","a":3}]', 'and that one is used up');
+    ok(s.tracked['item-1'].seen.m1, 'the charge is counted (seen) all the same');
+    const s2 = B.bankBudgetStep({ tracked: s.tracked, items: [item([...history, tx('m1-posted', 14, '2026-09-28', 'CHIPOTLE', { pending_id: 'm1' })])], purchases: [], typed: s.typed, today: TODAY, nextId: 1 });
+    ok(s2.purchases.length === 1 && s2.purchases[0].amount === 1.5 && /posted higher/.test(s2.purchases[0].title), 'it posts with a tip: the tip is spent today');
+    s = B.bankBudgetStep({ tracked: t.tracked, items: [item([...history, tx('m2', 12.5, '2026-09-26', 'OLD', { pending: true })])], purchases: [], typed, today: TODAY, nextId: 1 });
+    ok(s.purchases.length === 1 && s.typed.length === 2, 'typed two days after the bank\'s date: not the same purchase');
+    s = B.bankBudgetStep({ tracked: t.tracked, items: [item([...history, tx('m4', 12.5, '2026-09-27', 'LATE NIGHT', { pending: true })])], purchases: [], typed, today: TODAY, nextId: 1 });
+    ok(s.purchases.length === 0 && s.typed.length === 1, 'typed the day after it (a bank a time zone behind): the same purchase');
+    s = B.bankBudgetStep({ tracked: t.tracked, items: [item([...history, tx('m3', 12.5, TODAY, 'TODAY', { pending: true })])], purchases: [], typed, today: TODAY, nextId: 1 });
+    ok(s.purchases.length === 1 && s.typed.length === 2, 'a charge dated today is not matched to one typed on an earlier day');
   }
 
   console.log('\n── 7. What Budget says it follows ──');

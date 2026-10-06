@@ -49,10 +49,13 @@ export function setRunway(v) { runway = v; }
  *   anchor — { day, key, start }: the day the start of the day (budget.initial)
  *            was taken from the bank's balance, over which accounts (bankBalanceKey),
  *            and what it came to (another copy merged in with an older one makes
- *            it be taken again) */
-export let bankBudget = { on: true, items: {}, log: [], anchor: null };
+ *            it be taken again)
+ *   typed  — purchases typed by hand on the last few days that the bank hasn't
+ *            shown yet: [{ d: the day, a: amount }], kept at each new day, so the
+ *            bank's own copy of one, coming in a day later, isn't counted again */
+export let bankBudget = { on: true, items: {}, log: [], anchor: null, typed: [] };
 export function setBankBudget(v) { bankBudget = v; }
-const BANK_LOG_DAYS = 14, BANK_LOG_MAX = 20;
+const BANK_LOG_DAYS = 14, BANK_LOG_MAX = 20, BANK_TYPED_DAYS = 3;
 /* The account's bank connections as bank.js last handed them over (budgetSeeBank):
  * From your bank says which accounts it follows, and how fresh they are. */
 let bankSeen = [];
@@ -90,12 +93,14 @@ export function normalizeBudget(b) {
   };
 }
 
-/* A purchase as saved: a bank one keeps its transaction id and pending mark. */
+/* A purchase as saved: a bank one keeps its transaction id, its pending mark,
+ * and the day the bank dates it when that's an earlier day (`on`). */
 export function purchaseRecord(p) {
   return {
     id: p.id, title: p.title || '', amount: round2(p.amount),
     ...(typeof p.bank === 'string' && p.bank ? { bank: p.bank } : {}),
     ...(p.bank && p.pending ? { pending: true } : {}),
+    ...(p.bank && typeof p.on === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.on) ? { on: p.on } : {}),
   };
 }
 
@@ -109,7 +114,9 @@ export function normalizeBankBudget(b) {
   const a = b && b.anchor;
   const anchor = a && typeof a.day === 'string' && typeof a.key === 'string'
     ? { day: a.day, key: a.key, start: Number.isFinite(a.start) ? round2(a.start) : null } : null;
-  return { on: b?.on !== false, items, log, anchor };
+  const typed = Array.isArray(b?.typed) ? b.typed.filter(e => e && typeof e.d === 'string' && Number.isFinite(e.a))
+    .map(e => ({ d: e.d, a: round2(e.a) })).slice(-30) : [];
+  return { on: b?.on !== false, items, log, anchor, typed };
 }
 /* The balance follows a bank: it is the bank's balance (or, with no balance
  * from the bank, Budget logs the bank's transactions into its own), so money in
@@ -203,6 +210,10 @@ export function budgetRollover() {
     budgetBillsPaid = [];
     const bank = budgetBankBalance();
     budget.initial = bank === null ? totalBalance() : bank;   // (taken properly once today's purchases from the bank are in: budgetAnchor)
+    /* what was typed and the bank hasn't shown: its copy may come a day late (bankbudget.js) */
+    const since = addDays(today, -BANK_TYPED_DAYS);
+    bankBudget.typed = [...bankBudget.typed, ...budget.purchases.filter(p => !p.bank && round2(p.amount) > 0)
+      .map(p => ({ d: budget.lastDate, a: round2(p.amount) }))].filter(e => e.d >= since).slice(-30);
   } else if (runwayOn()) {
     // the daily budget is what you spend, not income; bills come out on their day
     budgetBillsPaid = billsDueBetween(runway.bills, budget.lastDate, today);
@@ -308,7 +319,7 @@ function budgetHtml() {
     <div class="budget-purchase-row${p.bank ? ' from-bank' : ''}" data-purchase-id="${p.id}">
       <input class="budget-purchase-title" data-pact="title"
         value="${escAttr(p.title)}" placeholder="Purchase…">
-      ${p.bank ? `<span class="budget-bank-tag" title="${p.pending ? 'From your bank, not posted yet' : 'From your bank'}">${p.pending ? 'pending' : 'bank'}</span>` : ''}
+      ${p.bank ? `<span class="budget-bank-tag" title="From your bank${p.pending ? ', not posted yet' : ''}${p.on ? `, dated ${fmtDay(p.on)}: it reached your bank's list today` : ''}">${p.pending ? 'pending' : 'bank'}${p.on ? ` · ${fmtDay(p.on)}` : ''}</span>` : ''}
       <input class="budget-purchase-amount" data-pact="amount" type="text" inputmode="decimal"
         value="${Number(p.amount).toFixed(2)}">
       <button class="budget-purchase-del" data-pact="del" title="Remove">×</button>
@@ -399,8 +410,8 @@ function fmtStamp(ms) {
  * newest one can be hours old, and this says so. */
 function bankStatusHtml() {
   const how = budgetBankBalance() !== null
-    ? 'Your total balance is your bank\'s balance (available: pending charges taken off). Today\'s spending is logged under Purchases today; money in and earlier days\' charges are listed here.'
-    : 'Today\'s spending is logged under Purchases today; money in and earlier days\' spending here, in your total balance.';
+    ? 'Your total balance is your bank\'s balance (available: pending charges taken off). Money out is logged under Purchases today on the day it reaches your bank\'s list, with its date if the bank dates it earlier; money in is listed here.'
+    : 'Money out is logged under Purchases today on the day it reaches your bank\'s list, with its date if the bank dates it earlier; money in is listed here, in your total balance.';
   const banks = bankBudgetFollowing(bankBudget.items, bankSeen);
   if (!banks.length) return `<div class="budget-bank-note">New transactions from your checking account are logged for you. ${how}</div>`;
   const notes = banks.map(f => {
@@ -702,9 +713,10 @@ export function budgetFromBank(items) {
   if (!bankBudget.on || !Array.isArray(items)) return true;
   if (userTyping()) return false;
   const rolled = budgetRollover();                     // today's purchases must be today's
-  const r = bankBudgetStep({ tracked: bankBudget.items, items, purchases: budget.purchases, today: dbdTodayKey(), nextId: purchaseIdCounter });
+  const r = bankBudgetStep({ tracked: bankBudget.items, items, purchases: budget.purchases, typed: bankBudget.typed, today: dbdTodayKey(), nextId: purchaseIdCounter });
   if (r.changed) {
     bankBudget.items = r.tracked;
+    bankBudget.typed = r.typed;
     budget.purchases = r.purchases;
     purchaseIdCounter = r.nextId;
     if (bankBalance(items) === null) budget.initial = round2(budget.initial + r.balance);   // (the bank's balance has these in it already)
@@ -739,7 +751,7 @@ export function budgetForgetBank(id) {
  * it was, Budget's own again. */
 export function budgetFollowBank(on, items) {
   if (!on) budget.initial = round2(totalBalance() + purchasesTotal());
-  bankBudget = { on: !!on, items: {}, log: on ? bankBudget.log : [], anchor: null };
+  bankBudget = { on: !!on, items: {}, log: on ? bankBudget.log : [], anchor: null, typed: [] };
   if (on) budgetFromBank(items);
   budgetChanged();
 }

@@ -207,6 +207,7 @@ function keepBankWithBalance(out, base, local, remote, preferLocal) {
   const side = preferLocal ? local : remote;
   if (isObj(out.bankBudget) && isObj(side.bankBudget)) {
     out.bankBudget = { ...out.bankBudget, items: side.bankBudget.items, log: side.bankBudget.log };
+    if ('typed' in side.bankBudget) out.bankBudget.typed = side.bankBudget.typed; else delete out.bankBudget.typed;
   }
   return out;
 }

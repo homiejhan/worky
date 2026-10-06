@@ -591,7 +591,7 @@ function bankRender() {
       <span class="settings-view-name">Budget follows your bank</span>
       <label class="gcal-toggle"><input type="checkbox" data-bank="budget"${bankBudget.on ? ' checked' : ''}><span class="gcal-toggle-track"></span></label>
     </div>
-    <div class="bank-fine">From checking accounts. Budget's total balance is your bank's balance, and each day starts from what it was when the day began. New transactions are logged too: today's spending as purchases, money in and earlier days' charges under From your bank.</div>` : '';
+    <div class="bank-fine">From checking accounts. Budget's total balance is your bank's balance, and each day starts from what it was when the day began. New transactions are logged too: money out as purchases on the day it shows up at your bank (with its date when the bank dates it earlier), money in under From your bank.</div>` : '';
   panel.innerHTML = `
     ${items.map(bankItemHtml).join('')}
     ${toBudget}
