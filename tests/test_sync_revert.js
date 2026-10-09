@@ -584,8 +584,12 @@ const used = w => { let n = 0; for (let i = 0; i < w.localStorage.length; i++) {
     O.dev.wake();                                                          // its copy goes over the laptop's, and it writes again every 0.6 s
     let back = 0;
     for (let i = 0; i < 5; i++) { await sleep(600); if (cloudTexts(W).includes('added on the laptop')) back++; O.toggle(1, 7); }
-    ok(back > 0 && O.heard().dbdTasks.some(t => t.text === 'added on the laptop'),
-      `the laptop's task is back in the cloud while the older phone keeps writing, and its copies take it in (back ${back} of 5 times)`);
+    ok(back > 0, `the laptop's task is back in the cloud while the older phone keeps writing (back ${back} of 5 times)`);
+    /* Whether the older phone hears a copy put back before its next write, 0.6 s on, is
+     * a race with the network (the answer takes up to half a second on a busy machine,
+     * on either version): it hears one once it pauses, and its copies take the task in. */
+    ok(await until(() => O.heard().dbdTasks.some(t => t.text === 'added on the laptop'), 4000),
+      'and once it pauses, the older phone hears the copy with the task, so its copies take it in');
     const L = await W.reload(L0);                                          // the laptop restarts just after
     await W.net.idle(); await sleep(3000); await W.net.idle();
     ok([dbdTexts(L), dbdTexts(P), cloudTexts(W)].every(t => t.includes('added on the laptop')) && /1:6 1:7/.test(doneOf(W.cloud())),

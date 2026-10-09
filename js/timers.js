@@ -83,6 +83,8 @@ export function renderTimers() {
     });
   });
   renderHome();
+  if (wokenUp) updateTimerSummary();
+  tickSchedule();
 }
 
 export function setTimerLabel(id, value) {
@@ -133,6 +135,8 @@ export function updateTimerUI(id) {
   const txt = fmt(getRemaining(t));
   document.querySelectorAll(`.tdisp-${id}`).forEach(el => { if (el.textContent !== txt) el.textContent = txt; });
   timerPaintProgress(t);
+  if (wokenUp) updateTimerSummary();         // (the time remaining changed: no need to wait for a tick)
+  tickSchedule();
 }
 
 export function startEditTimer(id, pfx) {
@@ -189,8 +193,12 @@ export function resetTimer(id) {
 /* Timer displays only change once a second, so the DOM is only touched
  * once a second. This used to rewrite every timer's text, progress bar
  * and the summary innerHTML on every animation frame (60x/s), which kept
- * the phone's main thread busy with layout and made taps feel late. */
+ * the phone's main thread busy with layout and made taps feel late. Nor
+ * does it ask for animation frames any more: one asked for every frame
+ * kept the browser drawing for as long as Focus was open, timers running
+ * or not. */
 let _tickLastSec = -1;
+let _tickNext = 0;
 export function tickAll() {
   const sec = Math.floor(Date.now() / 1000);
   if (sec !== _tickLastSec) {
@@ -206,7 +214,19 @@ export function tickAll() {
     });
     if (wokenUp) updateTimerSummary();
   }
-  requestAnimationFrame(tickAll);
+  tickSchedule();
+}
+/* The next tick: at the next second while a timer runs, at the next minute
+ * while only the summary's finish time moves (Woke up checked), none
+ * otherwise. Whatever starts a timer or checks Woke up asks for one again
+ * (renderTimers, updateTimerUI, toggleWakeup). */
+export function tickSchedule() {
+  clearTimeout(_tickNext);
+  _tickNext = 0;
+  const running = timers.some(t => t.running);
+  if (!running && !wokenUp) return;
+  const every = running ? 1000 : 60000;
+  _tickNext = setTimeout(tickAll, every - (Date.now() % every) + 20);
 }
 
 /* ───────────────────────── WAKEUP + SUMMARY ───────────────────────── */
@@ -223,6 +243,7 @@ export function toggleWakeup() {
   wokenUp = !wokenUp;
   syncWakeupUI();
   updateTimerSummary();
+  tickSchedule();
   saveToLocal();
 }
 

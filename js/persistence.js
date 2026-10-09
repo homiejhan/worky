@@ -377,6 +377,17 @@ export function saveToLocal() {
   }
   try { syncOnLocalSave(state); } catch(e) {}
 }
+/* The save every 2 s (main.js), for whatever changed without saving at once:
+ * only when the state isn't what this page last wrote or read, so a Focus left
+ * open doesn't rewrite the same state, and hand it to sync, again and again.
+ * (Another tab's save, found here, is taken in by saveToLocal as before.) */
+export function autosave() {
+  let str = null, cur = null;
+  try { str = JSON.stringify(gatherState()); } catch(e) { return; }
+  try { cur = localStorage.getItem(LS_KEY); } catch(e) {}
+  if (str === stateStored && cur === stateStored) return;
+  saveToLocal();
+}
 /* A state record (JSON) into the live variables, without localStorage: a copy
  * from the cloud still loads when this device's storage is full. */
 export function loadStateString(str) {

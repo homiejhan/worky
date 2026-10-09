@@ -1,6 +1,6 @@
 /* main.js — Entry point: exposes the inline-handler functions and starts the app. */
 import { $, watchTyping } from './util.js';
-import { gatherState, loadFromLocal, saveToLocal, saveToLocalNow, watchOtherTabs } from './persistence.js';
+import { autosave, gatherState, loadFromLocal, saveToLocal, saveToLocalNow, watchOtherTabs } from './persistence.js';
 import {
   changeTimerColor, commitEditTimer, renderTimers, resetTimer, setTimerLabel, startEditTimer,
   syncWakeupUI, tickAll, toggleTimer, updateTimerSummary,
@@ -98,14 +98,14 @@ Object.assign(window, {
   setSyncBooting(false);
   saveToLocal();             // saved from the start (another tab of Focus opened now finds it)
 
-  /* autosave */
-  setInterval(saveToLocal, 2000);
+  /* autosave: every 2 s, when something changed */
+  setInterval(autosave, 2000);
   /* day-by-day midnight rollover (also fires after device sleep) */
   setInterval(dbdCheckRollover, 30 * 1000);
   /* home page: keep the 4-hour calendar window and date current */
   setInterval(renderHome, 60 * 1000);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') dbdCheckRollover();
+    if (document.visibilityState === 'visible') { dbdCheckRollover(); tickAll(); }   // (timers wait while hidden)
     if (document.visibilityState === 'hidden') saveToLocalNow();
   });
   window.addEventListener('pagehide', saveToLocalNow);

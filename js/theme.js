@@ -19,6 +19,11 @@ export function setTheme(v) { theme = v; }
  * so it stays device-local in THEME_BG_LS_KEY. Another device sees
  * bgMode 'local', finds no image and simply shows the palette alone. */
 const THEME_BG_LS_KEY   = 'focus-theme-bg';
+/* Moving background (Settings → Appearance): the ambient colors drift and the
+ * Now badge on Home pulses. Off by default, since either one keeps the browser
+ * redrawing for as long as Focus is open; a choice for this device only, like
+ * an uploaded image (a phone and a laptop may want different ones). */
+const THEME_MOTION_LS_KEY = 'focus-bg-motion';
 const THEME_BG_MAX_EDGE = 1920;      // uploaded images are downscaled to this
 const THEME_BG_MAX_B64  = 2.5e6;     // and refused above ~2.5 MB encoded
 
@@ -122,6 +127,18 @@ export function decompressTheme(c) {
 }
 
 export function themeGet() { if (!theme) theme = normalizeTheme(null); return theme; }
+
+export function themeMotionOn() { try { return localStorage.getItem(THEME_MOTION_LS_KEY) === '1'; } catch(e) { return false; } }
+function themeApplyMotion() {
+  const on = themeMotionOn();
+  document.body.classList.toggle('bg-motion', on);
+  const toggle = $('themeMotionToggle');
+  if (toggle) toggle.checked = on;
+}
+function themeSetMotion(on) {
+  try { if (on) localStorage.setItem(THEME_MOTION_LS_KEY, '1'); else localStorage.removeItem(THEME_MOTION_LS_KEY); } catch(e) {}
+  themeApplyMotion();
+}
 
 /* ── color math ── */
 function themeHexToRgb(h) {
@@ -262,6 +279,7 @@ export function applyTheme() {
   }
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', t.bg);
+  themeApplyMotion();
 }
 
 /* Palette + type from a preset; the background image is a separate
@@ -484,4 +502,5 @@ export function bindTheme() {
   $('thBgUpload')?.addEventListener('click', () => $('themeBgFile')?.click());
   $('themeBgFile')?.addEventListener('change', e => { themeUploadBg(e.target.files && e.target.files[0]); e.target.value = ''; });
   $('thBgRemove')?.addEventListener('click', themeRemoveBg);
+  $('themeMotionToggle')?.addEventListener('change', e => themeSetMotion(e.target.checked));
 }

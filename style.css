@@ -100,9 +100,12 @@ input, textarea, select { font-family: var(--font-sans); color: var(--ink); }
 }
 
 /* ═══════════════════════════════════════════════════════
-   AMBIENT WASH — three slow-drifting colour fields derived
-   from the accent. Panels are transparent, so this is the
-   app's canvas; a theme background image replaces it.
+   AMBIENT WASH — three colour fields derived from the accent.
+   Panels are transparent, so this is the app's canvas; a theme
+   background image replaces it. They hold still unless Moving
+   background is on (body.bg-motion, Settings → Appearance, this
+   device only): drifting, they make the browser redraw the whole
+   window 60 times a second for as long as Focus is open.
    ═══════════════════════════════════════════════════════ */
 .ambient {
   position: fixed; inset: 0; z-index: 0;
@@ -114,24 +117,24 @@ input, textarea, select { font-family: var(--font-sans); color: var(--ink); }
   position: absolute;
   width: 64vmax; height: 64vmax;
   border-radius: 50%;
-  will-change: transform;
 }
+body.bg-motion .ambient-blob { will-change: transform; }
 .ambient-a {
   top: -28vmax; left: -22vmax;
   background: radial-gradient(circle at center, rgba(var(--accent-rgb),0.34) 0%, rgba(var(--accent-rgb),0.10) 38%, transparent 68%);
-  animation: driftA 46s ease-in-out infinite alternate;
 }
 .ambient-b {
   bottom: -30vmax; right: -18vmax;
   background: radial-gradient(circle at center, rgba(var(--accent-2-rgb),0.30) 0%, rgba(var(--accent-2-rgb),0.09) 38%, transparent 68%);
-  animation: driftB 58s ease-in-out infinite alternate;
 }
 .ambient-c {
   top: 30vh; left: 48vw;
   width: 46vmax; height: 46vmax;
   background: radial-gradient(circle at center, rgba(var(--accent-3-rgb),0.22) 0%, rgba(var(--accent-3-rgb),0.06) 40%, transparent 68%);
-  animation: driftC 70s ease-in-out infinite alternate;
 }
+body.bg-motion .ambient-a { animation: driftA 46s ease-in-out infinite alternate; }
+body.bg-motion .ambient-b { animation: driftB 58s ease-in-out infinite alternate; }
+body.bg-motion .ambient-c { animation: driftC 70s ease-in-out infinite alternate; }
 @keyframes driftA { from { transform: translate(0,0) scale(1); }    to { transform: translate(14vw, 10vh) scale(1.12); } }
 @keyframes driftB { from { transform: translate(0,0) scale(1.05); } to { transform: translate(-12vw, -12vh) scale(0.95); } }
 @keyframes driftC { from { transform: translate(0,0); }             to { transform: translate(-16vw, 12vh); } }
@@ -1471,8 +1474,8 @@ body.format-mode .list-sched-row { display: flex; }
 .home-cal-badge.now {
   color: var(--on-accent);
   background: var(--accent);
-  animation: homePulse 2.4s ease-in-out infinite;
 }
+body.bg-motion .home-cal-badge.now { animation: homePulse 2.4s ease-in-out infinite; }   /* (a pulse that never ends redraws Home every frame) */
 @keyframes homePulse { 0%,100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb),0.5); } 50% { box-shadow: 0 0 0 5px rgba(var(--accent-rgb),0); } }
 
 /* hero: balance chip (top right) */
@@ -3007,6 +3010,7 @@ body.format-mode .list-sched-row { display: flex; }
 .theme-footer .modal-cancel { flex: 1; }
 .theme-footer .modal-primary { flex: 1; }
 .settings-theme-row { display: flex; flex-direction: column; gap: 10px; }
+.settings-motion-row { margin-top: 14px; border-bottom: none; padding-bottom: 2px; }
 
 /* ═══════════════════════════════════════════════════════
    ONBOARDING — welcome card + guided tour
@@ -3053,6 +3057,8 @@ body.format-mode .list-sched-row { display: flex; }
 .wc-calendar { --wc: var(--hue-calendar); right: 4%; bottom: 26%; animation-delay: -0.5s; }
 .wc-budget   { --wc: var(--hue-budget);   left: 50%; bottom: 0; transform: translateX(-50%); animation-delay: -3s; }
 @keyframes chipFloat { 0%,100% { translate: 0 0; } 50% { translate: 0 -6px; } }
+/* closed, the welcome screen is only hidden (it fades out): its art stops moving */
+.modal-overlay:not(.show) .welcome-orb, .modal-overlay:not(.show) .welcome-chip { animation-play-state: paused; }
 .welcome-title {
   font-family: var(--font-display);
   font-size: 28px; font-weight: 500;

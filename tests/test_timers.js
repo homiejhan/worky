@@ -9,7 +9,7 @@ let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; console.log('  ✓', msg); } else { fail++; console.log('  ✗', msg); } }
 function eq(a, b, msg) { ok(a === b, `${msg} (got ${JSON.stringify(a)})`); }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-/* tickAll runs on animation frames, which can come late on a busy machine: wait for the result */
+/* tickAll runs on a timeout, which can come late on a busy machine: wait for the result */
 async function waitFor(fn, ms = 4000) {
   const t0 = Date.now();
   while (!fn() && Date.now() - t0 < ms) await sleep(25);
@@ -82,6 +82,51 @@ const BOOT = { 'focus-tour-done': '1' };
     const oldExport = { ...c, tm: c.tm.map((t, i) => (i === 1 ? { ...t, ov: 754 } : t)), tg: { '2026-09-20': { work: ['Work', 2700, 14400] } } };
     const back = w.decompressState(JSON.parse(JSON.stringify(oldExport)));
     ok(back && !('over' in back.timers[1]) && !('timerLog' in back), 'an Export from that build imports, without them');
+  }
+
+  console.log('\n── 4. Left open with nothing running, Focus does nothing ──');
+  {
+    let frames = 0, writes = 0;
+    const spy = w => {
+      const raf = w.requestAnimationFrame.bind(w);
+      w.requestAnimationFrame = cb => { frames++; return raf(cb); };
+      const set = w.Storage.prototype.setItem;
+      w.Storage.prototype.setItem = function (k, v) { if (k === 'focus-app-state') writes++; return set.call(this, k, v); };
+    };
+    const { w, d } = await loadApp({ storage: BOOT, before: spy });
+    const id = w.eval('timers[0].id');
+    const shown = () => d.querySelector(`#timerStack-d .tcard-${id} .timer-display`).textContent;
+    frames = 0; writes = 0;
+    await sleep(4500);
+    ok(frames === 0 && !w.eval('_tickNext'), `no animation frames, no tick with no timer running (frames: ${frames})`);
+    eq(writes, 0, 'and nothing saved with nothing changed (the save every 2 s skips)');
+    w.eval('budget.daily = 31');
+    ok(await waitFor(() => writes === 1, 3000), 'a change nothing saved at once is saved within 2 s');
+    ok(JSON.parse(w.localStorage.getItem('focus-app-state')).budget.daily === 31, 'with the change');
+
+    w.toggleTimer(id);
+    const at = shown();
+    ok(w.eval('_tickNext') && await waitFor(() => shown() !== at, 2500), `a timer started: it ticks, once a second (${at} → ${shown()})`);
+    eq(frames, 0, 'without animation frames');
+    w.toggleTimer(id);
+    ok(await waitFor(() => !w.eval('_tickNext'), 2500), 'paused, and nothing else running: the ticks stop');
+    w.toggleWakeup();
+    ok(w.eval('_tickNext'), 'Woke up checked: a tick at the next minute, for the finish time');
+    ok(/Est\. finish/.test(d.getElementById('timerSummary-d').textContent), 'which shows at once');
+    const left = () => d.querySelector('#timerSummary-d .timer-summary-value').textContent;
+    const before = left();
+    w.startEditTimer(id, 'd');
+    d.querySelector(`.tedit-${id}-d`).value = '0:30:00';
+    w.commitEditTimer(id, 'd');
+    ok(left() !== before, `a paused timer's time edited: the time remaining follows at once, not at the next minute (${before} → ${left()})`);
+    w.resetTimer(id);
+    const total = w.eval('fmt(timers.reduce((s, t) => s + Math.round(getRemaining(t)), 0))');
+    ok(left() === total, `and after Reset, at once (${left()})`);
+    w.toggleWakeup();
+    w.eval(`const t = timers[0]; t.running = true; t.startedAt = Date.now(); t.secondsAtStart = t.seconds; renderTimers();`);
+    const from = shown();
+    ok(await waitFor(() => shown() !== from, 2500), 'a timer running in a copy that arrives (sync, a reload) ticks too');
+    w.toggleTimer(id);
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);
