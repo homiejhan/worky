@@ -376,6 +376,94 @@ const item = (transactions, more = {}) => ({ id: 'item-1', accounts: ACCOUNTS, t
     ok(view.length === 1 && view[0].name === 'Freedom' && view[0].owed === 75 && view[0].start === 100, 'what Budget shows for it: owed now, and when today began');
   }
 
+  console.log('\n── 6d. A card payment its balance shows late, or early ──');
+  {
+    const cardOf = w => w.cards['item-1/cc'];
+    const pay = (id, more = {}) => tx(id, -200, TODAY, 'Payment Thank You', { account: 'cc', category: 'LOAN_PAYMENTS', ...more });
+    const pending = pay('pp1', { pending: true });
+    const posted = pay('pp2', { pending_id: 'pp1' });
+    const nothing = w => w.purchases.length === 0 && w.log.length === 0 && w.balance === 0;
+
+    const late = budgetWorld();                                            // a card whose balance counts posted ones only
+    late.pass([withCard(history, 410)]);
+    late.pass([withCard([...history, pending], 410)]);
+    ok(nothing(late) && cardOf(late).u.length === 1 && cardOf(late).u[0].i === 'pp1' && cardOf(late).u[0].a === 200 && !cardOf(late).u[0].s,
+      'a pending payment, the balance not down by it: not spending (before, the $200 counted as spent), and it waits');
+    late.pass([withCard([...history, pending, tx('lg1', 35, TODAY, 'Shell', { account: 'cc', pending: true })], 410)]);
+    ok(nothing(late), 'a pending charge meanwhile, not in that balance yet: nothing yet, and the payment still waits');
+    late.pass([withCard([...history, pending, tx('lg2', 35, TODAY, 'Shell', { account: 'cc', pending_id: 'lg1' })], 445)]);
+    ok(late.purchases.length === 1 && late.purchases[0].title === 'Shell' && late.purchases[0].amount === 35 && cardOf(late).u.length === 1, 'the charge posts: the $35 is spent');
+    late.pass([withCard([...history, posted, tx('lg2', 35, TODAY, 'Shell', { account: 'cc', pending_id: 'lg1' })], 245)]);
+    ok(late.purchases.length === 1 && late.log.length === 0 && late.balance === 0 && !cardOf(late).u, 'the payment posts and the balance falls $200: neither spending nor money in');
+
+    const soon = budgetWorld();                                            // a card whose balance counts pending ones
+    soon.pass([withCard(history, 410)]);
+    soon.pass([withCard([...history, pending], 210)]);
+    ok(nothing(soon) && cardOf(soon).u[0].s === 1, 'a pending payment the balance falls by at once: not money in, and marked as in the balance');
+    soon.pass([withCard([...history, posted], 210)]);
+    ok(nothing(soon) && !cardOf(soon).u, 'it posts: in the balance already, nothing more');
+
+    const both = budgetWorld();
+    both.pass([withCard(history, 410)]);
+    both.pass([withCard([...history, pending, tx('bt1', 23.4, TODAY, 'Trader Joe\'s', { account: 'cc', pending: true })], 233.4)]);
+    ok(both.purchases.length === 1 && both.purchases[0].title === 'Trader Joe\'s' && both.purchases[0].amount === 23.4 && both.log.length === 0,
+      'paid and bought between two checks, both pending and in the balance: what was bought is spent');
+    const bothLate = budgetWorld();
+    bothLate.pass([withCard(history, 410)]);
+    bothLate.pass([withCard([...history, pending, tx('bt1', 23.4, TODAY, 'Trader Joe\'s', { account: 'cc', pending: true })], 410)]);
+    ok(nothing(bothLate) && !cardOf(bothLate).u[0].s, 'the same on a card whose balance counts neither yet: nothing yet');
+
+    const later = budgetWorld();
+    later.pass([withCard(history, 410)]);
+    later.pass([withCard([...history, pending], 410)]);
+    later.pass([withCard([...history, pending], 210)]);
+    ok(nothing(later) && cardOf(later).u[0].s === 1, 'the balance falls by it a check later, still pending: not money in');
+
+    const two = budgetWorld();
+    two.pass([withCard(history, 410)]);
+    two.pass([withCard([...history, pending, pay('pq1', { pending: true, amount: -50 })], 410)]);
+    two.pass([withCard([...history, pending, pay('pq1', { pending: true, amount: -50 })], 160)]);
+    ok(nothing(two) && cardOf(two).u.every(e => e.s === 1), 'two pending payments the balance falls by together: neither is money in');
+
+    const gone = budgetWorld();
+    gone.pass([withCard(history, 410)]);
+    gone.pass([withCard([...history, pending], 210)]);
+    gone.pass([withCard(history, 410)]);
+    ok(nothing(gone) && !cardOf(gone).u, 'a pending payment that goes without posting (it didn\'t go through), the balance back up: not spending');
+
+    const unlinked = budgetWorld();
+    unlinked.pass([withCard(history, 410)]);
+    unlinked.pass([withCard([...history, pending], 410)]);
+    unlinked.pass([withCard([...history, pay('pu2')], 210)]);
+    ok(nothing(unlinked) && !cardOf(unlinked).u, 'it posts under a new id the bank doesn\'t link to the pending one: added back once');
+    const unlinkedSoon = budgetWorld();
+    unlinkedSoon.pass([withCard(history, 410)]);
+    unlinkedSoon.pass([withCard([...history, pending], 210)]);
+    unlinkedSoon.pass([withCard([...history, pay('pu2')], 210)]);
+    ok(nothing(unlinkedSoon) && !cardOf(unlinkedSoon).u, 'the same on a card whose balance had it while pending: still once');
+
+    const first = budgetWorld();
+    first.pass([withCard([...history, pending], 410)]);
+    ok(cardOf(first).u.length === 1 && cardOf(first).u[0].s === 'b', 'a pending payment listed when Budget first looks: whether the balance has it isn\'t known');
+    first.pass([withCard([...history, posted], 210)]);
+    ok(nothing(first) && !cardOf(first).u, 'it posts and the balance falls by it: it wasn\'t in the balance, added back');
+    const firstIn = budgetWorld();
+    firstIn.pass([withCard([...history, pending], 210)]);
+    firstIn.pass([withCard([...history, posted], 210)]);
+    ok(nothing(firstIn) && !cardOf(firstIn).u, 'it posts and the balance stays: it was in it already, nothing to add back');
+    const before = budgetWorld();
+    before.cards = { 'item-1/cc': { b: 410, s: 410, d: TODAY, n: 0, ids: ['c1', 'pp1'] } };
+    before.pass([withCard([...history, pending], 410)]);
+    ok(cardOf(before).u && cardOf(before).u[0].s === 'b', 'a card kept by a copy from before payments waited: a pending payment it knew is taken the same way');
+
+    const early = budgetWorld();
+    early.pass([withCard(history, 410)]);
+    early.pass([withCard(history, 210)]);
+    early.pass([withCard([...history, pay('pe1')], 210)]);
+    ok(early.balance === 200 && early.purchases.reduce((s, p) => s + p.amount, 0) === 200,
+      'the balance falls before the payment is listed: money in at first, then taken back out when it is (nothing in the end)');
+  }
+
   console.log('\n── 6c. From counting card transactions to the card\'s balance ──');
   {
     /* what the version before left: the card's transactions counted one by one, one no longer listed */

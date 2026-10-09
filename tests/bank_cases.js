@@ -165,16 +165,15 @@ async function runCase(seed) {
   const lineage = (b, a, t) => { const l = { b, a, cur: t.transaction_id, name: t.name }; b.lin.push(l); return l; };
   const curTx = l => l.b.txs.get(l.cur) || null;
   const bank = {
-    pending(b, amount, name, date = today()) {
-      const a = pick(b.accts.filter(followedAcct));
-      const t = newTx(b, a, amount, name, { pending: true, date });
+    pending(b, amount, name, date = today(), a = pick(b.accts.filter(followedAcct)), category = null) {
+      const t = newTx(b, a, amount, name, { pending: true, date, category });
       a.pending.set(t.transaction_id, t.amount);
       publish(b, { added: [t] });
       return lineage(b, a, t);
     },
     post(l, tip = 0) {
       const p = curTx(l);
-      const t = newTx(l.b, l.a, p.amount + tip, p.name.toUpperCase(), { of: p.transaction_id });
+      const t = newTx(l.b, l.a, p.amount + tip, p.name.toUpperCase(), { of: p.transaction_id, category: p.personal_finance_category.primary });
       l.a.pending.delete(p.transaction_id);
       l.a.current = round2(l.a.type === 'credit' ? l.a.current + t.amount : l.a.current - t.amount);
       l.cur = t.transaction_id;
@@ -306,7 +305,8 @@ async function runCase(seed) {
     cardPass(b, syncPoint);
   };
   /* A card, by its balance: what it went up by since the last look (its payments
-   * added back) is a purchase today, once what was typed for its new charges is
+   * added back: a posted one at once, a pending one once the balance falls by it
+   * or it posts) is a purchase today, once what was typed for its new charges is
    * taken off; down by more than its payments, the purchase of just that amount
    * today goes, or a refund is money in, or a drop with nothing behind it comes
    * off what the card spent today. */
@@ -330,19 +330,39 @@ async function runCase(seed) {
       if (owed === null) continue;
       const list = [...b.fetched.txs.values()].filter(t => t.account_id === a.account_id);
       const ids = new Set(list.map(t => t.transaction_id));
+      const isPay = t => t.amount < 0 && ['LOAN_PAYMENTS', 'TRANSFER_IN'].includes(t.personal_finance_category.primary);
       const prev = b.card;
       if (syncPoint || !prev) {
         const mine = id => ['#', '='].some(c => id.startsWith(`c:${key}${c}`));
         const used = rowsToday().filter(x => x.bank && mine(x.bank)).map(x => Number(x.bank.slice(key.length + 3)) || 0);
         const linked = M.typed.filter(p => p.lin && p.lin.card && mine(p.lin.appCur)).map(p => Number(p.lin.appCur.slice(key.length + 3)) || 0);
-        b.card = { b: owed, n: Math.max(0, ...used, ...linked), ids };
+        b.card = { b: owed, n: Math.max(0, ...used, ...linked), ids,
+          u: list.filter(t => t.pending && isPay(t)).map(t => ({ i: t.transaction_id, a: round2(-t.amount), s: 'b' })) };   // in the balance already or not: not known
         continue;
       }
       const fresh = list.filter(t => !prev.ids.has(t.transaction_id) && !(t.pending_transaction_id && prev.ids.has(t.pending_transaction_id)))
         .sort((x, y) => (x.date === y.date ? 0 : x.date < y.date ? -1 : 1));
-      const isPay = t => t.amount < 0 && ['LOAN_PAYMENTS', 'TRANSFER_IN'].includes(t.personal_finance_category.primary);
-      let x = round2(owed - prev.b - fresh.filter(isPay).reduce((s, t) => s + t.amount, 0));
-      b.card = { b: owed, n: prev.n, ids };
+      let x = round2(owed - prev.b);
+      fresh.filter(t => isPay(t) && !t.pending).forEach(t => { x = round2(x - t.amount); });      // posted: in the balance, added back
+      const byId = new Map(list.map(t => [t.transaction_id, t]));
+      const postedAs = new Set(list.filter(t => t.pending_transaction_id && !t.pending).map(t => t.pending_transaction_id));
+      const waiting = [], atPosting = [];
+      for (const e of [...prev.u.map(e => ({ ...e })), ...fresh.filter(t => isPay(t) && t.pending).map(t => ({ i: t.transaction_id, a: round2(-t.amount) }))]) {
+        const now = byId.get(e.i);
+        if (now && now.pending) waiting.push(e);                            // pending: waits for the balance
+        else if (now || postedAs.has(e.i)) { if (e.s === 'b') atPosting.push(e); else if (e.s !== 1) x = round2(x + e.a); }   // posted
+        else if (e.s === 1) x = round2(x - e.a);                            // gone after the balance fell by it
+      }
+      const g1 = round2(fresh.filter(t => !isPay(t)).reduce((s, t) => s + t.amount, 0));
+      const g0 = round2(fresh.filter(t => !isPay(t) && !t.pending).reduce((s, t) => s + t.amount, 0)
+        + list.filter(t => !t.pending && !isPay(t) && t.pending_transaction_id && prev.ids.has(t.pending_transaction_id) && !prev.ids.has(t.transaction_id)).reduce((s, t) => s + t.amount, 0));
+      const shows = amount => [g1, g0].some(g => Math.abs(round2(g - x) - amount) < 0.005);   // the balance fell by just that
+      atPosting.forEach(e => { if (shows(e.a)) x = round2(x + e.a); });
+      const open = waiting.filter(e => !e.s);
+      const sum = round2(open.reduce((s, e) => s + e.a, 0));
+      if (open.length > 1 && shows(sum)) { open.forEach(e => { e.s = 1; }); x = round2(x + sum); }
+      else open.forEach(e => { if (shows(e.a)) { e.s = 1; x = round2(x + e.a); } });
+      b.card = { b: owed, n: prev.n, ids, u: waiting };
       if (!x) continue;
       if (x > 0) {
         const left = [];
@@ -462,6 +482,12 @@ async function runCase(seed) {
       if (home && home.textContent !== `${money(total)} total`) problems.push(`${where}: Home shows "${home.textContent}", the total is ${money(total)}`);
       const ro = bud(app).querySelector('[data-bfield="initial"]').readOnly;
       if (ro !== (M.following && expectedBalance() !== null)) problems.push(`${where}: the initial balance is ${ro ? '' : 'not '}read-only`);
+      for (const b of banks.filter(x => M.following && x.connected && x.card && x.fetched)) {   // a card's pending payments, waiting for its balance
+        const cc = b.fetched.accounts.find(x => x.type === 'credit');
+        const kept = cc && JSON.parse(app.w.eval(`JSON.stringify(bankCards[${JSON.stringify(`${b.itemId}/${cc.account_id}`)}] || null)`));
+        const fmt = u => (u || []).map(e => `${e.i}:${money(e.a)}${e.s ? `:${e.s}` : ''}`).sort().join(' ');
+        if (cc && fmt(kept && kept.u) !== fmt(b.card.u)) problems.push(`${where}: card payments waiting [${fmt(kept && kept.u)}], should be [${fmt(b.card.u)}]`);
+      }
     }
     if (live().length > 1) {
       const fig = live().map(a => `${a.w.eval('totalBalance()')}|${a.w.eval('budget.initial')}|${a.w.eval('JSON.stringify(budget.purchases.map(p => [p.bank, p.amount]).sort())')}`);
@@ -567,7 +593,7 @@ async function runCase(seed) {
         did('pending charge');
       } else if (r < 0.32 && pend().length) {
         const l = pick(pend());
-        const tip = chance(0.3) ? cents(0.5, 6) : 0;
+        const tip = chance(0.3) && !l.payment ? cents(0.5, 6) : 0;
         bank.post(l, tip);
         what = `${b.spec.prefix}: ${l.name} posts${tip ? ` with a ${money(tip)} tip` : ''}`;
         did(tip ? 'posted with a tip' : 'posted');
@@ -607,9 +633,15 @@ async function runCase(seed) {
         else {
           const amount = round2(Math.min(cc.current, cents(20, 300)) || 10);
           bank.debit(b, b.accts[0], amount, 'Card payment', today(), 'LOAN_PAYMENTS').payment = true;
-          bank.credit(b, cc, amount, 'Payment received', 'LOAN_PAYMENTS').payment = true;
-          what = `${b.spec.prefix}: ${money(amount)} paid to the credit card`;
-          did('credit card paid');
+          if (chance(0.5)) {
+            bank.pending(b, -amount, 'Payment received', today(), cc, 'LOAN_PAYMENTS').payment = true;
+            what = `${b.spec.prefix}: ${money(amount)} paid to the credit card, pending there`;
+            did('credit card paid (pending)');
+          } else {
+            bank.credit(b, cc, amount, 'Payment received', 'LOAN_PAYMENTS').payment = true;
+            what = `${b.spec.prefix}: ${money(amount)} paid to the credit card`;
+            did('credit card paid');
+          }
         }
       } else if (r < 0.66) {
         const name = pick(NAMES) + ' (typed)';

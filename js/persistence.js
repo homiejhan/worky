@@ -204,8 +204,10 @@ function liveTimerRecord(t) {
  * in the known keys below, so it passes through untouched instead of being
  * stripped and written back. Build 10 follows credit cards by their balance
  * (bankCards); a device on an older build counts card charges differently, so
- * a copy from one makes the others say so (sync.js → syncOlderDevice). */
-export const STATE_BUILD = 10;
+ * a copy from one makes the others say so (sync.js → syncOlderDevice). Build 11
+ * keeps each card's pending payments until its balance shows them (bankCards
+ * → u), which a build-10 copy drops. */
+export const STATE_BUILD = 11;
 const STATE_KNOWN_KEYS = new Set(['version', 'build', 'wokenUp', 'timerDefaults', 'timers', 'todoIdCounter',
   'taskIdCounter', 'todoLists', 'dbdTasks', 'dbdIdCounter', 'budget', 'purchaseIdCounter', 'views', 'theme',
   'digest', 'shiftCals', 'runway', 'bankBudget', 'bankCards', 'calendar']);

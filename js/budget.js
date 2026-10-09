@@ -135,8 +135,11 @@ export function normalizeBankCards(c) {
   const out = {};
   Object.entries(c && typeof c === 'object' ? c : {}).forEach(([k, e]) => {
     if (!/^[^/]+\/./.test(k) || !e || !Number.isFinite(e.b)) return;
+    const u = Array.isArray(e.u) ? e.u.filter(w => w && typeof w.i === 'string' && Number.isFinite(w.a) && w.a > 0).slice(0, 40)
+      .map(w => ({ i: w.i, a: round2(w.a), ...(w.s === 1 || w.s === 'b' ? { s: w.s } : {}) })) : [];
     out[k] = { b: round2(e.b), s: Number.isFinite(e.s) ? round2(e.s) : round2(e.b), d: typeof e.d === 'string' ? e.d : null,
-      n: Math.max(0, Math.floor(Number(e.n) || 0)), ids: Array.isArray(e.ids) ? e.ids.filter(x => typeof x === 'string').slice(0, 400) : [] };
+      n: Math.max(0, Math.floor(Number(e.n) || 0)), ids: Array.isArray(e.ids) ? e.ids.filter(x => typeof x === 'string').slice(0, 400) : [],
+      ...(u.length ? { u } : {}) };
   });
   return out;
 }

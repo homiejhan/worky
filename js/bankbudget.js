@@ -37,7 +37,9 @@
  * whatever the balance went up by is spending, logged as one purchase today
  * (named after the card's new charges when they add up to it, and matched to
  * a purchase typed by hand first), and whatever a payment to the card took off
- * is added back to that, since paying the card isn't spending. When the
+ * is added back to that, since paying the card isn't spending: a posted
+ * payment at once, a pending one once the balance falls by it or it posts
+ * (some cards' balances count pending payments, some don't). When the
  * balance went down by more than its payments (a refund, a charge the card
  * dropped), that comes off what the card spent today, and the rest is money
  * in. Card transactions are never counted one by one, so none is in `seen`: a
@@ -140,11 +142,12 @@ function chargeNames(list) {
 /* One pass over the connections.
  *   tracked   { <item id>: { since, seen, acc, v } } from the last pass (the synced
  *             state): the checking accounts' sync point. v: 2 = counts checking only
- *   cards     { '<item id>/<account id>': { b, s, d, n, ids } } from the last pass:
+ *   cards     { '<item id>/<account id>': { b, s, d, n, ids, u? } } from the last pass:
  *             the balance last seen on each card (b), what was owed at the start of
- *             day d (s), how many lines it has logged (n: their ids), and the
- *             card's transactions in that copy of its list (ids: new ones name what
- *             was spent)
+ *             day d (s), how many lines it has logged (n: their ids), the card's
+ *             transactions in that copy of its list (ids: new ones name what was
+ *             spent), and its pending payments (u: [{ i: id, a: amount, s }], s: 1
+ *             once the balance fell by it, 'b' listed when Budget first looked)
  *   items     the account's connections: [{ id, accounts, transactions, updatedAt, status }]
  *   purchases today's purchases: [{ id, title, amount, bank?, pending?, on? }]
  *   typed     purchases typed by hand on the last few days that the bank hasn't
@@ -312,20 +315,59 @@ export function bankBudgetStep({ tracked = {}, cards = {}, items = [], purchases
       if (owed === null) { if (prev) res.cards[key] = prev; continue; }
       const list = all.filter(t => t && t.id && t.account === a.id);
       const ids = list.map(t => t.id).sort();
+      const isPay = t => cardPayment(t, a, true);
+      /* a pending payment listed when Budget first looks: whether the balance
+       * has it already isn't known ('b': it is added back when it posts only if
+       * the balance falls by it then) */
+      const atStart = known => list.filter(t => t.pending && isPay(t) && (!known || known.has(t.id))).map(t => ({ i: t.id, a: round2(-t.amount), s: 'b' }));
       if (!prev || !Number.isFinite(prev.b)) {
         /* what's owed now is already in the balance. (Numbered on from its purchases
          * already today, if Budget followed it earlier today: their ids stay its own.) */
         const used = res.purchases.filter(p => typeof p.bank === 'string' && ['#', '='].some(c => p.bank.startsWith(`${CARD_LINE}${key}${c}`)))
           .map(p => Number(p.bank.slice(CARD_LINE.length + key.length + 1)) || 0);
-        if (bankItemReady(item)) res.cards[key] = { b: owed, s: owed, d: today, n: Math.max(0, ...used), ids };
+        const u = atStart(null);
+        if (bankItemReady(item)) res.cards[key] = { b: owed, s: owed, d: today, n: Math.max(0, ...used), ids, ...(u.length ? { u } : {}) };
         continue;
       }
       const cur = { b: owed, s: prev.d === today && Number.isFinite(prev.s) ? prev.s : prev.b, d: today, n: Number(prev.n) || 0, ids };
       res.cards[key] = cur;
       const known = new Set(Array.isArray(prev.ids) ? prev.ids : []);
       const fresh = list.filter(t => !known.has(t.id) && !(t.pending_id && known.has(t.pending_id))).sort(byDate);
-      const paid = fresh.filter(t => cardPayment(t, a, true));
-      let x = round2(owed - prev.b - paid.reduce((s, t) => s + t.amount, 0));   // the rise in the balance, with what payments took off added back
+      let x = round2(owed - prev.b);                                              // the rise in the balance
+      /* Payments aren't spending: what one took off the balance is added back.
+       * A posted one is in the balance (Plaid's balance is never older than its
+       * transactions): added back now. A pending one is in it only on a card
+       * whose balance counts pending ones, so it waits (`u`) until the balance
+       * falls by it, or until it posts (then it's in the balance whatever the
+       * card counts), and one that goes without posting after the balance fell
+       * by it puts that back. */
+      fresh.filter(t => isPay(t) && !t.pending).forEach(t => { x = round2(x - t.amount); });
+      const listed = new Map(list.map(t => [t.id, t]));
+      const postedAs = new Set(list.filter(t => t.pending_id && !t.pending).map(t => t.pending_id));
+      const waiting = [];
+      const atPosting = [];
+      for (const e of [...(Array.isArray(prev.u) ? prev.u.map(e => ({ ...e })) : atStart(known)),   // (none kept: a copy from before payments waited)
+        ...fresh.filter(t => isPay(t) && t.pending).map(t => ({ i: t.id, a: round2(-t.amount) }))]) {
+        const now = listed.get(e.i);
+        if (now && now.pending) waiting.push(e);                                 // still pending
+        else if (now || postedAs.has(e.i)) {                                     // posted
+          if (e.s === 'b') atPosting.push(e);
+          else if (e.s !== 1) x = round2(x + e.a);
+        } else if (e.s === 1) x = round2(x - e.a);                               // gone without posting
+      }
+      /* the balance fell by just that, beyond what its new charges and credits
+       * moved it by: those pending ones too if the card counts them (g1), or
+       * the posted ones and pending ones that posted if it counts posted only (g0) */
+      const g1 = round2(fresh.filter(t => !isPay(t)).reduce((s, t) => s + t.amount, 0));
+      const g0 = round2(fresh.filter(t => !isPay(t) && !t.pending).reduce((s, t) => s + t.amount, 0)
+        + list.filter(t => !t.pending && !isPay(t) && t.pending_id && known.has(t.pending_id) && !known.has(t.id)).reduce((s, t) => s + t.amount, 0));
+      const shows = amount => [g1, g0].some(g => Math.abs(round2(g - x) - amount) < 0.005);
+      atPosting.forEach(e => { if (shows(e.a)) x = round2(x + e.a); });          // (otherwise it was in the balance before Budget looked)
+      const open = waiting.filter(e => !e.s);
+      const sum = round2(open.reduce((s, e) => s + e.a, 0));
+      if (open.length > 1 && shows(sum)) { open.forEach(e => { e.s = 1; }); x = round2(x + sum); }
+      else open.forEach(e => { if (shows(e.a)) { e.s = 1; x = round2(x + e.a); } });
+      if (waiting.length) cur.u = waiting;
       if (!x) continue;
       const lines = `${CARD_LINE}${key}#`;
       const label = `${a.name || 'Credit card'}${a.mask ? ` ••${a.mask}` : ''}`;
@@ -347,7 +389,7 @@ export function bankBudgetStep({ tracked = {}, cards = {}, items = [], purchases
           return true;
         };
         const left = [];
-        for (const t of fresh.filter(t => t.amount > 0 && !cardPayment(t, a, true))) {
+        for (const t of fresh.filter(t => t.amount > 0 && !isPay(t))) {
           const amount = round2(t.amount);
           if (amount <= x && typedFor(amount, t.date, t)) x = round2(x - amount);
           else left.push(t);
@@ -369,7 +411,7 @@ export function bankBudgetStep({ tracked = {}, cards = {}, items = [], purchases
        * drop with no transaction behind it (a hold the card let go) comes off
        * what the card spent today first */
       let back = -x;
-      const credits = fresh.filter(t => t.amount < 0 && !cardPayment(t, a, true));
+      const credits = fresh.filter(t => t.amount < 0 && !isPay(t));
       const mine = p => typeof p.bank === 'string' && p.bank.startsWith(lines);
       const same = res.purchases.filter(p => mine(p) && round2(p.amount) === back).pop();
       for (const p of same ? [same] : credits.length ? [] : [...res.purchases].reverse()) {

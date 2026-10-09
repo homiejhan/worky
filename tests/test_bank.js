@@ -934,13 +934,28 @@ async function sealV1(payload) {
     const moves = [...bud(L).querySelectorAll('.budget-purchase-list .budget-bank-move')].map(r => r.textContent.replace(/\s+/g, ' ').trim());
     ok(moves.length === 1 && /^Target bank \+\$25\.00$/.test(moves[0]) && lunch(), `listed with today's purchases, which stay: ${moves.join(' | ')}`);
 
+    /* a payment the card lists as pending before its balance falls by it */
+    const payment = { account_id: 'card', personal_finance_category: { primary: 'LOAN_PAYMENTS' } };
+    W.plaid.changeTransactions(access, { added: [tx('c-pay-pend', -100, today, 'MOBILE PAYMENT - THANK YOU', { ...payment, pending: true })] });
+    await refresh(L);
+    ok(purchases(L).length === 1 && L.w.eval('bankBudget.log').length === 1 && L.w.eval('totalBalance()') === 726.75,
+      'a payment the card lists as pending, its balance not down yet: not spending');
+    ok(kept(L).u && kept(L).u.length === 1 && kept(L).u[0].i === 'c-pay-pend' && kept(L).u[0].a === 100, 'it waits for the balance');
+    const waited = await loadApp({ storage: { 'focus-tour-done': '1', 'focus-app-state': L.w.localStorage.getItem('focus-app-state') }, transform: noRelay });
+    ok(kept(waited).u && kept(waited).u[0].a === 100, 'in the saved state too');
+    W.plaid.changeTransactions(access, { removed: ['c-pay-pend'], added: [tx('c-pay-done', -100, today, 'MOBILE PAYMENT - THANK YOU', { ...payment, pending_transaction_id: 'c-pay-pend' })] });
+    W.plaid.setBalances(access, { card: { available: 1906.75, current: 73.25 } });
+    await refresh(L);
+    ok(purchases(L).length === 1 && L.w.eval('bankBudget.log').length === 1 && !kept(L).u && kept(L).b === 73.25,
+      'it posts and the balance falls $100: neither spending nor money in');
+
     /* the start of the next day is the card's balance as last seen */
     L.w.eval(`budget.lastDate = addDays(dbdTodayKey(), -1); bankCards['${key}'].d = addDays(dbdTodayKey(), -1)`);
     L.w.eval('budgetRollover()');
     W.plaid.changeTransactions(access, { added: [tx('c-bus', 2.5, today, 'Capital Metro', { account_id: 'card', pending: true })] });
-    W.plaid.setBalances(access, { card: { available: 1804.25, current: 175.75 } });
+    W.plaid.setBalances(access, { card: { available: 1924.25, current: 75.75 } });
     await refresh(L);
-    ok(await until(() => purchases(L).some(p => p.title === 'Capital Metro')) && kept(L).s === 173.25 && kept(L).b === 175.75, 'a new day: the card starts from the balance last seen, and what it adds is spent');
+    ok(await until(() => purchases(L).some(p => p.title === 'Capital Metro')) && kept(L).s === 73.25 && kept(L).b === 75.75, 'a new day: the card starts from the balance last seen, and what it adds is spent');
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

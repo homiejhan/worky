@@ -33,7 +33,8 @@ the checking accounts' balance from `/accounts` less what is owed on the credit
 cards (each card's `current` balance), each day starts from it, each new
 transaction from a checking account is logged in Budget on the day it shows up,
 and what a card's balance went up by since Budget last saw it is logged as spent,
-payments to a card left out by their `category` (`js/bankbudget.js` has the rules).
+payments to a card left out by their `category` (a pending one once the card's
+balance shows it, or once it posts; `js/bankbudget.js` has the rules).
 A posted transaction carries `pending_id`, the pending one it replaces, so a
 charge that posts stays one purchase, and `/accounts` says when Plaid last got
 transactions from the bank (`checked_at`, from `/item/get`): banks send Plaid new
