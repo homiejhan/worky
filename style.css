@@ -2597,13 +2597,21 @@ body.format-mode .list-sched-row { display: flex; }
   border: 1px solid var(--border-mid); border-radius: 999px; padding: 0 7px;
 }
 .budget-bank-note { font-size: 11.5px; line-height: 1.5; color: var(--ink-3); }
-.budget-bank-list {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 4px 14px;
-  box-shadow: var(--shadow-card);
+.budget-bank-foot { display: flex; flex-direction: column; gap: 6px; padding: 0 4px; }
+.budget-card-owed { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+/* the bank's own lines in the same list (money in, a charge given back): read-only,
+   amounts lined up with the purchases' (the 24px remove button and its gap) */
+.budget-move-title {
+  flex: 1; min-width: 0;
+  font-size: 13.5px; color: var(--ink-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.budget-move-amount {
+  width: 86px; flex-shrink: 0; margin-right: 32px;
+  font-size: 13.5px; font-weight: 500; font-variant-numeric: tabular-nums;
+  text-align: right; color: var(--ink-2);
+}
+.budget-move-amount.in { color: var(--accent); }
 
 /* cash runway: days of cash against the next payday, plus the monthly bills */
 .runway {

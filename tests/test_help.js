@@ -102,8 +102,11 @@ console.log('\n── 3. The how-tos the help page was asked for ──');
   ok(/needs[^.]*cloud sync/.test(bank) && /every device you sign in on shows it/.test(bank), 'bank: a connection belongs to the account, so it needs cloud sync');
   ok(/FIREBASE_JWKS_URL=http:\/\/127\.0\.0\.1:0\/jwks npm run bank:check/.test(bank), 'bank: the check makes a test sign-in');
   const budgetText = text('budget');
-  ok(/From your bank/.test(budgetText) && /total balance<\/strong> is your bank's balance/.test(d.getElementById('budget-bank').parentElement.innerHTML)
+  ok(/Following your bank/.test(budgetText) && /total balance<\/strong> is your bank's balance/.test(d.getElementById('budget-bank').parentElement.innerHTML)
     && /when the day began/.test(budgetText) && /pending/.test(budgetText), 'budget: the total is the bank\'s, the day starts from it, and what the bank logs');
+  ok(/followed by their balance/.test(budgetText) && /that much comes off today's balance/.test(budgetText) && /Paying the card isn't spending/.test(budgetText),
+    'budget: a card is followed by its balance, and paying it is not spending');
+  ok(/fully close and reopen Focus on every device/.test(budgetText), 'budget: after an update, every device reopened');
   ok(/user_good/.test(bank) && /pass_good/.test(bank), 'bank: the sandbox login');
   const gcal = text('google-calendar');
   ok(/Connect Google Calendar/.test(gcal) && /From URL/.test(gcal) && /paid shifts/.test(gcal), 'Google Calendar: connect, subscribe a work schedule, mark it as shifts');

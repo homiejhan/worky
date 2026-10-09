@@ -19,8 +19,8 @@ import {
   setCalEvents, setCalTemplates,
 } from './calendar.js';
 import {
-  bankBudget, budget, budgetRollover, normalizeBankBudget, normalizeBudget, normalizeRunway, purchaseIdCounter,
-  purchaseRecord, renderBudget, runway, setBankBudget, setBudget, setPurchaseIdCounter, setRunway,
+  bankBudget, bankCards, budget, budgetRollover, normalizeBankBudget, normalizeBankCards, normalizeBudget, normalizeRunway,
+  purchaseIdCounter, purchaseRecord, renderBudget, runway, setBankBudget, setBankCards, setBudget, setPurchaseIdCounter, setRunway,
 } from './budget.js';
 import { syncFingerprint, syncOnLocalSave } from './sync.js';
 import { syncMerge, syncRecordsIn } from './syncmerge.js';
@@ -50,6 +50,7 @@ import { normalizeShiftCals, setShiftCals, shiftCals } from './gcal.js';
  *   runway→rw {p: payday, r: repeat, b: bills [{i: id, n: name, a: amount, d: day}]} (see budget.js)
  *   purchase: id→i title→t amount→a bank→b pending→pd on→o   (a purchase logged from the bank)
  *   bankBudget→bb {o: on (0 = off), i: items, l: log, a: anchor {d: day, k: key, s: start}, t: typed}    (Budget following the bank, see budget.js)
+ *   bankCards→bk  (each credit card's balance as Budget last saw it, see budget.js)
  *   digest: enabled→en last→l {at, md, n, m, s} clearedAt→ca   (see digest.js)
  */
 export function compressState(st) {
@@ -116,6 +117,7 @@ export function compressState(st) {
         ...(st.bankBudget.anchor ? { a: { d: st.bankBudget.anchor.day, k: st.bankBudget.anchor.key, s: st.bankBudget.anchor.start } } : {}),
         ...(st.bankBudget.typed && st.bankBudget.typed.length ? { t: st.bankBudget.typed } : {}) } }
       : {}),
+    ...(st.bankCards && Object.keys(st.bankCards).length ? { bk: st.bankCards } : {}),
     cal: { ce: cEvents, ct: (st.calendar.calTemplates||[]).map(cCalEv), cec: st.calendar.calEventIdCtr },
   };
 }
@@ -167,6 +169,7 @@ function decompressState(c) {
     shiftCals: normalizeShiftCals(c.sc),
     runway: normalizeRunway(c.rw ? { payday: c.rw.p, repeat: c.rw.r, bills: (c.rw.b || []).map(b => ({ id: b.i, name: b.n, amount: b.a, day: b.d })) } : null),
     bankBudget: normalizeBankBudget(c.bb ? { on: c.bb.o !== 0, items: c.bb.i, log: c.bb.l, anchor: c.bb.a ? { day: c.bb.a.d, key: c.bb.a.k, start: c.bb.a.s } : null, typed: c.bb.t } : null),
+    bankCards: normalizeBankCards(c.bk),
     calendar: { calEvents: dEvents, calTemplates: (c.cal.ct||[]).map(dCalEv), calEventIdCtr: c.cal.cec || 1 },
   };
 }
@@ -199,11 +202,13 @@ function liveTimerRecord(t) {
  * (syncLocal). timerLog (days a timer ran past zero) went away again when
  * timers went back to stopping at zero; a copy from a build-6 device is not
  * in the known keys below, so it passes through untouched instead of being
- * stripped and written back. */
-export const STATE_BUILD = 9;
+ * stripped and written back. Build 10 follows credit cards by their balance
+ * (bankCards); a device on an older build counts card charges differently, so
+ * a copy from one makes the others say so (sync.js → syncOlderDevice). */
+export const STATE_BUILD = 10;
 const STATE_KNOWN_KEYS = new Set(['version', 'build', 'wokenUp', 'timerDefaults', 'timers', 'todoIdCounter',
   'taskIdCounter', 'todoLists', 'dbdTasks', 'dbdIdCounter', 'budget', 'purchaseIdCounter', 'views', 'theme',
-  'digest', 'shiftCals', 'runway', 'bankBudget', 'calendar']);
+  'digest', 'shiftCals', 'runway', 'bankBudget', 'bankCards', 'calendar']);
 /* Top-level keys this build does not understand, carried through untouched so
  * an older device never strips what a newer one wrote (see syncApplyRemote). */
 let stateExtra = {};
@@ -253,6 +258,7 @@ export function gatherState() {
     runway: normalizeRunway(runway),
     bankBudget: { on: bankBudget.on, items: bankBudget.items, log: bankBudget.log, ...(bankBudget.anchor ? { anchor: bankBudget.anchor } : {}),
       ...(bankBudget.typed.length ? { typed: bankBudget.typed } : {}) },
+    ...(Object.keys(bankCards).length ? { bankCards } : {}),
     calendar: { calEvents, calTemplates, calEventIdCtr },
   };
 }
@@ -287,6 +293,7 @@ function hydrateState(st) {
   setShiftCals(normalizeShiftCals(st.shiftCals));
   setRunway(normalizeRunway(st.runway));
   setBankBudget(normalizeBankBudget(st.bankBudget));
+  setBankCards(normalizeBankCards(st.bankCards));
   if (st.calendar) {
     setCalEvents(st.calendar.calEvents     || {});
     setCalTemplates(st.calendar.calTemplates  || []);

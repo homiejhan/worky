@@ -17,6 +17,7 @@
 import { BANK_LS_KEY, BANK_RELAY_URL, PLAID_LINK_JS } from './config.js';
 import { $, calKeyToDate, escAttr, showToast } from './util.js';
 import { bankBudget, budgetFollowBank, budgetForgetBank, budgetFromBank, budgetSeeBank, money } from './budget.js';
+import { bankCardOwed } from './bankbudget.js';
 import { syncBtnClick, syncConfigured, syncRef, syncUser } from './sync.js';
 
 const BANK_LINK_SS_KEY = 'focus-bank-link';   // { uid, token }: the link token, while an OAuth bank sends the user back
@@ -469,7 +470,7 @@ function bankHost(url) { try { return new URL(url).host; } catch (e) { return ur
 
 function bankAccountHtml(a) {
   const credit = a.type === 'credit' || a.type === 'loan';
-  const main = a.current ?? a.available;
+  const main = a.type === 'credit' ? bankCardOwed(a) : a.current ?? a.available;   // a card: what Budget counts as owed
   const avail = !credit && a.available != null && a.current != null && a.available !== a.current
     ? `<span class="bank-acct-sub">${money(a.available)} available</span>` : '';
   return `
@@ -591,7 +592,7 @@ function bankRender() {
       <span class="settings-view-name">Budget follows your bank</span>
       <label class="gcal-toggle"><input type="checkbox" data-bank="budget"${bankBudget.on ? ' checked' : ''}><span class="gcal-toggle-track"></span></label>
     </div>
-    <div class="bank-fine">From checking accounts and credit cards. Budget's total balance is your bank's: your checking balance less what you owe on your cards, and each day starts from what it was when the day began. New transactions are logged too: money out as purchases on the day it shows up at your bank (with its date when the bank dates it earlier), money in under From your bank. Paying a card is neither.</div>` : '';
+    <div class="bank-fine">From checking accounts and credit cards. Budget's total balance is your bank's: your checking balance less what you owe on your cards, and each day starts from what it was when the day began. Checking transactions are logged as they show up at your bank (money out as purchases, with its date when the bank dates it earlier). A card is followed by its balance: whatever it went up by since Budget last checked is spent today. Paying a card is not spending.</div>` : '';
   panel.innerHTML = `
     ${items.map(bankItemHtml).join('')}
     ${toBudget}

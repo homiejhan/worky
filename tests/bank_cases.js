@@ -9,14 +9,17 @@
  * held to them:
  *   • the total balance is the bank's balance over the accounts Budget follows
  *     (checking: available, or current where there is none; less what is owed
- *     on the credit cards, pending charges too), as last fetched, less what
+ *     on the credit cards, as each card shows it), as last fetched, less what
  *     was typed today that the bank hasn't shown;
- *   • today's purchases are the money out Budget first saw at the bank today,
- *     whatever day the bank dates it, since Budget started following it (one
- *     purchase however it posts, with its final amount, or only the tip when it
- *     posts after its day; a pending one the bank drops goes; one typed for the
- *     same amount is matched, not counted twice, also when the bank shows it a
- *     day late; one taken out with × stays out), and what was typed;
+ *   • today's purchases are the money out Budget first saw at the bank today on
+ *     checking, whatever day the bank dates it, since Budget started following
+ *     it (one purchase however it posts, with its final amount, or only the tip
+ *     when it posts after its day; a pending one the bank drops goes; one typed
+ *     for the same amount is matched, not counted twice, also when the bank
+ *     shows it a day late; one taken out with × stays out), what each card's
+ *     balance went up by between two looks at it (its payments added back; a
+ *     card whose balance counts pending charges, or one that counts posted
+ *     ones only), and what was typed;
  *   • a new day starts from the bank's balance as last fetched, and within a
  *     day the start stays put, unless the banks followed change;
  *   • turned off, the total stays where it was and the bank no longer moves it;
@@ -135,13 +138,14 @@ async function runCase(seed) {
     const accts = [{ id: `${spec.prefix}-chk`, name: 'Checking', type: 'depository', subtype: 'checking', current: cents(80, 1500), pending: new Map(), noAvail: spec.noAvail }];
     if (spec.paypal) accts.push({ id: `${spec.prefix}-pp`, name: 'PayPal', type: 'depository', subtype: 'paypal', current: cents(0, 200), pending: new Map(), noAvail: false });
     if (spec.savings) accts.push({ id: `${spec.prefix}-sav`, name: 'Savings', type: 'depository', subtype: 'savings', current: cents(100, 3000), pending: new Map(), noAvail: false });
-    if (spec.credit) accts.push({ id: `${spec.prefix}-cc`, name: 'Card', type: 'credit', subtype: 'credit card', current: cents(0, 600), pending: new Map(), noAvail: false, limit: 2000 });
-    return { spec, accts, txs: new Map(), lin: [], token: null, itemId: null, connected: false, fetched: null, since: null };
+    if (spec.credit) accts.push({ id: `${spec.prefix}-cc`, name: 'Card', type: 'credit', subtype: 'credit card', current: cents(0, 600), pending: new Map(), noAvail: false, limit: 2000,
+      pendingIn: chance(0.5) });                                            // its balance counts pending charges (some cards' do, some only count posted ones)
+    return { spec, accts, txs: new Map(), lin: [], token: null, itemId: null, connected: false, fetched: null, since: null, card: null, cardRows: [] };
   });
   const followedAcct = a => (a.type === 'depository' && ['checking', 'paypal'].includes(a.subtype)) || a.type === 'credit';
   const pendingOf = a => [...a.pending.values()].reduce((s, x) => s + x, 0);
   const balanceOf = a => (a.type === 'credit'
-    ? { available: round2(a.limit - a.current - pendingOf(a)), current: a.current }
+    ? { available: round2(a.limit - a.current - pendingOf(a)), current: round2(a.current + (a.pendingIn ? pendingOf(a) : 0)) }
     : { available: a.noAvail ? null : round2(a.current - [...a.pending.values()].reduce((s, x) => s + x, 0)), current: a.current });
   const plaidAccounts = b => b.accts.map(a => ({ account_id: a.id, name: a.name, official_name: null, mask: a.id.slice(-4),
     type: a.type, subtype: a.subtype, balances: { ...balanceOf(a), limit: a.limit ?? null, iso_currency_code: 'USD' } }));
@@ -221,9 +225,8 @@ async function runCase(seed) {
     for (const b of banks.filter(x => x.connected && x.fetched)) {
       for (const a of b.fetched.accounts) {
         if (!followedAcct(a)) continue;
-        if (a.type === 'credit') {                                          // what's owed, pending charges too
-          const owed = Number.isFinite(a.balances.limit) && Number.isFinite(a.balances.available) ? a.balances.limit - a.balances.available
-            : Number.isFinite(a.balances.current) ? a.balances.current : null;
+        if (a.type === 'credit') {                                          // what's owed, as the card shows it
+          const owed = owedOf(a);
           if (owed !== null) sum -= owed;
           continue;
         }
@@ -233,13 +236,18 @@ async function runCase(seed) {
     }
     return any ? round2(sum) : null;
   };
+  const owedOf = a => (Number.isFinite(a.balances.current) ? round2(a.balances.current)
+    : Number.isFinite(a.balances.limit) && Number.isFinite(a.balances.available) ? round2(a.balances.limit - a.balances.available) : null);
   const typedToday = () => M.typed.filter(p => p.day === today() && !p.removed);
   /* today's purchases from the bank: a lineage's purchase (`row`, the day it was
    * first seen), or what more it came to when it posted after that day (`extra`) */
-  const rowsToday = () => banks.flatMap(b => b.lin).filter(l => !l.removed).flatMap(l => [
-    ...(l.row && l.rowDay === today() ? [{ l, row: l.row, bank: l.appCur }] : []),
-    ...(l.extra && l.extra.day === today() ? [{ l, row: l.extra, bank: l.extra.bank }] : []),
-  ]);
+  const rowsToday = () => [
+    ...banks.flatMap(b => b.lin).filter(l => !l.removed).flatMap(l => [
+      ...(l.row && l.rowDay === today() ? [{ l, row: l.row, bank: l.appCur }] : []),
+      ...(l.extra && l.extra.day === today() ? [{ l, row: l.extra, bank: l.extra.bank }] : []),
+    ]),
+    ...banks.flatMap(b => b.cardRows).filter(r => r.day === today() && !r.removed).map(r => ({ l: null, card: r, row: r, bank: r.bank })),
+  ];
   const expectedPurchases = () => [
     ...typedToday().map(p => ({ title: p.title, amount: p.lin ? p.lin.row.amount : p.amount, bank: p.lin ? p.lin.appCur : null })),
     ...rowsToday().filter(x => !x.row.typed).map(x => ({ title: null, amount: x.row.amount, bank: x.bank })),
@@ -261,6 +269,7 @@ async function runCase(seed) {
     for (const l of b.lin) {
       const t = b.fetched.txs.get(l.cur) || null;
       if (!followedAcct(l.a) || l.payment) continue;                       // paying a card: neither spending nor money in
+      if (l.a.type === 'credit') continue;                                 // a card goes by its balance (cardPass)
       if (l.seen === undefined) {
         if (!t) continue;
         l.seenAmount = t.amount;
@@ -293,6 +302,69 @@ async function runCase(seed) {
         else if (delta > 0) l.extra = { amount: delta, day: today(), bank: l.cur };   // more out after its day: spent today
       }
       l.seenAmount = t.amount;
+    }
+    cardPass(b, syncPoint);
+  };
+  /* A card, by its balance: what it went up by since the last look (its payments
+   * added back) is a purchase today, once what was typed for its new charges is
+   * taken off; down by more than its payments, the purchase of just that amount
+   * today goes, or a refund is money in, or a drop with nothing behind it comes
+   * off what the card spent today. */
+  const typedFor = (b, key, amount, date, t) => {
+    if (date >= today()) {
+      const p = typedToday().find(q => !q.lin && round2(q.amount) === amount);
+      if (!p) return false;
+      p.lin = { row: { amount: p.amount }, appCur: `c:${key}=${++b.card.n}`, card: true };
+      return true;
+    }
+    const p = M.typed.find(q => q.carried && !q.lin && !q.removed && q.day < today() && q.day >= addDays(today(), -3)
+      && (!t || (q.day >= addDays(date, -1) && q.day <= addDays(date, 1))) && round2(q.amount) === amount);
+    if (!p) return false;
+    p.lin = { carried: true };
+    return true;
+  };
+  const cardPass = (b, syncPoint) => {
+    for (const a of b.fetched.accounts.filter(x => x.type === 'credit')) {
+      const key = `${b.itemId}/${a.account_id}`;
+      const owed = owedOf(a);
+      if (owed === null) continue;
+      const list = [...b.fetched.txs.values()].filter(t => t.account_id === a.account_id);
+      const ids = new Set(list.map(t => t.transaction_id));
+      const prev = b.card;
+      if (syncPoint || !prev) {
+        const mine = id => ['#', '='].some(c => id.startsWith(`c:${key}${c}`));
+        const used = rowsToday().filter(x => x.bank && mine(x.bank)).map(x => Number(x.bank.slice(key.length + 3)) || 0);
+        const linked = M.typed.filter(p => p.lin && p.lin.card && mine(p.lin.appCur)).map(p => Number(p.lin.appCur.slice(key.length + 3)) || 0);
+        b.card = { b: owed, n: Math.max(0, ...used, ...linked), ids };
+        continue;
+      }
+      const fresh = list.filter(t => !prev.ids.has(t.transaction_id) && !(t.pending_transaction_id && prev.ids.has(t.pending_transaction_id)))
+        .sort((x, y) => (x.date === y.date ? 0 : x.date < y.date ? -1 : 1));
+      const isPay = t => t.amount < 0 && ['LOAN_PAYMENTS', 'TRANSFER_IN'].includes(t.personal_finance_category.primary);
+      let x = round2(owed - prev.b - fresh.filter(isPay).reduce((s, t) => s + t.amount, 0));
+      b.card = { b: owed, n: prev.n, ids };
+      if (!x) continue;
+      if (x > 0) {
+        const left = [];
+        for (const t of fresh.filter(t => t.amount > 0 && !isPay(t))) {
+          const amount = round2(t.amount);
+          if (amount <= x && typedFor(b, key, amount, t.date, t)) x = round2(x - amount); else left.push(t);
+        }
+        if (x > 0 && !left.length && (typedFor(b, key, x, today(), null) || typedFor(b, key, x, '', null))) x = 0;
+        if (x > 0) b.cardRows.push({ amount: x, day: today(), bank: `c:${key}#${++b.card.n}` });
+        continue;
+      }
+      let back = -x;
+      const credits = fresh.filter(t => t.amount < 0 && !isPay(t));
+      const rows = b.cardRows.filter(r => r.day === today() && !r.removed);
+      const same = rows.filter(r => round2(r.amount) === back).pop();
+      for (const r of same ? [same] : credits.length ? [] : [...rows].reverse()) {
+        if (!(back > 0)) break;
+        const take = Math.min(back, r.amount);
+        r.amount = round2(r.amount - take);
+        back = round2(back - take);
+      }
+      b.cardRows = b.cardRows.filter(r => !(r.day === today() && !r.removed && !(r.amount > 0)));
     }
   };
   const fetched = b => {
@@ -457,6 +529,7 @@ async function runCase(seed) {
         appNow.d.querySelector(`#bankPanel [data-bank="disconnect"][data-item="${gone.itemId}"]`).click();
         await until(() => appNow.w.eval('bank.items.length') === 1, 5000);
         gone.connected = false;
+        gone.card = null;
         what = `${appNow.name} disconnects ${gone.spec.prefix}`;
         M.initial = null; M.anchorFromLog = M.following; did('bank disconnected');
       } else if (followOffOn && chance(0.08)) {
@@ -479,6 +552,8 @@ async function runCase(seed) {
               if (l.fetchedCur) { l.seen = 'history'; l.seenAmount = x.fetched.txs.get(l.fetchedCur).amount; l.appCur = l.fetchedCur; }
               else l.seen = undefined;
             }
+            x.card = null;
+            cardPass(x, true);                                                // and each card starts from its balance as last fetched
           }
           M.initial = null; M.anchorFromLog = true;
           what = `${appNow.name} turns following on again`;
@@ -555,10 +630,15 @@ async function runCase(seed) {
         const el = rowEl(appNow, p => p.bank === x.bank);
         if (el) {
           el.querySelector('[data-pact="del"]').click();
-          x.l.removed = true;
-          if (x.row.typed) x.row.typed.removed = true;
-          x.l.row = null; x.l.extra = null;
-          what = `${appNow.name} takes ${x.l.name}${x.row === x.l.extra ? ' (posted higher)' : ''} out of Budget (×)`;
+          if (x.card) {
+            x.card.removed = true;
+            what = `${appNow.name} takes a card purchase out of Budget (×)`;
+          } else {
+            x.l.removed = true;
+            if (x.row.typed) x.row.typed.removed = true;
+            x.l.row = null; x.l.extra = null;
+            what = `${appNow.name} takes ${x.l.name}${x.row === x.l.extra ? ' (posted higher)' : ''} out of Budget (×)`;
+          }
           did('taken out with ×');
         }
       } else if (r < 0.73 && rowsToday().length) {
@@ -571,7 +651,7 @@ async function runCase(seed) {
           input.dispatchEvent(new appNow.w.Event('change', { bubbles: true }));
           x.row.amount = amount;
           if (x.row.typed) x.row.typed.amount = amount;
-          what = `${appNow.name} changes ${x.l.name} to ${money(amount)}`;
+          what = `${appNow.name} changes ${x.l ? x.l.name : 'a card purchase'} to ${money(amount)}`;
           did('amount changed');
         }
       } else if (r < 0.79) {                                           // a bank that hands Plaid yesterday's charges only today

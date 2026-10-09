@@ -604,7 +604,7 @@ async function sealV1(payload) {
     const itemId = Object.keys(L.w.eval('bankBudget.items'))[0];
     const tracked = () => L.w.eval('bankBudget.items')[itemId];
     eq(tracked().since, today, 'dated today');
-    eq(Object.keys(tracked().seen).sort().join(), 'tx-1,tx-2,tx-3,tx-4,tx-5,tx-6', 'counting what the checking account and the card show as already in the balance');
+    eq(Object.keys(tracked().seen).sort().join(), 'tx-1,tx-2,tx-4,tx-6', 'counting what the checking account shows as already in the balance (the card goes by its balance)');
     ok(L.w.eval('totalBalance()') === 100 && L.w.eval('budget.initial') === 100 && purchases(L).length === 0,
       'the total balance becomes the bank\'s ($100 available in checking, not the $500 typed), and the day starts from it');
     ok(L.w.eval('budgetFollowsBank()') && !/Logged/.test(toast(L.d)), 'it follows the bank from now on, with nothing logged');
@@ -636,8 +636,10 @@ async function sealV1(payload) {
     ok(tagOf(chip) && tagOf(chip).textContent === 'pending', 'on the Budget screen it is marked as from the bank, pending');
     const day = L.w.eval(`calKeyToDate('${yesterday}').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })`);
     ok(tagOf(target) && tagOf(target).textContent === `bank · ${day}` && /dated .*reached your bank's list today/.test(tagOf(target).title), `and the Target with its day: "${tagOf(target) && tagOf(target).textContent}"`);
-    const lines = [...bud(L).querySelectorAll('.budget-bank-list .bank-tx')].map(r => r.textContent.replace(/\s+/g, ' ').trim());
-    ok(lines.length === 1 && /Campus Café payroll \+\$500\.00$/.test(lines[0]), `From your bank lists the money in: ${lines.join(' | ')}`);
+    const lines = [...bud(L).querySelectorAll('.budget-purchase-list .budget-bank-move')].map(r => r.textContent.replace(/\s+/g, ' ').trim());
+    ok(lines.length === 1 && /^Campus Café payroll bank \+\$500\.00$/.test(lines[0]), `the money in is listed with today's purchases: ${lines.join(' | ')}`);
+    ok(!bud(L).querySelector('.budget-bank-list') && !/From your bank/.test([...bud(L).querySelectorAll('.section-sublabel')].map(e => e.textContent).join()),
+      'one list for today: no separate From your bank section');
     ok(/What you let yourself spend a day/.test(bud(L).textContent) && /Your bank balance when today began/.test(bud(L).textContent)
       && bud(L).querySelector('[data-bfield="initial"]').readOnly, 'the daily budget is spending, and the initial balance follows the bank (it can\'t be typed over)');
     L.w.eval('setBudgetField("initial", "9999")');
@@ -857,7 +859,7 @@ async function sealV1(payload) {
     ok(await until(() => !P.w.eval('bankBudget.items')[itemId], 4000), 'on every device');
   }
 
-  console.log('\n── 12. A credit card: what is spent on it is spending, what is owed comes off the total, paying it is neither ──');
+  console.log('\n── 12. A credit card: followed by its balance; what is owed comes off the total, paying it is neither ──');
   {
     const W = bankWorld();
     const tx = W.plaid.transaction;
@@ -883,42 +885,62 @@ async function sealV1(payload) {
     ok(await until(() => status(L.d) === 'No banks connected.'), 'an account with no banks yet');
     L.d.querySelector('[data-bank="connect"]').click();
     ok(await until(() => Object.keys(L.w.eval('bankBudget.items')).length === 1, 4000), 'connect a bank with checking and a credit card');
-    eq(L.w.eval('totalBalance()'), 700, 'the total is checking ($1,200) less what is owed on the card, pending too ($2,000 limit − $1,500 available)');
+    eq(L.w.eval('totalBalance()'), 720, 'the total is checking ($1,200) less what the card shows it owes ($480)');
     const id12 = Object.keys(L.w.eval('bankBudget.items'))[0];
-    eq(L.w.eval('bankBudget.items')[id12].acc.join(), 'card,chk', 'the sync point says which accounts it covers');
+    const key = `${id12}/card`;
+    const kept = app => app.w.eval('bankCards')[key];
+    ok(kept(L) && kept(L).b === 480 && kept(L).s === 480 && kept(L).d === today, 'the card\'s balance is kept: the one Budget last saw, and the one today began with');
+    eq(L.w.eval('bankBudget.items')[id12].acc.join(), 'chk', 'the sync point counts checking only');
+    ok(/"bankCards":\{/.test(L.w.localStorage.getItem('focus-app-state')), 'at the top of the saved state, where a copy of Focus from before carries it through untouched');
     const reopened = await loadApp({ storage: { 'focus-tour-done': '1', 'focus-app-state': L.w.localStorage.getItem('focus-app-state') }, transform: noRelay });
-    eq(reopened.w.eval('bankBudget.items')[id12] && reopened.w.eval('bankBudget.items')[id12].acc.join(), 'card,chk', 'kept in the saved state');
+    ok(kept(reopened) && kept(reopened).b === 480, 'kept in the saved state');
     reopened.w.applyState(JSON.parse(L.w.eval('JSON.stringify(compressState(gatherState()))')));
-    eq(reopened.w.eval('bankBudget.items')[id12].acc.join(), 'card,chk', 'and through Export and Import');
-    ok(L.w.eval('budget.initial') === 700 && purchases(L).length === 0, 'the day starts from it, and what the card shows already is taken as spent');
+    ok(kept(reopened) && kept(reopened).b === 480, 'and through Export and Import');
+    ok(L.w.eval('budget.initial') === 720 && purchases(L).length === 0, 'the day starts from it, and what the card owes already is taken as spent');
     const note = () => [...bud(L).querySelectorAll('.budget-bank-note')].map(n => n.textContent.replace(/\s+/g, ' ').trim()).join(' | ');
-    ok(/Following Total Checking ••1111, Freedom ••2222 at First Platypus Bank since today\./.test(note()), `From your bank says it follows both: "${note().slice(0, 90)}"`);
-    ok(/less what you owe on your credit cards/.test(note()) && /Paying a card is neither/.test(note()), 'and how the card counts');
-    ok(/From checking accounts and credit cards/.test(L.d.getElementById('bankPanel').textContent), 'Settings says so too');
+    ok(/Following Total Checking ••1111, Freedom ••2222 at First Platypus Bank since today\./.test(note()), `the note under Today says it follows both: "${note().slice(0, 90)}"`);
+    ok(/Freedom ••2222: \$480\.00 owed now, \$480\.00 when today began\./.test(note()), 'and what the card owes now, and when today began');
+    ok(/less what you owe on your credit cards/.test(note()) && /a card's balance went up by since Budget last checked comes off today/.test(note()) && /Paying the card isn't spending/.test(note()), 'and how the card counts');
+    ok(/From checking accounts and credit cards/.test(L.d.getElementById('bankPanel').textContent) && /A card is followed by its balance/.test(L.d.getElementById('bankPanel').textContent), 'Settings says so too');
+    ok(/\$480\.00 owed/.test(L.d.getElementById('bankPanel').textContent), 'and shows the card at the balance Budget goes by');
 
     const access = [...W.plaid.state.items.keys()].pop();
     W.plaid.changeTransactions(access, { added: [tx('c-lunch', 18.25, today, 'Kiin Di', { account_id: 'card', pending: true, personal_finance_category: { primary: 'FOOD_AND_DRINK' } })] });
-    W.plaid.setBalances(access, { card: { available: 1481.75 } });
+    W.plaid.setBalances(access, { card: { available: 1481.75, current: 498.25 } });
     await refresh(L);
-    ok(await until(() => purchases(L).some(p => p.bank === 'c-lunch' && p.amount === 18.25 && p.pending)), 'a purchase on the card is a purchase today');
+    const lunch = () => purchases(L).find(p => p.title === 'Kiin Di');
+    ok(await until(() => lunch() && lunch().amount === 18.25 && lunch().pending && lunch().bank === `c:${key}#1`), 'the card\'s balance went up $18.25: spent today, named after the charge');
     eq(L.w.eval('todayBalance()'), 21.75, 'off today\'s balance ($40 − $18.25)');
-    eq(L.w.eval('totalBalance()'), 681.75, 'and off the total, as what is owed on the card goes up');
-    eq(bud(L).querySelector('.budget-figure-sub').textContent, '$700.00 at the start of today − $18.25 spent today', 'the line under it adds up');
+    eq(L.w.eval('totalBalance()'), 701.75, 'and off the total, as what is owed on the card goes up');
+    eq(bud(L).querySelector('.budget-figure-sub').textContent, '$720.00 at the start of today − $18.25 spent today', 'the line under it adds up');
+    const tag = bud(L).querySelector(`.budget-purchase-row[data-purchase-id="${lunch().id}"] .budget-bank-tag`);
+    ok(tag && tag.textContent === 'card · pending' && /its balance went up/.test(tag.title), `marked as from the card: "${tag && tag.textContent}"`);
+    ok(/Freedom ••2222: \$498\.25 owed now, \$480\.00 when today began\./.test(note()), 'the note follows the card\'s balance');
 
     W.plaid.changeTransactions(access, { added: [
       tx('c-pay-out', 300, today, 'CHASE CREDIT CRD AUTOPAY', { account_id: 'chk', personal_finance_category: { primary: 'LOAN_PAYMENTS' } }),
       tx('c-pay-in', -300, today, 'AUTOMATIC PAYMENT - THANK YOU', { account_id: 'card', personal_finance_category: { primary: 'LOAN_PAYMENTS' } }),
     ] });
-    W.plaid.setBalances(access, { chk: { available: 900, current: 900 }, card: { available: 1781.75, current: 180 } });
+    W.plaid.setBalances(access, { chk: { available: 900, current: 900 }, card: { available: 1781.75, current: 198.25 } });
     await refresh(L);
     ok(purchases(L).length === 1 && L.w.eval('bankBudget.log').length === 0, 'paying the card from checking is not spending, and the payment is not money in');
-    ok(L.w.eval('totalBalance()') === 681.75 && L.w.eval('todayBalance()') === 21.75, 'the total stays put (checking −$300, owed −$300), and so does today\'s balance');
+    ok(L.w.eval('totalBalance()') === 701.75 && L.w.eval('todayBalance()') === 21.75, 'the total stays put (checking −$300, owed −$300), and so does today\'s balance');
 
     W.plaid.changeTransactions(access, { added: [tx('c-refund', -25, today, 'Target', { account_id: 'card', personal_finance_category: { primary: 'GENERAL_MERCHANDISE' } })] });
-    W.plaid.setBalances(access, { card: { available: 1806.75, current: 155 } });
+    W.plaid.setBalances(access, { card: { available: 1806.75, current: 173.25 } });
     await refresh(L);
-    ok(await until(() => L.w.eval('bankBudget.log').some(l => l.n === 'Target' && l.a === 25)), 'a refund on the card is money in, under From your bank');
-    eq(L.w.eval('totalBalance()'), 706.75, 'and the total goes up with it');
+    ok(await until(() => L.w.eval('bankBudget.log').some(l => l.n === 'Target' && l.a === 25)), 'a refund on the card is money in');
+    eq(L.w.eval('totalBalance()'), 726.75, 'and the total goes up with it');
+    const moves = [...bud(L).querySelectorAll('.budget-purchase-list .budget-bank-move')].map(r => r.textContent.replace(/\s+/g, ' ').trim());
+    ok(moves.length === 1 && /^Target bank \+\$25\.00$/.test(moves[0]) && lunch(), `listed with today's purchases, which stay: ${moves.join(' | ')}`);
+
+    /* the start of the next day is the card's balance as last seen */
+    L.w.eval(`budget.lastDate = addDays(dbdTodayKey(), -1); bankCards['${key}'].d = addDays(dbdTodayKey(), -1)`);
+    L.w.eval('budgetRollover()');
+    W.plaid.changeTransactions(access, { added: [tx('c-bus', 2.5, today, 'Capital Metro', { account_id: 'card', pending: true })] });
+    W.plaid.setBalances(access, { card: { available: 1804.25, current: 175.75 } });
+    await refresh(L);
+    ok(await until(() => purchases(L).some(p => p.title === 'Capital Metro')) && kept(L).s === 173.25 && kept(L).b === 175.75, 'a new day: the card starts from the balance last seen, and what it adds is spent');
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

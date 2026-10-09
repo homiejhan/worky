@@ -195,11 +195,12 @@ function settle(st) {
 
 /* When both sides changed Budget's balance (a new day rolled over on the phone
  * while the laptop logged a paycheck, say), the merged balance is one side's.
- * The bank transactions counted in it (bankBudget.items) and the From your bank
- * lines (bankBudget.log) must be that side's too: merged key by key, the other
- * side's paycheck would be marked as counted without being in the balance, and
- * never logged again. This way whatever only the other side counted is logged
- * on the next pass (bankbudget.js), and a purchase it logged is taken as is. */
+ * The bank transactions counted in it (bankBudget.items), the bank's lines
+ * (bankBudget.log) and the card balances it was taken at (bankCards) must be
+ * that side's too: merged key by key, the other side's paycheck would be
+ * marked as counted without being in the balance, and never logged again. This
+ * way whatever only the other side counted is logged on the next pass
+ * (bankbudget.js), and a purchase it logged is taken as is. */
 function keepBankWithBalance(out, base, local, remote, preferLocal) {
   const initial = st => (isObj(st) && isObj(st.budget) ? st.budget.initial : undefined);
   const [b, l, r] = [initial(base), initial(local), initial(remote)];
@@ -209,6 +210,7 @@ function keepBankWithBalance(out, base, local, remote, preferLocal) {
     out.bankBudget = { ...out.bankBudget, items: side.bankBudget.items, log: side.bankBudget.log };
     if ('typed' in side.bankBudget) out.bankBudget.typed = side.bankBudget.typed; else delete out.bankBudget.typed;
   }
+  if (isObj(side) && 'bankCards' in side) out.bankCards = side.bankCards; else delete out.bankCards;
   return out;
 }
 

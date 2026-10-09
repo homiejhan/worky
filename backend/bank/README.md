@@ -30,9 +30,10 @@ Disconnect ───────────────────────
 The app refreshes a bank on its own once what it has is half an hour old, and,
 with **Budget follows your bank** on (the default), Budget's total balance is
 the checking accounts' balance from `/accounts` less what is owed on the credit
-cards, each day starts from it, and each new transaction from a checking account
-or a credit card is logged in Budget on the day it shows up, payments to a card
-left out by their `category` (`js/bankbudget.js` has the rules).
+cards (each card's `current` balance), each day starts from it, each new
+transaction from a checking account is logged in Budget on the day it shows up,
+and what a card's balance went up by since Budget last saw it is logged as spent,
+payments to a card left out by their `category` (`js/bankbudget.js` has the rules).
 A posted transaction carries `pending_id`, the pending one it replaces, so a
 charge that posts stays one purchase, and `/accounts` says when Plaid last got
 transactions from the bank (`checked_at`, from `/item/get`): banks send Plaid new
@@ -173,7 +174,9 @@ hosts that run one (Deno Deploy, Bun, Vercel Edge) work too. On a plain Node ser
 - **In the user's synced data** (`users/<uid>/state`, and Export), only with **Log
   new transactions in Budget** on: the purchases and balance changes Budget logged
   (description, amount, date), and for each bank the day logging started and the
-  transactions it has counted (their ids, amounts and dates, no descriptions).
+  checking transactions it has counted (their ids, amounts and dates, no
+  descriptions), and for each credit card the balance Budget last saw and the ids
+  of its listed transactions (`bankCards`).
 - **On the device** (`localStorage`, key `focus-bank`): a copy of the signed-in
   account's banks, to show while offline (`{ uid, relay, items }`), dropped on
   sign-out; and a relay address set on that device for testing. Nothing else about
