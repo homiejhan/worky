@@ -100,12 +100,14 @@ input, textarea, select { font-family: var(--font-sans); color: var(--ink); }
 }
 
 /* ═══════════════════════════════════════════════════════
-   AMBIENT WASH — three colour fields derived from the accent.
-   Panels are transparent, so this is the app's canvas; a theme
-   background image replaces it. They hold still unless Moving
-   background is on (body.bg-motion, Settings → Appearance, this
-   device only): drifting, they make the browser redraw the whole
-   window 60 times a second for as long as Focus is open.
+   AMBIENT WASH — soft lights in the accent colors. Panels are
+   transparent, so this is the app's canvas; a theme background
+   image replaces it. ambient.js draws them, drifting, into one
+   small canvas stretched over the window, 8 times a second
+   and only while Focus is in use (Moving background, Settings →
+   Appearance). The blobs below are the still picture where there
+   is no canvas. (Animated as CSS, the blobs were three
+   window-sized layers redrawn 60 times a second, for good.)
    ═══════════════════════════════════════════════════════ */
 .ambient {
   position: fixed; inset: 0; z-index: 0;
@@ -113,12 +115,13 @@ input, textarea, select { font-family: var(--font-sans); color: var(--ink); }
   opacity: var(--ambient-alpha);
 }
 .theme-bg.on ~ .ambient { display: none; }
+.ambient-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.ambient.has-canvas .ambient-blob { display: none; }
 .ambient-blob {
   position: absolute;
   width: 64vmax; height: 64vmax;
   border-radius: 50%;
 }
-body.bg-motion .ambient-blob { will-change: transform; }
 .ambient-a {
   top: -28vmax; left: -22vmax;
   background: radial-gradient(circle at center, rgba(var(--accent-rgb),0.34) 0%, rgba(var(--accent-rgb),0.10) 38%, transparent 68%);
@@ -132,12 +135,6 @@ body.bg-motion .ambient-blob { will-change: transform; }
   width: 46vmax; height: 46vmax;
   background: radial-gradient(circle at center, rgba(var(--accent-3-rgb),0.22) 0%, rgba(var(--accent-3-rgb),0.06) 40%, transparent 68%);
 }
-body.bg-motion .ambient-a { animation: driftA 46s ease-in-out infinite alternate; }
-body.bg-motion .ambient-b { animation: driftB 58s ease-in-out infinite alternate; }
-body.bg-motion .ambient-c { animation: driftC 70s ease-in-out infinite alternate; }
-@keyframes driftA { from { transform: translate(0,0) scale(1); }    to { transform: translate(14vw, 10vh) scale(1.12); } }
-@keyframes driftB { from { transform: translate(0,0) scale(1.05); } to { transform: translate(-12vw, -12vh) scale(0.95); } }
-@keyframes driftC { from { transform: translate(0,0); }             to { transform: translate(-16vw, 12vh); } }
 
 /* ═══ Shared bits ═══ */
 .section-label {
@@ -1472,11 +1469,20 @@ body.format-mode .list-sched-row { display: flex; }
   flex-shrink: 0; white-space: nowrap;
 }
 .home-cal-badge.now {
+  position: relative;
   color: var(--on-accent);
   background: var(--accent);
 }
-body.bg-motion .home-cal-badge.now { animation: homePulse 2.4s ease-in-out infinite; }   /* (a pulse that never ends redraws Home every frame) */
-@keyframes homePulse { 0%,100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb),0.5); } 50% { box-shadow: 0 0 0 5px rgba(var(--accent-rgb),0); } }
+/* a ring that grows and fades from it while Focus is in use (body.motion-live,
+ * ambient.js): only its size and opacity change, which the GPU does alone */
+.home-cal-badge.now::after {
+  content: ''; position: absolute; inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb),0.6);
+  opacity: 0; pointer-events: none;
+}
+body.motion-live .home-cal-badge.now::after { animation: nowRing 2.4s ease-out infinite; }
+@keyframes nowRing { 0% { opacity: 0.9; transform: scale(1); } 100% { opacity: 0; transform: scale(1.25, 1.6); } }
 
 /* hero: balance chip (top right) */
 .home-hero-top {

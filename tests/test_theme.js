@@ -232,33 +232,36 @@ console.log('\n── 10. normalizeTheme hardening ──');
   eq(c.radius, 0, 'custom: radius clamped');
 }
 
-console.log('\n── 11. Moving background: off unless turned on, on this device only ──');
+console.log('\n── 11. Moving background: on unless turned off, on this device only ──');
 {
   const { w, d } = await boot();
   const toggle = () => d.getElementById('themeMotionToggle');
   const flip = on => { toggle().checked = on; toggle().dispatchEvent(new w.Event('change', { bubbles: true })); };
-  ok(toggle() && !toggle().checked && !d.body.classList.contains('bg-motion'), 'off at first: the background holds still');
-  flip(true);
-  ok(d.body.classList.contains('bg-motion') && w.localStorage.getItem('focus-bg-motion') === '1', 'Settings → Appearance turns it on, kept on this device');
+  ok(toggle() && toggle().checked && d.body.classList.contains('bg-motion'), 'on at first (the lights move while Focus is in use: tests/test_ambient.js)');
+  flip(false);
+  ok(!d.body.classList.contains('bg-motion') && w.localStorage.getItem('focus-bg-motion') === '0', 'Settings → Appearance turns it off, kept on this device');
   w.saveToLocal();
   ok(!/motion/i.test(w.localStorage.getItem('focus-app-state')), 'not in the synced state: each device keeps its own');
-  const again = await boot({ 'focus-bg-motion': '1' });
-  ok(again.d.body.classList.contains('bg-motion') && again.d.getElementById('themeMotionToggle').checked, 'still on when Focus opens again');
+  const again = await boot({ 'focus-bg-motion': '0' });
+  ok(!again.d.body.classList.contains('bg-motion') && !again.d.getElementById('themeMotionToggle').checked, 'still off when Focus opens again');
   w.themeApplyPreset('daylight');
-  ok(d.body.classList.contains('bg-motion'), 'and through a change of theme');
-  flip(false);
-  ok(!d.body.classList.contains('bg-motion') && w.localStorage.getItem('focus-bg-motion') === null, 'off again');
+  ok(!d.body.classList.contains('bg-motion'), 'and through a change of theme');
+  flip(true);
+  ok(d.body.classList.contains('bg-motion') && w.localStorage.getItem('focus-bg-motion') === '1', 'on again');
 
-  /* nothing animates for good while Focus sits open: every endless animation
-   * needs Moving background, or is art on a screen that is open at the time */
+  /* nothing animates for good while Focus sits idle or in the background: every
+   * endless animation runs only while Focus is in use (body.motion-live, which
+   * ambient.js sets only then), or is art on a screen that is open at the time */
   const fs = require('fs'), path = require('path');
   const css = fs.readFileSync(path.join(require('./load-app').ROOT, 'style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   const endless = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(m => /animation[^;]*\binfinite\b/.test(m[2])).map(m => m[1].trim());
-  const allowed = sel => /^body\.bg-motion /.test(sel) || ['.welcome-orb', '.welcome-chip', '.tour-spot::after'].includes(sel);
-  ok(endless.length >= 5 && endless.every(allowed), `endless animations only with Moving background on, on the welcome screen or in the tour: ${endless.join(' | ')}`);
+  const allowed = sel => /^body\.motion-live /.test(sel) || ['.welcome-orb', '.welcome-chip', '.tour-spot::after'].includes(sel);
+  ok(endless.length >= 4 && endless.every(allowed), `endless animations only while Focus is in use, on the welcome screen or in the tour: ${endless.join(' | ')}`);
   ok(/\.modal-overlay:not\(\.show\) \.welcome-orb, \.modal-overlay:not\(\.show\) \.welcome-chip \{ animation-play-state: paused; \}/.test(css),
     'the welcome screen\'s art stops once it is closed (it is only faded out)');
-  ok(!/^\.ambient-blob \{[^}]*will-change/m.test(css) && /body\.bg-motion \.ambient-blob \{ will-change: transform; \}/.test(css), 'and the still background keeps no layers of its own');
+  ok(!/\.ambient-blob[^{]*\{[^}]*(will-change|animation)/.test(css), 'the still blobs (no canvas) keep no layers of their own and never move');
+  ok(/@keyframes nowRing \{[^}]*\{ opacity: [\d.]+; transform: [^}]*\}[^}]*\{ opacity: 0; transform: [^}]*\} \}/.test(css) && !/@keyframes \w+ \{[^@]*box-shadow/.test(css.slice(css.indexOf('@keyframes nowRing'), css.indexOf('@keyframes nowRing') + 200)),
+    'the Now pulse changes only size and opacity, which the GPU does alone');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

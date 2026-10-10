@@ -53,6 +53,9 @@ async function loadApp({ storage, url = 'https://localhost/worky/', before, tran
   if (storage) Object.entries(storage).forEach(([k, v]) => w.localStorage.setItem(k, v));
   Object.defineProperty(w, 'confirm', { value: () => true, writable: true, configurable: true });
   w.matchMedia = w.matchMedia || (() => ({ matches: false, addListener() {}, removeListener() {} }));
+  /* jsdom has no 2D canvas (it says so as an error): a browser without one, so the
+   * moving background keeps its still CSS blobs (js/ambient.js). A test can put in one of its own. */
+  w.HTMLCanvasElement.prototype.getContext = () => null;
   if (before) before(w);
 
   const context = dom.getInternalVMContext();
