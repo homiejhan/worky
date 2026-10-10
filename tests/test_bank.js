@@ -727,6 +727,12 @@ async function sealV1(payload) {
     I.w.applyState(JSON.parse(exported));
     ok(I.w.eval('bankBudget.items')[itemId] && purchases(I).some(p => p.bank === 'n-chipotle-posted'), 'and Import brings them back');
 
+    /* The new day is the laptop's alone (its date set back): first both devices are
+     * done with the bank's last changes and agree, or a copy of the phone's still on
+     * its way would bring the purchases back after it, as purchases of the phone's today */
+    const agreed = () => [L, P].every(a => !a.w.eval('syncPushTimer') && !a.w.eval('syncPushing') && !a.w.eval('bankBudgetTimer'))
+      && L.w.eval('syncHash(syncFingerprint(gatherState()))') === P.w.eval('syncHash(syncFingerprint(gatherState()))');
+    await until(agreed, 15000);
     const total = L.w.eval('totalBalance()');
     L.w.eval(`budget.lastDate = '${yesterday}'`);
     L.w.eval('budgetRollover()');
@@ -764,6 +770,20 @@ async function sealV1(payload) {
     ok(await until(() => purchases(P).some(p => p.bank === 'n-snack'), 4000), 'but if its Budget changes never arrive, this device logs it after a short wait');
     await sleep(1800);
     ok([L, P].every(app => purchases(app).filter(p => p.bank === 'n-snack').length === 1), 'once, on every device');
+
+    /* a second refresh elsewhere just before this device's wait runs out: what it
+     * brings gets a whole wait of its own, so the device that fetched it can log it */
+    await until(() => !P.w.eval('bankBudgetTimer'), 5000);
+    const gum = { id: 'n-gum', account: 'acc-checking', date: today, name: 'Gum', amount: 1.5, pending: false };
+    const tea = { id: 'n-tea', account: 'acc-checking', date: today, name: 'Tea', amount: 3.5, pending: false };
+    cloud.at(`users/user-c/bank/items/${itemId}`).transactions.unshift(gum);
+    cloud.emit();
+    await sleep(2000);                                                       // (the phone waits 2.5 s)
+    cloud.at(`users/user-c/bank/items/${itemId}`).transactions.unshift(tea);
+    cloud.emit();
+    await sleep(1000);                                                       // past the first wait, not the second
+    ok(!purchases(P).some(p => p.bank === 'n-tea'), 'a charge another device fetched half a second before the wait ran out is not logged here yet: it gets a wait of its own');
+    ok(await until(() => ['n-gum', 'n-tea'].every(id => purchases(P).some(p => p.bank === id)), 4000), 'and with the other device\'s changes never arriving, both are logged after it');
 
     await sleep(1500);
     const node = cloud.at(`users/user-c/bank/items/${itemId}`);

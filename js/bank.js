@@ -48,6 +48,7 @@ let bankLinkPromise = null;
 let bankResume = null;        // { uid, token, received }: an OAuth bank sent the user back mid-way
 let bankAutoAt = 0;           // the last refresh made on its own
 let bankBudgetTimer = null;   // a Budget pass waiting for another device's changes (bankBudgetSoon)
+let bankBudgetSince = 0;      // … since the first change it waits for
 
 /* ── this device's copy (localStorage) ── */
 function bankLoad() {
@@ -131,9 +132,10 @@ export function bankCloudSeen(node) {
   bank.uid = syncUser.uid;
   bank.items = items;
   bankCloudKnown = true;
-  if (JSON.stringify([bank.uid, bank.items, bankCloudKnown]) !== before) { bankSave(); bankRender(); }
+  const changed = JSON.stringify([bank.uid, bank.items, bankCloudKnown]) !== before;
+  if (changed) { bankSave(); bankRender(); }
   budgetSeeBank(bank.items);
-  bankBudgetSoon();
+  bankBudgetSoon(changed);
   bankResumeLink();
   if (first) bankAutoRefresh();
 }
@@ -143,13 +145,20 @@ export function bankCloudSeen(node) {
  * a moment later. Handing it over here at once as well would make this device
  * write the same change, and whichever write came last could undo something
  * typed on the other one meanwhile. So this waits, and only logs what is still
- * missing then (that device went offline or closed first). */
-function bankBudgetSoon() {
-  if (bankBudgetTimer) return;
+ * missing then (that device went offline or closed first). The wait runs from
+ * the latest change to the connections (`fresh`): one that came just before an
+ * earlier wait ran out would otherwise get none, and be logged here before the
+ * other device's changes for it could arrive. It never runs past three waits
+ * from the first change, so a stream of them can't put the logging off for good. */
+function bankBudgetSoon(fresh = false) {
+  if (bankBudgetTimer && !fresh) return;
+  const now = Date.now();
+  if (!bankBudgetTimer) bankBudgetSince = now;
+  clearTimeout(bankBudgetTimer);
   bankBudgetTimer = setTimeout(() => {
     bankBudgetTimer = null;
     if (syncUser && bankCloudKnown && !budgetFromBank(bankItems())) bankBudgetSoon();   // something is being typed: again later
-  }, BANK_BUDGET_WAIT_MS);
+  }, Math.max(0, Math.min(now + BANK_BUDGET_WAIT_MS, bankBudgetSince + 3 * BANK_BUDGET_WAIT_MS) - now));
 }
 /* sync.js calls this whenever the signed-in account changes (sign-in, sign-out, the
  * session coming back at start-up), before it listens again. Connections belong to
