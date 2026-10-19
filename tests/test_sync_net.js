@@ -104,7 +104,91 @@ function ok(cond, msg) { if (cond) { pass++; console.log('  ✓', msg); } else {
       'which build wrote a copy, and its stamps, are not content: the same copy has the same fingerprint');
   }
 
-  console.log('\n── 7. Randomized: three devices and an older version, at random times ──');
+  console.log('\n── 7. A device closed, or put away, right after a change ──');
+  {
+    /* put away, not closed (another app in front, the lid going shut): hidden, and still running for now */
+    const putAway = app => {
+      Object.defineProperty(app.w.document, 'visibilityState', { value: 'hidden', configurable: true });
+      app.w.document.dispatchEvent(new app.w.Event('visibilitychange'));
+    };
+    const textOf = (st, id) => st.todoLists[0].tasks.find(t => t.id === id).text;
+    {
+      const W = world();
+      const [L, P] = await W.devicesOnline(['laptop', 'phone']);
+      const seq = W.cloud().syncSeq;
+      for (const tid of [0, 1, 2]) { L.w.toggleTask(0, tid); await sleep(100); }
+      await until(() => doneOf(W.cloud()) === '0:0 0:1 0:2', 4000);
+      await sleep(300);
+      ok(done(P) === '0:0 0:1 0:2' && W.cloud().syncSeq === seq + 1, 'in front, a burst of changes still waits a moment and goes in one push');
+      L.w.toggleTask(0, 3);
+      await sleep(100);
+      W.close(L);                                                          // the tab closed, the app swiped away: nothing runs there after
+      ok(await until(() => done(P) === '0:0 0:1 0:2 0:3', 4000) && doneOf(W.cloud()) === done(P), 'a task checked a moment before the laptop\'s tab is closed: in the cloud and on the phone');
+    }
+    {
+      const W = world();
+      const [L, P] = await W.devicesOnline(['laptop', 'phone']);
+      L.w.toggleTask(0, 1);
+      await sleep(100);
+      putAway(L);
+      L.dev.sleep();                                                       // the lid shut: hidden, and the laptop asleep right after
+      ok(await until(() => done(P) === '0:1', 4000), 'a moment before the lid is shut and the laptop sleeps: on the phone too');
+    }
+    {
+      const W = world();
+      const [L, P] = await W.devicesOnline(['laptop', 'phone']);
+      L.w.eval('todoLists[0].tasks.find(t => t.id === 2).text = "Typed just now"');   // typed: saved by the next save every 2 s
+      await sleep(100);
+      W.close(L);
+      ok(await until(() => textOf(W.cloud(), 2) === 'Typed just now' && P.w.eval('todoLists[0].tasks.find(t => t.id === 2).text') === 'Typed just now', 4000),
+        'typed and closed before the next save: what was typed reaches the phone');
+    }
+    {
+      const W = world({ delay: () => 700 });
+      const [L] = await W.devicesOnline(['laptop']);
+      L.w.toggleTask(0, 0);
+      await until(() => L.w.eval('syncPushing'), 3000);
+      L.w.toggleTask(0, 1);                                                // a second change while the first push is on its way,
+      const L2 = await W.reload(L);                                        // and the tab closed at once (one push at a time: this one has to wait)
+      ok(await until(() => doneOf(W.cloud()) === '0:0 0:1', 8000) && done(L2) === '0:0 0:1',
+        'closed with a push still on its way: the change after it was saved there, and goes when Focus opens there again');
+    }
+    {
+      const W = world({ delay: () => 700 });                               // slow: a push is answered about 1.4 s after it leaves
+      const [L] = await W.devicesOnline(['laptop']);
+      L.w.toggleTask(0, 0);
+      await until(() => L.w.eval('syncPushing'), 3000);
+      const seq = L.w.eval('syncCloudSeq');
+      L.w.toggleTask(0, 1);                                                // a second change while the first push is on its way,
+      putAway(L);                                                          // and the app put away
+      await until(() => L.w.eval('syncCloudSeq') > seq, 5000);            // the first is answered …
+      await sleep(150);
+      L.dev.sleep();                                                       // … and soon after, the app is stopped
+      ok(await until(() => doneOf(W.cloud()) === '0:0 0:1', 5000), 'a change made while a push was on its way, then the app put away: it follows as soon as the first is answered');
+    }
+    {
+      const W = world();
+      const [L, P] = await W.devicesOnline(['laptop', 'phone']);
+      const field = L.d.querySelector('input.task-text-2');
+      const key = () => field.dispatchEvent(new L.w.Event('input', { bubbles: true }));
+      field.focus();
+      key();
+      const typing = setInterval(key, 100);                                // someone types on the laptop …
+      P.w.toggleTask(1, 4);                                                // … when the phone checks a task: it waits there for the typing to pause
+      const waited = await until(() => L.w.eval('syncTypingValue') !== null, 4000);
+      field.value = 'Call the bank';                                       // what is typed meanwhile waits too (it would go over the phone's)
+      key();
+      await sleep(2500);                                                   // (saved on the laptop by now)
+      clearInterval(typing);
+      ok(waited && textOf(W.cloud(), 2) !== 'Call the bank', '(the phone\'s change waits on the laptop while someone types there, and what is typed waits for it)');
+      W.close(L);                                                          // the laptop is closed mid-typing
+      ok(await until(() => textOf(W.cloud(), 2) === 'Call the bank' && doneOf(W.cloud()) === '1:4', 4000),
+        'closed mid-typing: what was typed reaches the cloud, with the phone\'s change taken in, not written over');
+      ok(await until(() => P.w.eval('todoLists[0].tasks.find(t => t.id === 2).text') === 'Call the bank' && done(P) === '1:4', 4000), 'and the phone has both');
+    }
+  }
+
+  console.log('\n── 8. Randomized: three devices and an older version, at random times ──');
   for (const seed of [3, 17, 29]) {
     let rnd = seed;
     const rand = () => (rnd = (rnd * 16807) % 2147483647) / 2147483647;

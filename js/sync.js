@@ -92,6 +92,7 @@ let syncKnownLog    = [];     // the revisions the agreed copy comes after (sync
 let syncSent        = null;   // the last push sent and not heard back about yet: { rev, hash, seq, state, base, baseRev, at }
 let syncPushing     = false;  // a push is on its way: the next one waits for it
 let syncPushAgain   = false;  // … and was asked for meanwhile
+let syncPushSoon    = false;  // hidden: a push goes once what runs now is done (syncSchedulePush)
 let syncOlderSeen   = false;  // a device on an older version of Focus wrote to the cloud this session
 let syncCommitPending  = 0;    // >0 while a Done push awaits server ack (priority window)
 const SYNC_COMMIT_MAX_REPUSH = 2;
@@ -368,7 +369,26 @@ function syncSchedulePush() {
   if (syncPendingRemote || syncHeld()) return; // don't touch the cloud until the user chooses / finishes
   if (!syncReconciled) return;                 // first cloud value not seen yet — reconcile will push if needed
   clearTimeout(syncPushTimer);
+  syncPushTimer = null;
+  /* Hidden (another app or tab in front, the lid shut, being closed), the page
+   * may be stopped any moment and run nothing more: no pause then, it goes as
+   * soon as what is running now is done (a merge and its saves, all in one). */
+  if (document.visibilityState === 'hidden') {
+    if (!syncPushSoon) { syncPushSoon = true; Promise.resolve().then(() => { syncPushSoon = false; syncPushNow(); }); }
+    return;
+  }
   syncPushTimer = setTimeout(syncPushNow, 1200);
+}
+/* The page is being hidden or closed: what was just saved (main.js saves first)
+ * goes to the cloud now, while the page still runs, not after the pause, which
+ * a closed tab, a phone app swiped away or a laptop going to sleep never gets
+ * to. Another device's change waiting for the typing to pause is taken in first
+ * (nobody types into a hidden page), so both go. A push already on its way is
+ * followed by this one as soon as it is answered (syncSchedulePush). */
+function syncOnHide() {
+  if (!syncUser || !syncRef) return;
+  if (syncTypingValue) syncTypingDone();
+  syncPushNow();
 }
 
 function syncPushNow(opts) {
@@ -627,7 +647,7 @@ function syncOnRemoteValue(snap) {
     bankCloudSeen(v ? v.bank : null);
     return;
   }
-  if (userTyping() && syncForeignChange(v)) { syncTypingValue = v; syncTypingLater(); return; }
+  if (syncTyping() && syncForeignChange(v)) { syncTypingValue = v; syncTypingLater(); return; }
   syncTypingValue = null;
   digestInboxLatest = (v && v.digestInbox) || null;
   syncReconcileRemote(v);
@@ -643,6 +663,7 @@ function syncOnRemoteValue(snap) {
  * write over it. */
 let syncTypingValue = null;
 let syncTypingTimer = null;
+const syncTyping = () => userTyping() && document.visibilityState !== 'hidden';   // (a hidden page isn't typed into)
 function syncForeignChange(v) {
   if (!v || typeof v.state !== 'string' || v.client === syncClientId) return false;
   try { return syncFingerprint(JSON.parse(v.state)) !== syncFingerprint(gatherState()); } catch(e) { return false; }
@@ -653,7 +674,7 @@ function syncTypingLater() {
 }
 function syncTypingDone() {
   if (!syncTypingValue || !syncRef) return;
-  if (userTyping()) { syncTypingLater(); return; }
+  if (syncTyping()) { syncTypingLater(); return; }
   clearTimeout(syncTypingTimer);
   const v = syncTypingValue;
   syncTypingValue = null;
@@ -1225,8 +1246,8 @@ export function syncInit() {
     return;
   }
   document.addEventListener('focusout', () => setTimeout(syncTypingDone, 0));   // a field was left: take in what waited now
-  window.addEventListener('pagehide', copiesSave);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') copiesSave(); });
+  window.addEventListener('pagehide', () => { syncOnHide(); copiesSave(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { syncOnHide(); copiesSave(); } });
   syncCopiesReady = false;
   copiesStart().then(() => {
     syncKeepBootCopy();
