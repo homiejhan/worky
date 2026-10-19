@@ -6,7 +6,8 @@
  * is owed on the credit cards, as each card shows it. So it can't drift from
  * the bank's, and the day starts from what that balance was when the day began
  * (budget.js). With no checking account connected there is no such balance:
- * Budget keeps its own total, and what the cards spend comes off it.
+ * Budget keeps its own total, as without a bank (the daily budget is added to it
+ * each morning), and what the cards spend comes off it.
  *
  * Checking accounts: the transactions say what the day's spending is. The
  * first time Budget sees a bank connection whose history Plaid has finished

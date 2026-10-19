@@ -9,7 +9,7 @@ import { calDesktopOpen, calShiftSources, calToggleDesktop } from './calendar.js
 import { digestDesktopOpen, digestToggleDesktop } from './digest.js';
 import { shiftsOnDays } from './shifts.js';
 import { addDays, billsDueBetween, cashRunway, daysBetween, nextPayday, PAY_REPEATS } from './runway.js';
-import { bankBalance, bankBalanceKey, bankBudgetFollowing, bankBudgetSkip, bankBudgetStep, bankCardLine, bankCardsTracked } from './bankbudget.js';
+import { bankBalance, bankBalanceKey, bankBudgetFollowing, bankBudgetSkip, bankBudgetStep, bankCardLine, bankCardsTracked, bankCashAccount } from './bankbudget.js';
 
 /* budget state
  *   initial        — balance allocated at the start of today
@@ -152,6 +152,18 @@ export function budgetFollowsBank() {
 /* The bank's balance Budget's total is (bankbudget.js → bankBalance), or null:
  * not following a bank, or no balance from it yet. */
 export function budgetBankBalance() { return bankBudget.on ? bankBalance(bankSeen) : null; }
+/* Following credit cards alone: no checking account, here (bankSeen) or in a sync
+ * point (`acc`, known before the bank is, when Focus opens), so no balance from
+ * the bank and no paychecks from it. The total is Budget's own, as without a
+ * bank: the cards' spending comes off it, and the daily budget is added to it. */
+function budgetCardsAlone() {
+  return budgetBankBalance() === null
+    && !Object.values(bankBudget.items).some(t => Array.isArray(t.acc) && t.acc.length)
+    && !bankSeen.some(i => (i.accounts || []).some(bankCashAccount));
+}
+/* Each new day adds the daily budget to the total: Budget's own total, without a
+ * bank or with cards alone, and no payday set. */
+function budgetDailyAdded() { return !runwayOn() && (!budgetFollowsBank() || budgetCardsAlone()); }
 
 export function normalizeRunway(r) {
   const bills = Array.isArray(r?.bills) ? r.bills : [];
@@ -224,7 +236,10 @@ function daysBetweenKeys(fromKey, toKey) {
  * With a payday set (runwayOn) the balance is real cash between paychecks: no
  * daily budget is added, and the bills due since the last rollover come out.
  * Following a bank, the balance is the bank's: the day starts from it as last
- * checked (budgetAnchor), since the paychecks and bills come in with the bank. */
+ * checked (budgetAnchor), since the paychecks and bills come in with the bank.
+ * Following credit cards alone, the total is Budget's own, and the daily budget
+ * is added as without a bank (budgetDailyAdded); the bills stay the runway's,
+ * since a card may pay them, which logs them already. */
 let budgetBillsPaid = [];   // what the last rollover took out, for its toast
 export function budgetRollover() {
   const today = dbdTodayKey();
@@ -234,7 +249,8 @@ export function budgetRollover() {
   if (budgetFollowsBank()) {
     budgetBillsPaid = [];
     const bank = budgetBankBalance();
-    budget.initial = bank === null ? totalBalance() : bank;   // (taken properly once today's purchases from the bank are in: budgetAnchor)
+    budget.initial = bank !== null ? bank                     // (taken properly once today's purchases from the bank are in: budgetAnchor)
+      : round2(totalBalance() + (budgetDailyAdded() ? budget.daily * days : 0));
     /* what was typed and the bank hasn't shown: its copy may come a day late (bankbudget.js) */
     const since = addDays(today, -BANK_TYPED_DAYS);
     bankBudget.typed = [...bankBudget.typed, ...budget.purchases.filter(p => !p.bank && round2(p.amount) > 0)
@@ -330,6 +346,7 @@ function budgetHtml() {
   const total = totalBalance();
   const follows = budgetFollowsBank();
   const fromBank = budgetBankBalance() !== null;          // the total is the bank's balance
+  const cardsAlone = follows && budgetCardsAlone();       // Budget's own total, the cards' spending off it
   const other = bankOtherToday();
   const sub = fromBank
     ? `${money(round2(budget.initial))} at the start of today − ${money(spent)} spent today`
@@ -383,10 +400,10 @@ function budgetHtml() {
         <div class="budget-settings-body"${open ? '' : ' hidden'}>
           <div class="budget-fields">
             ${budgetFieldHtml('today', "Today's balance", tb, 'Spending envelope — editing it won\'t change your total')}
-            ${budgetFieldHtml('daily', 'Daily budget', round2(budget.daily), follows || runwayOn() ? 'What you let yourself spend a day' : 'Added to your balance each new day')}
+            ${budgetFieldHtml('daily', 'Daily budget', round2(budget.daily), budgetDailyAdded() ? 'Added to your balance each new day' : 'What you let yourself spend a day')}
             ${budgetFieldHtml('initial', 'Initial balance', round2(budget.initial), fromBank ? 'Your bank balance when today began: it follows your bank'
-              : follows ? 'Your cash this morning: what your bank and cards spend comes off it'
-              : runwayOn() ? 'Your cash this morning: add each paycheck here' : 'Grows by the daily budget each morning', fromBank)}
+              : follows && !cardsAlone ? 'Your cash this morning: what your bank and cards spend comes off it'
+              : `${runwayOn() ? 'Your cash this morning: add each paycheck here' : 'Grows by the daily budget each morning'}${follows ? ', and what your cards spend comes off it' : ''}`, fromBank)}
           </div>
           ${runwayHtml(r)}
         </div>
@@ -446,7 +463,7 @@ function bankStatusHtml() {
   const how = budgetBankBalance() !== null
     ? `Your total balance is your bank's: what's in your checking accounts (available: pending charges taken off), less what you owe on your credit cards. Checking: money out comes off today on the day it reaches your bank's list, with its date if the bank dates it earlier, and money in is listed with it. ${cardsHow}`
     : bankSeen.some(i => (i.accounts || []).some(a => a.type === 'credit'))
-      ? `No checking account is connected, so the total balance is Budget's own: set it in Budget settings → Initial balance, or connect your checking account to have it follow your bank. ${cardsHow}`
+      ? `No checking account is connected, so the total balance is Budget's own: set it in Budget settings → Initial balance, or connect your checking account to have it follow your bank.${budgetDailyAdded() ? ' Your daily budget is added to it each morning, so it grows by what you don\'t spend.' : ''} ${cardsHow}`
       : 'Money out comes off today on the day it reaches your bank\'s list, with its date if the bank dates it earlier; money in is listed with it, in your total balance. Paying a card is neither.';
   const banks = bankBudgetFollowing(bankBudget.items, bankSeen, bankCards);
   if (!banks.length) return `<div class="budget-bank-note">New transactions from your checking accounts and credit cards are logged for you. ${how}</div>`;
@@ -527,7 +544,7 @@ function runwayHtml(r = runwayResult()) {
   if (!runwayOn()) return `
     <div class="runway empty">
       <div class="runway-label">Cash runway</div>
-      <div class="runway-sub">${budgetFollowsBank()
+      <div class="runway-sub">${budgetFollowsBank() && !budgetCardsAlone()
         ? 'Set your next payday to see whether your cash lasts until then. Paychecks come in with your bank\'s transactions.'
         : 'Set your next payday to see whether your cash lasts until then. From then on your daily budget is what you spend each day. It is no longer added to your balance each morning, so add each paycheck to your balance when it lands.'}</div>
       ${setup}
@@ -543,7 +560,7 @@ function runwayHtml(r = runwayResult()) {
     const why = r.runsOutWith.length ? ` when ${escAttr(r.runsOutWith.join(' and '))} ${r.runsOutWith.length === 1 ? 'is' : 'are'} due` : '';
     const status = r.short
       ? `Runs out ${fmtDayKey(r.runsOutOn)}${why}, ${plural(r.shortBy, 'day')} before payday.`
-      : r.daysToPayday === 0 ? (budgetFollowsBank() ? 'Your paycheck comes in when your bank shows it.' : 'Add your paycheck to the balance above.')
+      : r.daysToPayday === 0 ? (budgetFollowsBank() && !budgetCardsAlone() ? 'Your paycheck comes in when your bank shows it.' : 'Add your paycheck to the balance above.')
       : `Covers you to payday${r.paycheck > 0 ? `, when about ${money(r.paycheck)} lands` : ''}.`;
     const parts = [`${money(totalBalance())} now`, `${money(budget.daily)} a day`];
     if (r.billsBeforePayday) parts.push(`−${money(r.billsBeforePayday)} bills before payday`);
