@@ -12,10 +12,12 @@ import { syncCommitFormat, syncFlushPending, syncUpdateUI } from './sync.js';
 import { digestInboxFlush } from './digest.js';
 
 export let formatMode = false;
-export let formatTimerIdCounter = 900;
+export let formatTimerIdCounter = 1000;
 /* An id no timer has: past every timer's, not only past what this page gave out
  * (the counter starts again each time Focus opens, so counting alone gave a timer
- * added after a reopen the id of one added before). */
+ * added after a reopen the id of one added before). From 1000 up: a device still
+ * on build 12 or before counts from 900 each time it opens, and an id it gives a
+ * timer it adds can't be one given out here. */
 export function nextFormatTimerId() {
   formatTimerIdCounter = Math.max(formatTimerIdCounter, ...timers.map(t => (Number.isFinite(t.id) ? t.id + 1 : 0)));
   return formatTimerIdCounter++;

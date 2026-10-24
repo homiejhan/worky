@@ -97,6 +97,14 @@ console.log('\n── 5. Controls inside panes still work ──');
   ok(d.getElementById('themeModal').classList.contains('show') && !d.getElementById('settingsModal').classList.contains('show'), 'Customize theme still hands off to the editor');
 }
 
+console.log('\n── 6. Settings → Help says which build this device runs ──');
+{
+  const { w, d } = await boot();
+  w.openSettings('help');
+  const line = d.getElementById('appBuildLine').textContent;
+  ok(line.includes(`Focus build ${w.eval('STATE_BUILD')}`) && /every device should show the same number/.test(line), `so each device can be checked after an update ("${line}")`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

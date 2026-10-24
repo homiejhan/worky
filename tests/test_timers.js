@@ -147,6 +147,7 @@ const BOOT = { 'focus-tour-done': '1' };
     w.toggleFormatMode(); w.addFormatTimer();
     const ids = w.eval('timers.map(t => t.id)'), n = ids.length;
     ok(new Set(ids).size === n, `a timer added after Focus was opened again gets an id of its own (${ids.join(', ')})`);
+    ok(ids.slice(-2).every(id => id >= 1000), 'from 1000 up: an older build, counting from 900 each time it opens, can\'t give one out');
     recolor(w, d, n - 1, '#ff0000');
     ok(shade(d, n - 1) === '#ff0000' && shade(d, n - 2) !== '#ff0000' && w.eval('timers[timers.length - 1].color') === '#ff0000'
       && w.eval('timers[timers.length - 2].color') !== '#ff0000', 'its color changes that timer alone, on screen and saved');
@@ -162,8 +163,8 @@ const BOOT = { 'focus-tour-done': '1' };
     const broken = JSON.stringify(st);
     ({ w, d } = await boot({ 'focus-app-state': broken }));
     const fixed = w.eval('timers.map(t => t.id)');
-    ok(new Set(fixed).size === fixed.length && fixed[fixed.length - 2] === reading.id && fixed[fixed.length - 1] > reading.id,
-      `two saved under one id: the first keeps it, the later one gets one of its own (${fixed.join(', ')})`);
+    ok(new Set(fixed).size === fixed.length && fixed[fixed.length - 2] === reading.id && fixed[fixed.length - 1] >= 1000,
+      `two saved under one id: the first keeps it, the later one gets one of its own, from 1000 up (${fixed.join(', ')})`);
     eq(labels(w), st.timers.map(t => t.label).join(', '), 'every timer is still there, in its place');
     const saved = JSON.parse(w.localStorage.getItem('focus-app-state')).timers.map(t => t.id);
     ok(saved.join() === fixed.join(), 'and saved so (synced as a change, so the other devices get it)');

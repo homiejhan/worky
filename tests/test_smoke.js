@@ -53,6 +53,31 @@ const fakeFetch = async url => {
   eq(listed.join(' '), onDisk.join(' '), 'SHELL_FILES lists every js/ module and nothing else');
   ok(!/'\.\/app\.js'/.test(sw), 'and no longer lists app.js');
 
+  console.log('\n── 2a. The service worker gets the app\'s files from the server, not the browser\'s 10-minute copy ──');
+  {
+    const vm = require('vm');
+    const on = {}, fetched = [], precached = [];
+    const cache = { put() {}, match: async () => null, addAll: async reqs => { precached.push(...reqs); } };
+    const ctx = vm.createContext({
+      self: { addEventListener: (type, fn) => { on[type] = fn; }, location: { origin: 'https://example.test' },
+        skipWaiting: () => Promise.resolve(), clients: { claim: () => Promise.resolve() } },
+      caches: { open: async () => cache, keys: async () => [], delete: async () => true },
+      fetch: async (req, init) => { fetched.push({ url: req.url, init }); return { ok: true, clone() { return this; } }; },
+      Request: class { constructor(url, init) { this.url = url; this.cache = init && init.cache; } },
+      URL, Promise,
+    });
+    vm.runInContext(sw, ctx);
+    const respond = async request => { let p; on.fetch({ request, respondWith: x => { p = x; } }); await p; return fetched.pop(); };
+    const script = await respond({ method: 'GET', url: 'https://example.test/worky/js/timers.js', mode: 'cors' });
+    ok(script && script.init && script.init.cache === 'no-cache', 'a module is checked with the server on every load (unchanged: a short "not modified")');
+    const page = await respond({ method: 'GET', url: 'https://example.test/worky/', mode: 'navigate' });
+    ok(page && page.init === undefined, 'the page itself goes as the browser sends it');
+    let installing;
+    on.install({ waitUntil: p => { installing = p; } });
+    await installing;
+    ok(precached.length > 0 && precached.every(r => r.cache === 'reload'), 'and a new version precaches from the server, not from the browser\'s copy');
+  }
+
   console.log('\n── 3. The real modules boot (fresh device → starter profile) ──');
   const token = JSON.stringify({ access_token: 'x', expires_at: Date.now() + 3600e3 });
   const cals = JSON.stringify([{ id: 'primary', summary: 'Me', color: '#378ADD', enabled: true }]);

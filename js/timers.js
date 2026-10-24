@@ -21,13 +21,14 @@ export let timers = TIMER_DEFAULTS.map((t, i) => ({
   running: false, startedAt: null, secondsAtStart: null
 }));
 export function setTimers(v) { timers = v; }
-/* Timers with an id each. Before this build a timer added in Formats after Focus
+/* Timers with an id each. Before build 13 a timer added in Formats after Focus
  * was opened again could take the id of one added before, and then coloring or
  * removing one did it to the other. The first keeps the id and each later one
- * takes the next id no timer has: the same on every device, so their copies agree. */
+ * takes the next id no timer has, from 1000 up (past the ids an older build
+ * gives out, see formats.js): the same on every device, so their copies agree. */
 export function timersWithOwnIds(list) {
   const seen = new Set();
-  let next = Math.max(899, ...list.map(t => (Number.isFinite(t.id) ? t.id : -1))) + 1;
+  let next = Math.max(999, ...list.map(t => (Number.isFinite(t.id) ? t.id : -1))) + 1;
   return list.map(t => {
     if (Number.isFinite(t.id) && !seen.has(t.id)) { seen.add(t.id); return t; }
     seen.add(next);

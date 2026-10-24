@@ -12,7 +12,7 @@
      passed straight through to the network — never cached.
    ════════════════════════════════════════════════════════════ */
 
-const CACHE_VERSION = 'worky-v21';
+const CACHE_VERSION = 'worky-v22';
 const SHELL_CACHE   = `${CACHE_VERSION}-shell`;
 const FONT_CACHE    = `${CACHE_VERSION}-fonts`;
 
@@ -66,7 +66,7 @@ const SHELL_FILES = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(SHELL_CACHE)
-      .then((cache) => cache.addAll(SHELL_FILES))
+      .then((cache) => cache.addAll(SHELL_FILES.map((u) => new Request(u, { cache: 'reload' }))))   // (from the server, not the browser's copy)
       .then(() => self.skipWaiting())
   );
 });
@@ -119,11 +119,15 @@ self.addEventListener('fetch', (event) => {
 });
 
 /* Network-first: try the network, update cache on success,
-   fall back to cache when offline. */
+   fall back to cache when offline. The app's files are checked with the
+   server every time (no-cache: unchanged ones come back as a short "not
+   modified"): GitHub Pages lets the browser keep them 10 minutes, so a
+   reopen right after a deploy got the old code, or old files mixed with
+   new ones. (Page loads themselves go as the browser sends them.) */
 async function networkFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
   try {
-    const fresh = await fetch(request);
+    const fresh = await fetch(request, request.mode === 'navigate' ? undefined : { cache: 'no-cache' });
     if (fresh && fresh.ok) {
       cache.put(request, fresh.clone());
     }

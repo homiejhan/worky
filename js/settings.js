@@ -1,6 +1,6 @@
 /* settings.js — The Settings modal. */
 import { $ } from './util.js';
-import { saveToLocal } from './persistence.js';
+import { saveToLocal, STATE_BUILD } from './persistence.js';
 import { applyViewVisibility, VIEW_DEFS, viewEnabled, views } from './views.js';
 import { gcalIsConnected, gcalUpdateBtn } from './gcal.js';
 import { syncUpdateUI } from './sync.js';
@@ -100,6 +100,8 @@ export function renderSettings() {
   gcalUpdateBtn();
   bankRenderSettings();
   digestRenderSettings();
+  const build = $('appBuildLine');                     // after an update, each device should say the same
+  if (build) build.textContent = `This device runs Focus build ${STATE_BUILD}. After an update, every device should show the same number.`;
 }
 
 /* Put a tab on the phone's bottom bar or take it off (it stays in the ☰ menu). */
