@@ -4,7 +4,7 @@ import { LS_KEY, SYNC_BASE_LS_KEY } from './config.js';
 import { cloneTask, getRemaining, keepField, showToast } from './util.js';
 import {
   renderTimers, setTimerDefaults, setTimers, setWokenUp, syncWakeupUI, TIMER_DEFAULTS, timers,
-  updateTimerSummary, wokenUp,
+  timersWithOwnIds, updateTimerSummary, wokenUp,
 } from './timers.js';
 import {
   renderTodos, setTaskIdCounter, setTodoIdCounter, setTodoLists, taskIdCounter, todoIdCounter,
@@ -273,11 +273,11 @@ function hydrateState(st) {
   stateCaptureExtra(st);
   setWokenUp(!!st.wokenUp);
   if (st.timerDefaults) setTimerDefaults(st.timerDefaults);
-  setTimers(st.timers.map(t => ({
+  setTimers(timersWithOwnIds(st.timers.map(t => ({
     id: t.id, label: t.label, color: t.color,
     seconds: t.seconds, running: t.running,
     startedAt: t.startedAt, secondsAtStart: t.secondsAtStart,
-  })));
+  }))));   // (two sharing an id, from an older build: the later one gets its own)
   setTodoIdCounter(st.todoIdCounter ?? todoIdCounter);
   setTaskIdCounter(st.taskIdCounter ?? taskIdCounter);
   setTodoLists(st.todoLists.map(l => ({

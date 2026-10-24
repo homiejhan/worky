@@ -13,7 +13,13 @@ import { digestInboxFlush } from './digest.js';
 
 export let formatMode = false;
 export let formatTimerIdCounter = 900;
-export function nextFormatTimerId() { return formatTimerIdCounter++; }
+/* An id no timer has: past every timer's, not only past what this page gave out
+ * (the counter starts again each time Focus opens, so counting alone gave a timer
+ * added after a reopen the id of one added before). */
+export function nextFormatTimerId() {
+  formatTimerIdCounter = Math.max(formatTimerIdCounter, ...timers.map(t => (Number.isFinite(t.id) ? t.id + 1 : 0)));
+  return formatTimerIdCounter++;
+}
 export let preFormatTimerState = [];   // live timer progress, parked while Formats shows the defaults
 export function setPreFormatTimerState(v) { preFormatTimerState = v; }
 
@@ -98,7 +104,7 @@ export function commitFormatMode() {
 
 export function addFormatTimer() {
   if (!formatMode) return;
-  const id = formatTimerIdCounter++;
+  const id = nextFormatTimerId();
   const newT = { id, label: 'New Timer', seconds: 3600, color: '#5DCAA5', running: false, startedAt: null, secondsAtStart: null };
   timers.push(newT);
   TIMER_DEFAULTS.push({ label: newT.label, seconds: newT.seconds, color: newT.color });
