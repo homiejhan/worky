@@ -236,7 +236,7 @@ export function initSwipe() {
     const t = e.target;
     if (t.tagName === 'INPUT' || t.tagName === 'BUTTON' || t.tagName === 'SELECT'
       || t.closest('button') || t.closest('input')
-      || t.closest('.drag-handle') || t.closest('.list-drag-handle')
+      || t.closest('.drag-handle') || t.closest('.list-drag-handle') || t.closest('.timer-drag-handle')
       || t.closest('.cal-event') || t.closest('.cal-divider')) return;
     sx = e.touches[0].clientX;
     sy = e.touches[0].clientY;

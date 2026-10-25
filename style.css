@@ -1174,7 +1174,7 @@ body.format-mode .list-sched-row { display: flex; }
 /* ═══════════════════════════════════════════════════════
    UNIFIED DRAG SYSTEM
    ═══════════════════════════════════════════════════════ */
-.drag-handle, .list-drag-handle {
+.drag-handle, .list-drag-handle, .timer-drag-handle {
   display: flex; align-items: center; justify-content: center;
   width: 18px; align-self: stretch;
   color: var(--ink-3);
@@ -1187,9 +1187,14 @@ body.format-mode .list-sched-row { display: flex; }
   transition: opacity 0.15s, color 0.15s;
 }
 .task-row:hover .drag-handle,
-.todo-card:hover .list-drag-handle { opacity: 1; }
-.drag-handle:hover, .list-drag-handle:hover { color: var(--ink-2); }
-.drag-handle:active, .list-drag-handle:active { cursor: grabbing; }
+.todo-card:hover .list-drag-handle,
+.timer-card:hover .timer-drag-handle { opacity: 1; }
+.drag-handle:hover, .list-drag-handle:hover, .timer-drag-handle:hover { color: var(--ink-2); }
+.drag-handle:active, .list-drag-handle:active, .timer-drag-handle:active { cursor: grabbing; }
+.timer-drag-handle { width: 14px; margin: -4px -3px -4px -6px; padding: 4px 0; }   /* a bigger target than it looks */
+/* where a dragged timer lands: a line just outside the card (the card clips what's inside) */
+.timer-card.timer-drop-before { box-shadow: 0 -6px 0 -3px var(--accent), 0 -4px 12px -4px rgba(var(--accent-rgb),0.6), var(--shadow-card); }
+.timer-card.timer-drop-after  { box-shadow: 0 6px 0 -3px var(--accent), 0 4px 12px -4px rgba(var(--accent-rgb),0.6), var(--shadow-card); }
 
 .drag-ghost {
   position: fixed;

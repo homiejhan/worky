@@ -194,6 +194,97 @@ const BOOT = { 'focus-tour-done': '1' };
       `once, without going back and forth (${ids(W.cloud()).join(', ')})`);
   }
 
+  /* jsdom has no layout: each card of a stack gets a 90 px box, 100 px apart, and
+   * elementFromPoint answers from those. A drag: press the grip, move past 5 px,
+   * move to `toY`, let go. */
+  const layOut = (d, stack) => {
+    const cards = [...d.querySelectorAll(`#${stack} .timer-card`)];
+    cards.forEach((c, i) => { c.getBoundingClientRect = () => ({ left: 0, right: 320, width: 320, top: i * 100, bottom: i * 100 + 90, height: 90, x: 0, y: i * 100 }); });
+    d.elementFromPoint = (x, y) => { const c = cards[Math.floor(y / 100)]; return c && y >= 0 && y % 100 < 90 ? c.querySelector('.timer-display') : null; };
+    return cards;
+  };
+  const dragTimer = (w, d, from, toY, { stack = 'timerStack-d', pointerType = 'mouse', during } = {}) => {
+    const cards = layOut(d, stack);
+    const ev = (type, y) => new w.PointerEvent(type, { clientX: 20, clientY: y, button: 0, pointerType, bubbles: true, cancelable: true });
+    cards[from].querySelector('.timer-drag-handle').dispatchEvent(ev('pointerdown', from * 100 + 12));
+    w.dispatchEvent(ev('pointermove', from * 100 + 30));
+    w.dispatchEvent(ev('pointermove', toY));
+    if (during) during(cards);
+    w.dispatchEvent(ev('pointerup', toY));
+  };
+  const order = w => w.eval('timers.map(t => t.label).join(", ")');
+  const defaults = w => w.eval('TIMER_DEFAULTS.map(t => t.label).join(", ")');
+
+  console.log('\n── 7. Dragging a timer by its grip ──');
+  {
+    let { w, d } = await loadApp({ storage: BOOT });
+    const start = order(w);
+    const ids = w.eval('Object.fromEntries(timers.map(t => [t.label, t.id]))');
+    ok(d.querySelectorAll('#timerStack-d .timer-drag-handle').length === w.eval('timers.length')
+      && d.querySelectorAll('#timerStack-m .timer-drag-handle').length === w.eval('timers.length'), `every timer has a grip, on a computer and a phone (${start})`);
+    let shown = null;
+    dragTimer(w, d, 0, 270, { during: cards => { shown = { line: cards[2].classList.contains('timer-drop-after'), src: cards[0].classList.contains('drag-src'), ghost: !!d.querySelector('.drag-ghost') }; } });
+    const [a, b, c] = start.split(', ');
+    ok(shown && shown.line && shown.src && shown.ghost, 'while dragging: the card follows the pointer, and a line shows where it will land');
+    eq(order(w), `${b}, ${c}, ${a}`, 'dropped on the lower half of the last one: it goes after it');
+    ok(w.eval('timers.map(t => t.label + "=" + t.id).join()') === [b, c, a].map(l => `${l}=${ids[l]}`).join(), 'each keeps its id');
+    eq(defaults(w), order(w), 'and its default goes with it');
+    ok(!d.querySelector('.drag-ghost, .drag-src, .timer-drop-before, .timer-drop-after'), 'nothing of the drag is left on the page');
+    eq(JSON.parse(w.localStorage.getItem('focus-app-state')).timers.map(t => t.label).join(', '), order(w), 'saved at once');
+
+    dragTimer(w, d, 2, 10);
+    eq(order(w), `${a}, ${b}, ${c}`, 'the last one dropped on the top half of the first: it goes before it');
+    dragTimer(w, d, 1, 20, { stack: 'timerStack-m', pointerType: 'touch' });
+    eq(order(w), `${b}, ${a}, ${c}`, 'on a phone, by touch, the same');
+    const before = order(w);
+    dragTimer(w, d, 1, 150);
+    dragTimer(w, d, 0, 95);
+    eq(order(w), before, 'dropped on itself, or between cards: it stays where it was');
+
+    const sleepId = ids[c], sleepDefault = w.eval(`TIMER_DEFAULTS[timers.findIndex(t => t.id === ${sleepId})].seconds`);
+    w.eval(`timers.find(t => t.id === ${sleepId}).seconds = 60`);
+    dragTimer(w, d, 2, 10);
+    w.resetTimer(sleepId);
+    eq(w.eval(`timers.find(t => t.id === ${sleepId}).seconds`), sleepDefault, 'Reset after a move gives it its own time, not that of the timer that was there');
+
+    await sleep(300);
+    w.toggleFormatMode();
+    dragTimer(w, d, 0, 270);
+    const inFormats = order(w);
+    w.toggleFormatMode();
+    ok(order(w) === inFormats && defaults(w) === inFormats, `in Formats too, and Done keeps it (${inFormats})`);
+    ({ w, d } = await loadApp({ storage: { ...BOOT, 'focus-app-state': w.localStorage.getItem('focus-app-state') } }));
+    ok(order(w) === inFormats && defaults(w) === inFormats, 'and Focus opened again has it');
+  }
+
+  console.log('\n── 8. A timer dragged on one device, with the other changing something meanwhile ──');
+  {
+    const W = world();
+    const [L, P] = await W.devicesOnline(['laptop', 'phone']);
+    const start = order(L.w);
+    const [a, b, c] = start.split(', ');
+    dragTimer(L.w, L.d, 0, 270);
+    ok(await until(() => order(P.w) === `${b}, ${c}, ${a}`, 5000) && defaults(P.w) === order(P.w), `on the phone in a moment, each timer with its own default (${order(P.w)})`);
+
+    L.dev.sleep();                                                        // the laptop drags while it can't reach the cloud …
+    dragTimer(L.w, L.d, 2, 10);
+    const started = P.w.eval('timers[0].id');
+    P.w.toggleTimer(started);                                             // … and the phone starts a timer: both changed the timers
+    P.w.toggleTask(0, 0);                                                 // (and checks a task off)
+    await until(() => W.cloud().timers.some(t => t.running) && W.cloud().todoLists[0].tasks[0].done, 5000);
+    L.dev.wake();                                                         // the two are merged
+    const want = `${a}, ${b}, ${c}`;
+    ok(await until(() => order(L.w) === want && order(P.w) === want && W.fp(L) === W.fp(P), 8000),
+      `both changes stay: the order dragged on the laptop (${order(L.w)} / ${order(P.w)}) …`);
+    const cloud = W.cloud();
+    const running = st => st.timers.filter(t => t.running).map(t => t.id).join();
+    ok(running(cloud) === String(started) && L.w.eval(`timers.find(t => t.id === ${started}).running`) && cloud.todoLists[0].tasks[0].done,
+      '… and the timer started on the phone, running everywhere, with the task it checked off');
+    ok(cloud.timerDefaults.map(t => t.label).join(', ') === cloud.timers.map(t => t.label).join(', ') && defaults(L.w) === order(L.w) && defaults(P.w) === order(P.w),
+      'each timer\'s default still beside it, in the cloud and on both');
+    P.w.toggleTimer(started);
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

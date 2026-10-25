@@ -1,5 +1,6 @@
-/* drag.js — One pointer-events drag engine for list cards, task rows and calendar events. */
+/* drag.js — One pointer-events drag engine for list cards, task rows, timer cards and calendar events. */
 import { moveList, moveTask } from './lists.js';
+import { moveTimer } from './timers.js';
 
 /* ───────────────────────── UNIFIED DRAG ENGINE ─────────────────────────
  * One pointer-events implementation for mouse, touch, and pen.
@@ -175,6 +176,39 @@ function bindTaskDrag(row) {
       }
     },
   });
+}
+
+/* ── timer-card reordering: by the grip, within the stack it is in ── */
+function clearTimerDrop() {
+  document.querySelectorAll('.timer-drop-before, .timer-drop-after').forEach(el => el.classList.remove('timer-drop-before', 'timer-drop-after'));
+}
+function timerDropAt(card, x, y, ghost) {
+  const el = hitTestAt(x, y, ghost);
+  const target = el && el.closest('.timer-card');
+  if (!target || target === card || target.parentElement !== card.parentElement) return null;
+  const r = target.getBoundingClientRect();
+  return { target, after: y > r.top + r.height / 2 };
+}
+function bindTimerDrag(card) {
+  const handle = card.querySelector('.timer-drag-handle');
+  if (!handle || handle._dragBound) return;
+  handle._dragBound = true;
+  makeDrag(handle, {
+    source: () => card,
+    onMove: (x, y, ghost) => {
+      clearTimerDrop();
+      const at = timerDropAt(card, x, y, ghost);
+      if (at) at.target.classList.add(at.after ? 'timer-drop-after' : 'timer-drop-before');
+    },
+    onDrop: (x, y, ghost) => {
+      const at = timerDropAt(card, x, y, ghost);
+      if (at) moveTimer(Number(card.dataset.timerId), Number(at.target.dataset.timerId), at.after);
+    },
+    onEnd: clearTimerDrop,
+  });
+}
+export function bindTimerDrags() {
+  document.querySelectorAll('.timer-card').forEach(bindTimerDrag);
 }
 
 export function bindAllDrags() {

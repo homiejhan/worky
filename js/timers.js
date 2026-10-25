@@ -1,10 +1,11 @@
 /* timers.js — Timer state and cards, the woke-up checkbox and the time-remaining summary. */
 import {
-  $, escAttr, fmt, getRemaining, parseTime, pauseIcon, playIcon, resetIcon,
+  $, escAttr, fmt, getRemaining, GRIP_SVG, parseTime, pauseIcon, playIcon, resetIcon,
 } from './util.js';
 import { saveToLocal } from './persistence.js';
 import { formatMode } from './formats.js';
 import { renderHome } from './home.js';
+import { bindTimerDrags } from './drag.js';
 
 export let TIMER_DEFAULTS = [
   { label: 'Productivity Timer',   seconds: 5*3600, color: '#378ADD' },
@@ -56,6 +57,7 @@ function timerPaintProgress(t) {
 function timerCardHTML(t, pfx) {
   return `
     <div class="timer-header">
+      <div class="timer-drag-handle" title="Drag to reorder">${GRIP_SVG}</div>
       <div class="color-swatch" style="background:${t.color}">
         <input type="color" value="${t.color}" oninput="changeTimerColor(${t.id}, this.value)">
       </div>
@@ -91,14 +93,33 @@ export function renderTimers() {
     timers.forEach(t => {
       const card = document.createElement('div');
       card.className = 'timer-card tcard-' + t.id + (t.running ? ' running' : '');
+      card.dataset.timerId = t.id;
       card.style.setProperty('--tc', t.color);
       card.innerHTML = timerCardHTML(t, pfx);
       stack.appendChild(card);
     });
   });
+  bindTimerDrags();
   renderHome();
   if (wokenUp) updateTimerSummary();
   tickSchedule();
+}
+
+/* A timer dragged by its grip to just before or after another (drag.js). Its
+ * default (TIMER_DEFAULTS, side by side with the timers) moves with it, so Reset
+ * and Formats still give it its own; outside Formats too, like any other change. */
+export function moveTimer(fromId, toId, after) {
+  const from = timers.findIndex(t => t.id === fromId);
+  if (from === -1 || fromId === toId || !timers.some(t => t.id === toId)) return;
+  const [moved] = timers.splice(from, 1);
+  const to = timers.findIndex(t => t.id === toId) + (after ? 1 : 0);
+  timers.splice(to, 0, moved);
+  if (from < TIMER_DEFAULTS.length) {
+    const [def] = TIMER_DEFAULTS.splice(from, 1);
+    TIMER_DEFAULTS.splice(Math.min(to, TIMER_DEFAULTS.length), 0, def);
+  }
+  renderTimers();
+  saveToLocal();
 }
 
 export function setTimerLabel(id, value) {

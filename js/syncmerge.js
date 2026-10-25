@@ -10,7 +10,9 @@
  *   • lists of records with ids (tasks, lists, purchases, events, timers, …)
  *     merge record by record: added on either side is kept, deleted on one side
  *     and untouched on the other goes, changed on one side and deleted on the
- *     other stays;
+ *     other stays; in the other side's order, unless only this side moved
+ *     records about (dragged one elsewhere: see reorderedHereOnly). A timer's
+ *     default (timerDefaults) goes with its timer (see withTimerDefaults);
  *   • a record both sides added under the same id (each device numbers new
  *     records on its own) is two records: the other side's keeps the id, this
  *     side's gets the next free one; where one side moved a record like that,
@@ -145,7 +147,29 @@ function mergeRecords(base0, local0, remote0, opts) {
     if (r.has(y.id)) continue;
     if (!(b.has(y.id) && same(b.get(y.id), y))) out.push(y);   // added here, or changed here while deleted there
   }
-  return [...out, ...moved];
+  return [...(reorderedHereOnly(base, local, remote) ? inOrderOf(out, local, remote) : out), ...moved];
+}
+/* The order is the other side's, unless only this side moved records about (a
+ * timer, list or task dragged elsewhere): then this side's, as with any value
+ * only one side changed. Told apart over the records all three have. */
+function reorderedHereOnly(base, local, remote) {
+  const inAll = new Set(base.map(x => x.id).filter(id => local.some(y => y.id === id) && remote.some(z => z.id === id)));
+  const order = list => list.map(x => x.id).filter(id => inAll.has(id)).join('\u0000');
+  const b = order(base);
+  return order(local) !== b && order(remote) === b;
+}
+/* `out` in this side's order; a record only the other side has goes after what
+ * comes before it there. */
+function inOrderOf(out, local, remote) {
+  const at = new Map(local.map((y, i) => [y.id, i]));
+  const key = new Map();
+  let prev = -1, n = 0;
+  for (const x of remote) {
+    if (at.has(x.id)) { prev = at.get(x.id); n = 0; }
+    else key.set(x.id, prev + (++n) / (remote.length + 2));
+  }
+  const k = x => (at.has(x.id) ? at.get(x.id) : key.has(x.id) ? key.get(x.id) : Infinity);
+  return out.map((x, i) => [x, i]).sort((p, q) => k(p[0]) - k(q[0]) || p[1] - q[1]).map(p => p[0]);
 }
 
 function merge(base, local, remote, opts, key) {
@@ -221,7 +245,28 @@ function keepBankWithBalance(out, base, local, remote, preferLocal) {
  * one id, the one other devices know keeps it (two tabs of Focus merging their
  * saves; between devices, the remote side is the cloud's). */
 export function syncMerge(base, local, remote, { preferLocal = false, settled = null } = {}) {
-  return settle(keepBankWithBalance(merge(base, local, remote, { preferLocal, settled }), base, local, remote, preferLocal));
+  const inCloud = settled && (rec => settled(isObj(rec) && TIMER_DEFAULT in rec ? withoutDefault(rec) : rec));   // (a timer is in the cloud without its default in it)
+  const merged = merge(withTimerDefaults(base), withTimerDefaults(local), withTimerDefaults(remote), { preferLocal, settled: inCloud });
+  return settle(keepBankWithBalance(withoutTimerDefaults(merged), base, local, remote, preferLocal));
+}
+/* Each timer's default (timerDefaults, side by side with timers: the first
+ * default is the first timer's) rides in its timer for the merge, so the two
+ * can't come apart: a timer added, removed or moved on either side keeps its
+ * own. Taken back out after. */
+const TIMER_DEFAULT = '_timerDefault';
+function withTimerDefaults(st) {
+  if (!isObj(st) || !Array.isArray(st.timers) || !Array.isArray(st.timerDefaults)) return st;
+  const { timerDefaults, ...rest } = st;
+  return { ...rest, timers: st.timers.map((t, i) => (isObj(t) && timerDefaults[i] !== undefined ? { ...t, [TIMER_DEFAULT]: timerDefaults[i] } : t)) };
+}
+const withoutDefault = t => { const { [TIMER_DEFAULT]: _, ...rest } = t; return rest; };
+function withoutTimerDefaults(st) {
+  if (!isObj(st) || !Array.isArray(st.timers) || !st.timers.some(t => isObj(t) && TIMER_DEFAULT in t)) return st;
+  return {
+    ...st,
+    timers: st.timers.map(t => (isObj(t) ? withoutDefault(t) : t)),
+    timerDefaults: st.timers.map(t => (isObj(t) && isObj(t[TIMER_DEFAULT]) ? t[TIMER_DEFAULT] : { label: t && t.label, seconds: t && t.seconds, color: t && t.color })),
+  };
 }
 /* Whether a record (an object with an id, anywhere in it) is in a state as it is. */
 export function syncRecordsIn(state) {

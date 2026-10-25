@@ -189,6 +189,49 @@ const BASE = {
       'a record changed there (and another added) is not a move: deleted here, changed there, the change stays');
   }
 
+  console.log('\n── 8. Order: a record dragged elsewhere on one side, and timers with their defaults ──');
+  {
+    const T = [['Study', 3600, '#8B5CF6'], ['Work', 14400, '#22C55E'], ['Sleep', 28800, '#378ADD']];
+    const base = clone(BASE);
+    base.timers = T.map(([label, seconds, color], id) => ({ id, label, seconds, color, running: false, startedAt: null, secondsAtStart: null }));
+    base.timerDefaults = T.map(([label, seconds, color]) => ({ label, seconds, color }));
+    const drag = (st, from, to) => {                                    // as timers.js → moveTimer does
+      const [t] = st.timers.splice(from, 1); st.timers.splice(to, 0, t);
+      const [d] = st.timerDefaults.splice(from, 1); st.timerDefaults.splice(to, 0, d);
+    };
+    const labels = st => st.timers.map(t => t.label).join(', ');
+    const paired = st => st.timers.every((t, i) => st.timerDefaults[i] && st.timerDefaults[i].label === t.label);
+    const local = clone(base); drag(local, 2, 0);                        // Sleep dragged to the top here …
+    const remote = clone(base); remote.timers[0].running = true; remote.timers[0].startedAt = 1;   // … Study started there
+    const m = syncMerge(clone(base), local, remote);
+    ok(labels(m) === 'Sleep, Study, Work' && m.timers.find(t => t.label === 'Study').running, `dragged here, started there: this side's order, with the other side's start (${labels(m)})`);
+    ok(paired(m), 'each timer with its own default');
+    const back = syncMerge(clone(base), remote, local);
+    ok(labels(back) === 'Sleep, Study, Work' && back.timers.find(t => t.label === 'Study').running && paired(back), 'and the same merged on the other device');
+    const both = clone(base); drag(both, 0, 2); both.timers[0].label = 'Shift';   // here: Work (renamed Shift), Sleep, Study
+    const r2 = clone(base); drag(r2, 1, 0);                                       // there: Work, Study, Sleep
+    eq(labels(syncMerge(clone(base), both, r2)), 'Shift, Study, Sleep', 'both sides moved records: the other side\'s order, as before (with the rename made here)');
+
+    const added = clone(local); added.timers.push({ id: 900, label: 'Piano', seconds: 1800, color: '#00aa00', running: false, startedAt: null, secondsAtStart: null });
+    added.timerDefaults.push({ label: 'Piano', seconds: 1800, color: '#00aa00' });
+    const removed = clone(base); removed.timers.splice(1, 1); removed.timerDefaults.splice(1, 1);   // Work removed there (Formats)
+    const f = syncMerge(clone(base), added, removed);
+    ok(labels(f) === 'Sleep, Study, Piano' && paired(f) && f.timerDefaults.find(d => d.label === 'Piano').seconds === 1800,
+      `a timer added and one moved here, another removed there: each left with its own default (${labels(f)})`);
+    const timer = (id, label) => ({ id, label, seconds: 1800, color: '#00aa00', running: false, startedAt: null, secondsAtStart: null });
+    const here = clone(base); here.timers.push(timer(3, 'Read')); here.timerDefaults.push({ label: 'Read', seconds: 1800, color: '#00aa00' });
+    const there = clone(base); there.timers.push(timer(3, 'Gym')); there.timerDefaults.push({ label: 'Gym', seconds: 1800, color: '#00aa00' });
+    const s = syncMerge(clone(base), here, there, { settled: syncRecordsIn(here) });
+    eq(s.timers.map(t => `${t.id}:${t.label}`).join(', '), '0:Study, 1:Work, 2:Sleep, 3:Read, 4:Gym',
+      'a timer added on each side under one id, this side\'s in the cloud already: it keeps the id (its default rides along, not in the way)');
+    ok(paired(s), 'each with its own default');
+    const inList = clone(BASE); inList.todoLists[0].tasks.push({ id: 1, text: 'Lab', done: false }, { id: 2, text: 'Read', done: false });
+    const ml = clone(inList); const [t] = ml.todoLists[0].tasks.splice(2, 1); ml.todoLists[0].tasks.unshift(t);
+    const mr = clone(inList); mr.todoLists[0].tasks[0].done = true; mr.todoLists[0].tasks.splice(2, 0, { id: 3, text: 'Quiz', done: false });
+    eq(syncMerge(clone(inList), ml, mr).todoLists[0].tasks.map(x => `${x.text}${x.done ? ' ✓' : ''}`).join(', '), 'Read, Essay ✓, Lab, Quiz',
+      'tasks too: dragged here, checked and added there; the one added goes after what comes before it there');
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
