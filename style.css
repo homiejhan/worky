@@ -3262,7 +3262,7 @@ body.motion-live .home-cal-badge.now::after { animation: nowRing 2.4s ease-out i
     overflow: visible; margin: 0; padding: 0;
   }
   .dg-toc-label { display: block; padding: 4px 10px 8px; font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-3); }
-  .dg-toc-item { background: none; border-color: transparent; border-radius: var(--radius-md); padding: 7px 10px; text-align: left; }
+  .dg-toc-item { background: none; border-color: transparent; border-radius: var(--radius-md); padding: 7px 10px; text-align: left; min-width: 0; overflow-wrap: anywhere; }
   .dg-toc-item:hover { background: var(--bg-hover); border-color: transparent; }
 }
 
@@ -3276,6 +3276,7 @@ body.motion-live .home-cal-badge.now::after { animation: nowRing 2.4s ease-out i
   scroll-margin-top: 16px;
 }
 .dg-sec-head { display: flex; align-items: center; gap: 12px; margin: 0 0 4px; font-size: 16.5px; font-weight: 650; letter-spacing: -0.005em; line-height: 1.3; color: var(--ink); }
+.dg-sec-title { min-width: 0; overflow-wrap: anywhere; }
 .dg-sec-ico {
   width: 36px; height: 36px; border-radius: 11px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
@@ -3303,6 +3304,7 @@ body.motion-live .home-cal-badge.now::after { animation: nowRing 2.4s ease-out i
   border-radius: var(--radius-md);
   background: var(--accent-dim); color: var(--ink);
   font-size: 13px; line-height: 1.4;
+  overflow-wrap: anywhere;            /* (an error from GitHub can carry a long link) */
 }
 .dg-run.err { background: var(--danger-dim); color: var(--danger); }
 .dg-run a { color: inherit; font-weight: 600; text-decoration: underline; }
@@ -3323,8 +3325,8 @@ body.motion-live .home-cal-badge.now::after { animation: nowRing 2.4s ease-out i
   border-top: 1px solid var(--border);
 }
 .dg-todo-main { flex: 1; min-width: 0; }
-.dg-todo-title { font-size: 14.5px; color: var(--ink); line-height: 1.4; }
-.dg-todo-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; font-size: 12.5px; color: var(--ink-2); line-height: 1.4; }
+.dg-todo-title { font-size: 14.5px; color: var(--ink); line-height: 1.4; overflow-wrap: anywhere; }
+.dg-todo-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; font-size: 12.5px; color: var(--ink-2); line-height: 1.4; overflow-wrap: anywhere; }
 .dg-todo-due {
   font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px;
   background: rgba(var(--accent-rgb),0.14); color: var(--accent); white-space: nowrap;
@@ -3353,8 +3355,11 @@ body.motion-live .home-cal-badge.now::after { animation: nowRing 2.4s ease-out i
 }
 .dg-todo-dismiss:hover { color: var(--ink); background: var(--bg-hover); border-color: var(--border-mid); }
 
-/* the digest's text: a size up, roomy lines, a readable measure */
-.dg-md { font-size: 15px; line-height: 1.68; color: var(--ink-2); }
+/* the digest's text: a size up, roomy lines, a readable measure. A string
+   with no spaces in it (a tracking link, a link left as raw markdown) breaks
+   wherever it must, so it stays inside the card; code blocks and tables
+   scroll in their own frames instead (below) */
+.dg-md { font-size: 15px; line-height: 1.68; color: var(--ink-2); overflow-wrap: anywhere; }
 .dg-md > :first-child { margin-top: 10px; }
 .dg-md > :not(.dg-table):not(pre) { max-width: 70ch; }
 .dg-lead .dg-md { font-size: 16.5px; line-height: 1.7; color: var(--ink); }
