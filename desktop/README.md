@@ -11,30 +11,14 @@ Focus as a round button with its checkmark, above every window on your Mac.
 It shows the live Focus site, so it is always the latest version, and it syncs
 with your other devices once signed in.
 
-## Install
+## Install and sign in
 
-1. Download **Focus-Overlay-mac.zip** from the
-   [Focus Overlay for Mac release](https://github.com/homiejhan/worky/releases/tag/desktop-latest)
-   and open it (it works on Apple Silicon and Intel Macs).
-2. Move **Focus Overlay** to **Applications**.
-3. Open it the first time:
-   - **macOS 14 and earlier:** right-click it, choose **Open**, then **Open**.
-   - **macOS 15 and later:** open it once (macOS says it can't check it), then
-     go to **System Settings → Privacy & Security**, scroll down and click
-     **Open Anyway** next to Focus Overlay.
+**[Download Focus-Overlay-mac.zip](https://github.com/homiejhan/worky/releases/download/desktop-latest/Focus-Overlay-mac.zip)**,
+then follow the steps in the [repository's README](../README.md#focus-overlay-for-mac):
+install, what to do when macOS says *"Focus Overlay" Not Opened*, and signing in.
 
-   macOS asks because the app isn't signed with an Apple developer account. Or,
-   in Terminal: `xattr -dr com.apple.quarantine "/Applications/Focus Overlay.app"`.
-
-The button appears against the right side of the screen. It has no Dock icon:
-quit it from its right-click menu.
-
-## Sign in
-
-Click the button, then **Sign in to sync**. Google's sign-in opens in your
-browser, where you're likely signed in already; pick your account, and when the
-browser asks to open Focus Overlay, allow it. The app then takes your account's
-day (it never sends its own empty one over yours).
+The first sign-in takes your account's day; the app never sends its own empty
+one over yours.
 
 ## Build it yourself
 

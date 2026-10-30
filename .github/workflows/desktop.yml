@@ -13,6 +13,7 @@ on:
   push:
     paths:
       - "desktop/**"
+      - "!desktop/**/*.md"                       # (a change to its README needs no new build)
       - ".github/workflows/desktop.yml"
   workflow_dispatch:
 
@@ -71,4 +72,8 @@ jobs:
           gh release create desktop-latest Focus-Overlay-mac.zip \
             --target "$GITHUB_SHA" \
             --title "Focus Overlay for Mac" \
-            --notes "Focus as a round button above every window: click it for your timers and today's tasks. Unzip, move Focus Overlay to Applications, then the first time right-click it and choose Open (on macOS 15 and later: open it once, then System Settings → Privacy & Security → Open Anyway). How to use it: https://homiejhan.github.io/worky/help/#overlay"
+            --notes "Focus as a round button above every window: click it for your timers and today's tasks. One app for Apple Silicon and Intel Macs.
+
+          Install: open Focus-Overlay-mac.zip, move Focus Overlay to Applications, and open it. When macOS says \"Focus Overlay\" Not Opened, click Done, then System Settings → Privacy & Security → Open Anyway (or run: xattr -dr com.apple.quarantine \"/Applications/Focus Overlay.app\").
+
+          Every step, and signing in: https://github.com/homiejhan/worky#focus-overlay-for-mac"
