@@ -1,0 +1,47 @@
+{
+  "name": "focus-overlay",
+  "productName": "Focus Overlay",
+  "version": "1.0.0",
+  "description": "Focus as a button above every window: the timers and today's tasks, a click away.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "icon": "node -e \"require('fs').mkdirSync('build',{recursive:true});require('fs').copyFileSync('../icon-512.png','build/icon.png')\"",
+    "dist:mac": "npm run icon && electron-builder --mac dir --universal"
+  },
+  "devDependencies": {
+    "electron": "44.7.2",
+    "electron-builder": "26.17.0",
+    "playwright-core": "1.64.1"
+  },
+  "build": {
+    "appId": "io.github.homiejhan.focus-overlay",
+    "productName": "Focus Overlay",
+    "files": [
+      "main.js",
+      "preload.js",
+      "snap.js"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "protocols": [
+      {
+        "name": "Focus Overlay sign-in",
+        "schemes": [
+          "focus-overlay"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.png",
+      "identity": null,
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    }
+  }
+}

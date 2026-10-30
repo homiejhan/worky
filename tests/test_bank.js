@@ -357,8 +357,12 @@ async function sealV1(payload) {
     };
     let dev = null;
     const { w, d } = await loadApp({ storage: { 'focus-tour-done': '1' }, before: w => { w.fetch = relayUp; dev = install(w); },
-      transform: (src, file) => withRelay('https://relay.example.workers.dev')(src, file)
-        .replace('window.location.href = `https://accounts.google.com', 'window.__wentTo = `https://accounts.google.com') });
+      transform: (src, file) => {
+        const out = withRelay('https://relay.example.workers.dev')(src, file);
+        const go = 'window.location.href = syncAuthUrl(SYNC_STATE_TAG);';   // (the sign-in leaves the page: kept instead)
+        if (file === 'js/sync.js' && !out.includes(go)) throw new Error('js/sync.js changed: update the sign-in hook');
+        return out.replace(go, 'window.__wentTo = syncAuthUrl(SYNC_STATE_TAG);');
+      } });
     w.openSettings('bank');
     eq(status(d), 'Sign in to Cloud sync to connect a bank.', 'signed out: asks for Cloud sync first');
     ok(d.querySelector('[data-bank="sign-in"]') && !d.querySelector('[data-bank="connect"]'), 'with a sign-in button, and no Connect');

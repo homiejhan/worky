@@ -185,6 +185,19 @@ console.log('\n── 4. Renderer is safe: raw HTML and javascript: links are ne
   ok(out.startsWith('<h2>'), 'h1 in the digest renders as h2 inside the card');
 }
 
+console.log('\n── 4a. A line with no spaces (a tracking link, a link left as raw markdown) stays inside its card ──');
+{
+  /* jsdom lays nothing out, so this holds the rules that do it (measured in Chromium:
+   * without them such a line ran 2,600 px past the card, under the contents column) */
+  const css = fs.readFileSync(path.join(DIR, 'style.css'), 'utf8');
+  const rule = sel => (css.match(new RegExp(`(?:^|\\n)\\s*${sel.replace(/[.]/g, '\\.')}\\s*\\{([^}]*)\\}`)) || [])[1] || '';
+  for (const [sel, what] of [['.dg-md', 'the digest\'s text, its links, inline code and table cells'], ['.dg-sec-title', 'a section\'s title'],
+    ['.dg-todo-title', 'a suggested task'], ['.dg-todo-sub', 'what a suggestion says it is for'], ['.dg-run', 'what GitHub says about a run']]) {
+    ok(/overflow-wrap:\s*anywhere/.test(rule(sel)), `${what}: a string with no spaces breaks to fit (${sel})`);
+  }
+  ok(/overflow-x:\s*auto/.test(rule('.dg-md pre')) && /overflow-x:\s*auto/.test(rule('.dg-table')), 'code blocks and tables scroll in their own frames instead');
+}
+
 console.log('\n── 5. Compress/decompress round trip keeps the digest ──');
 {
   const { w } = await boot();

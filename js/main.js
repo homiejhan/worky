@@ -39,6 +39,7 @@ import {
 } from './digest.js';
 import { bindStatic } from './bindings.js';
 import { applyStarterProfile, tourOffer } from './onboarding.js';
+import { overlayInit } from './overlay.js';
 
 /* Functions called by inline on…="…" handlers, in index.html and in the HTML the
  * modules render. Module code is not global, so these are the only names put on
@@ -89,6 +90,7 @@ Object.assign(window, {
   calRenderMobile();
   calTickNow();
   budgetTickDay();
+  const overlay = overlayInit();   // in the desktop app (desktop/): the button and its panel, nothing else
 
   /* Everything above was load + normalisation + rollovers, not user
    * edits: take it as the sync baseline so the first autosave (or a
@@ -129,6 +131,6 @@ Object.assign(window, {
   /* bank accounts: this device's copy of the account's banks, and a connection an OAuth bank sent back mid-way */
   bankInit();
 
-  /* onboarding: welcome + guided tour on a fresh device */
-  if (firstRun) tourOffer();
+  /* onboarding: welcome + guided tour on a fresh device (the desktop app's panel has nothing it shows) */
+  if (firstRun && !overlay) tourOffer();
 })();

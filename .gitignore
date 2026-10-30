@@ -4,3 +4,8 @@ node_modules/
 backend/bank/.env
 backend/bank/.dev.vars
 backend/bank/.wrangler/
+
+# Focus Overlay (desktop/): what a build makes
+desktop/dist/
+desktop/build/
+tests/e2e_overlay-*.png
