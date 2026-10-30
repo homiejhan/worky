@@ -86,7 +86,7 @@ function eq(a, b, msg) { ok(a === b, `${msg} (got ${JSON.stringify(a)})`); }
     ok(!!d.querySelector('#budgetContainer-d .budget-wrap'), 'and rendered');
     eq(w.eval('calTemplates.map(t => t.title).join()'), 'Study block,Lunch,Plan the week,Lights out', 'weekly calendar blocks from the template');
     eq(w.eval('dbdTasks.map(t => t.text).join(" | ")'), 'Take a look around Focus | Connect Google Calendar to bring in shifts | Mark a shift as paid and add your wage', 'Day by Day nudges toward shifts and wages');
-    eq(w.eval('theme.preset'), 'midnight', 'default theme unchanged');
+    eq(w.eval('theme.preset'), 'black', 'default theme unchanged');
     ok(d.querySelector('.welcome-sub').textContent.includes('Deadlines list'), 'the welcome card describes the working-student setup');
     const tour = w.eval('TOUR_STEPS.map(s => s.body).join(" ")');
     ok(!/Morning routine|Weekend reset|Groceries|eight ready-made/i.test(tour), 'the tour no longer names the old starter content');

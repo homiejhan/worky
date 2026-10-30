@@ -1133,6 +1133,7 @@ function syncAuthUrl(state) {
   return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
 }
 function syncConnect() {
+  if (overlayApp()) { window.focusOverlay.signIn(syncAppSignInUrl()); return; }   // the desktop app: through the browser (below)
   window.location.href = syncAuthUrl(SYNC_STATE_TAG);
 }
 /* The desktop app signs in through the browser (Google turns sign-in away in an

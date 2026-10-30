@@ -1,35 +1,36 @@
 /* ═══════════════════════════════════════════════════════
    WORKY — design tokens
-   Palette values below are the Midnight defaults; applyTheme()
+   Palette values below are the Black defaults; applyTheme()
    overwrites them at runtime from the saved theme.
    ═══════════════════════════════════════════════════════ */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
   --bg-base:     transparent;          /* panels let the ambient wash through */
-  --bg-surface:  #151823;
-  --bg-elevated: #1c202c;
-  --bg-hover:    #242938;
-  --bg-solid:    #0d0f15;              /* always opaque — html/body canvas */
-  --bg-rgb:      13,15,21;
-  --border:        rgba(238,240,244,0.07);
-  --border-mid:    rgba(238,240,244,0.12);
-  --border-strong: rgba(238,240,244,0.2);
-  --ink:    #eef0f4;
-  --ink-2:  #9aa3b2;
-  --ink-3:  #5f6878;
-  --ink-rgb: 238,240,244;
-  --accent:      #5dcaa5;
-  --accent-rgb:  93,202,165;
-  --accent-dim:  rgba(93,202,165,0.14);
-  --accent-2:    #a55dca;              /* derived: accent hue + 120° */
-  --accent-2-rgb: 165,93,202;
-  --accent-3:    #caa55d;              /* derived: accent hue + 240° */
-  --accent-3-rgb: 202,165,93;
-  --on-accent:   #0b1410;              /* readable text on a solid accent fill */
-  --danger:      #e05555;
-  --danger-rgb:  224,85,85;
-  --danger-dim:  rgba(224,85,85,0.12);
+  --bg-surface:  #000000;
+  --bg-elevated: #0b0b0b;
+  --bg-hover:    #161616;
+  --bg-solid:    #000000;              /* always opaque — html/body canvas */
+  --bg-rgb:      0,0,0;
+  --border:        rgba(255,255,255,0.38);
+  --border-mid:    rgba(255,255,255,0.6);
+  --border-strong: rgba(255,255,255,1);
+  --line:          #ffffff;            /* the theme's outlines, whole */
+  --ink:    #f2f2f2;
+  --ink-2:  #a6a6a6;
+  --ink-3:  #737373;
+  --ink-rgb: 242,242,242;
+  --accent:      #ffffff;
+  --accent-rgb:  255,255,255;
+  --accent-dim:  rgba(255,255,255,0.14);
+  --accent-2:    #ffffff;              /* derived: accent hue + 120° (a grey: the same) */
+  --accent-2-rgb: 255,255,255;
+  --accent-3:    #ffffff;              /* derived: accent hue + 240° */
+  --accent-3-rgb: 255,255,255;
+  --on-accent:   #000000;              /* readable text on a solid accent fill */
+  --danger:      #ff5c5c;
+  --danger-rgb:  255,92,92;
+  --danger-dim:  rgba(255,92,92,0.12);
   --gcal-blue:   #4285f4;
   --gcal-rgb:    66,133,244;
   --gcal-dim:    rgba(66,133,244,0.10);
@@ -45,7 +46,7 @@
   --hue-budget:   #EAB308;
   --hue-digest:   #D4537E;
 
-  --ambient-alpha: 1;                  /* JS lowers this on light themes */
+  --ambient-alpha: 0;                  /* JS: none for a grey accent, lower on light themes */
   --font-size:  14px;
   --scheme:     dark;
   --font-sans: 'DM Sans', system-ui, sans-serif;
@@ -188,7 +189,7 @@ body.format-mode .panel-header-fmt { display: flex; }
   content: '';
   position: absolute; left: 7px; right: 7px; bottom: 5px;
   height: 12px; border-radius: 12px 12px 3px 3px;
-  background: rgba(255,255,255,0.92);
+  background: var(--on-accent); opacity: 0.92;   /* (the accent can be white) */
 }
 .brand-name {
   font-family: var(--font-display);
@@ -284,6 +285,7 @@ button.brand:hover .brand-mark { transform: translateY(-1px) rotate(-4deg); }
 }
 .cal-nav-tab.active .nav-ico { background: var(--nc); color: #fff; }
 .nav-budget.active .nav-ico { color: #1f1700; }
+.nav-home.active .nav-ico { color: var(--on-accent); }   /* Home wears the accent, which can be white */
 
 .cal-week-mode-btn {
   display: none;
@@ -595,6 +597,7 @@ body.format-mode .brand-desktop { visibility: hidden; }
 }
 .side-menu-item.active .side-menu-ico { background: var(--tc); color: #fff; }
 .side-menu-item.tab-budget.active .side-menu-ico { color: #1f1700; }
+.side-menu-item.tab-home.active .side-menu-ico { color: var(--on-accent); }
 @media (min-width: 641px) { .side-menu, .side-menu-scrim { display: none; } }
 
 /* ═══════════════════════════════════════════════════════
@@ -625,6 +628,7 @@ body.format-mode .brand-desktop { visibility: hidden; }
 .wakeup-box .wakeup-check { opacity: 0; transition: opacity 0.15s; }
 .wakeup-box.checked { background: var(--accent); border-color: var(--accent); transform: scale(1.06); }
 .wakeup-box.checked .wakeup-check { opacity: 1; }
+.wakeup-box.checked .wakeup-check path { stroke: var(--on-accent); }   /* (the accent can be white) */
 .wakeup-label { font-size: 13.5px; font-weight: 600; }
 .wakeup-hint { font-size: 11px; color: var(--ink-3); margin-left: auto; white-space: nowrap; }
 .left-panel .wakeup-hint { display: none; }
@@ -947,6 +951,7 @@ body.format-mode .list-sched-row { display: flex; }
 }
 
 .dbd-check.done { background: var(--accent); border-color: var(--accent); }
+.dbd-row:not(.dbd-tagged) .dbd-check.done svg path { stroke: var(--on-accent); }   /* (a tagged one wears its list's colour) */
 /* compact "change date" button (icon only under dated headers) */
 .dbd-row .dbd-date-btn { padding: 5px 7px; opacity: 0.6; }
 .dbd-row .dbd-date-btn.has-label { padding: 4px 8px; opacity: 0.85; }
@@ -1394,6 +1399,7 @@ body.format-mode .list-sched-row { display: flex; }
 /* day-by-day tones: overdue red / today ink / upcoming muted */
 .home-dbd-check { border-color: var(--border-strong); }
 .home-dbd-check.done { background: var(--accent); border-color: var(--accent); }
+.home-dbd-check.done:not([style]) svg path { stroke: var(--on-accent); }
 .home-dbd-date {
   font-size: 10.5px; font-weight: 600;
   color: var(--ink-3);
@@ -2324,6 +2330,7 @@ body.motion-live .home-cal-badge.now::after { animation: nowRing 2.4s ease-out i
 }
 /* settings toggles use the accent instead of Google blue */
 .settings-view-row .gcal-toggle input:checked + .gcal-toggle-track { background: var(--accent); border-color: var(--accent); }
+.settings-view-row .gcal-toggle input:checked + .gcal-toggle-track::after { background: var(--on-accent); }   /* (the accent can be white) */
 
 .gcal-disconnect { color: var(--danger) !important; border-color: rgba(var(--danger-rgb),0.3) !important; }
 .gcal-detail-meta { display: flex; flex-direction: column; gap: 4px; }
@@ -2935,11 +2942,11 @@ body.motion-live .home-cal-badge.now::after { animation: nowRing 2.4s ease-out i
 
 /* preset chips */
 .theme-presets { display: flex; flex-wrap: wrap; gap: 10px 6px; }
-/* all nine presets on one line in the computer's Settings pane (5 + 4 on a phone) */
-.settings-section .theme-presets { column-gap: 2px; }
+/* the four presets on one line */
+.settings-section .theme-presets { column-gap: 12px; }
 .theme-chip {
   display: flex; flex-direction: column; align-items: center; gap: 5px;
-  width: 54px;
+  min-width: 62px; white-space: nowrap;
   font-size: 10.5px; color: var(--ink-3);
   touch-action: manipulation;
 }
@@ -2956,7 +2963,7 @@ body.motion-live .home-cal-badge.now::after { animation: nowRing 2.4s ease-out i
   background: var(--c-sf); color: var(--c-ink);
   font-size: 11px; font-weight: 600; line-height: 26px; text-align: center;
   font-family: var(--c-font, inherit);
-  box-shadow: inset 0 -4px 0 var(--c-ac);
+  box-shadow: inset 0 0 0 1.5px var(--c-line);     /* the theme's outlines */
 }
 .theme-chip:hover .theme-chip-ball { border-color: var(--border-strong); transform: translateY(-2px); }
 .theme-chip.active { color: var(--ink); }
@@ -3539,84 +3546,192 @@ body.motion-live .home-cal-badge.now::after { animation: nowRing 2.4s ease-out i
 /* ═══════════════════════════════════════════════════════
    DESKTOP OVERLAY (overlay.js, in the desktop app: desktop/)
    The window is see-through and sized by the app: the round button
-   alone, or the panel with the timers and today's tasks. The rest of
-   Focus is hidden; dialogs and toasts still show.
+   alone, or the panel with the timers, today's tasks and the Daily
+   lists. The rest of Focus is hidden; dialogs and toasts still show.
+   Plain on purpose: a typewriter's letters, small; no bar and no
+   cards, the theme's outline round the panel; colour only where it
+   says something (a timer's, a list's, red for overdue).
    ═══════════════════════════════════════════════════════ */
 .ov { display: none; }
+html.overlay-app {
+  /* (over the theme's own, which applyTheme writes on the page itself) */
+  --font-sans: 'Courier Prime', 'Courier New', Courier, monospace !important;
+  --font-mono: 'Courier Prime', 'Courier New', Courier, monospace !important;
+  --font-display: 'Courier Prime', 'Courier New', Courier, monospace;
+  --ov-text: 12px;
+  --ov-small: 11px;
+  --ov-left: minmax(210px, 250px);               /* the timers' column */
+}
 html.overlay-app, html.overlay-app body { height: 100%; background: transparent !important; overflow: hidden; }
 html.overlay-app body > :not(#overlay):not(.modal-overlay):not(#toast) { display: none !important; }
-html.overlay-app .ov { display: block; position: fixed; inset: 0; }
+html.overlay-app .ov { display: block; position: fixed; inset: 0; font-family: var(--font-sans); }
 .ov-icon, .ov-panel { display: none; }
 .ov[data-state="icon"] .ov-icon { display: flex; }
 .ov[data-state="panel"] .ov-panel { display: flex; }
 html.overlay-app:not([data-ov="panel"]) #toast { display: none; }   /* no room for it beside the button */
 
-/* the button: the checkmark, in a round of the theme (room for its shadow around it) */
+/* the button: the checkmark, on the theme's background in its outline (room for its shadow around it) */
 .ov-icon {
   position: absolute; inset: 7px;
   align-items: center; justify-content: center;
   border-radius: 50%;
-  color: var(--accent);
-  background: radial-gradient(circle at 32% 26%, color-mix(in srgb, var(--accent) 24%, var(--bg-elevated)), var(--bg-elevated) 72%);
-  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border-mid));
-  box-shadow: 0 3px 10px rgba(0,0,0,0.45);
+  color: var(--ink);
+  background: var(--bg-solid);
+  border: 1px solid var(--line);
+  box-shadow: 0 3px 10px rgba(0,0,0,0.4);
   cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
   transition: transform 0.15s var(--ease);
 }
 .ov-icon:hover { transform: scale(1.06); }
 .ov-icon:active { cursor: grabbing; transform: scale(0.96); }
-.ov-icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.ov-icon svg { width: 26px; height: 26px; }
+.ov-icon:focus-visible { outline: 2px solid var(--line); outline-offset: 2px; }
+.ov-icon svg { width: 24px; height: 24px; }
 
-/* the panel: timers on the left, today's tasks (or the Daily lists) on the right */
+/* the panel: timers on the left, today's tasks and the Daily lists on the right */
 .ov-panel {
   position: absolute; inset: 8px;
   flex-direction: column;
   background: var(--bg-solid);
-  border: 1px solid var(--border-mid);
-  border-radius: 18px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.4);
   overflow: hidden;
+  color: var(--ink);
+  font-size: var(--ov-text);
+  line-height: 1.5;
 }
-.ov-head {
-  display: flex; align-items: center; gap: 10px;
-  padding: 9px 10px 9px 16px;
-  border-bottom: 1px solid var(--border);
+/* along the top, no bar: the columns' names, which the panel is dragged by, and the corner */
+.ov-top {
+  display: grid; grid-template-columns: var(--ov-left) minmax(0, 1fr) auto; align-items: center;
+  padding: 7px 7px 0 0;
   user-select: none; -webkit-user-select: none;
-  -webkit-app-region: drag;                      /* the header moves the panel */
+  -webkit-app-region: drag;
 }
-.ov-head button { -webkit-app-region: no-drag; }
-.ov-brand { display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--ink); }
-.ov-brand b { font-weight: 650; }
-.ov-brand svg { width: 18px; height: 18px; color: var(--accent); }
-.ov-tabs { display: flex; gap: 2px; padding: 3px; margin-left: 6px; border-radius: 999px; background: var(--bg-surface); border: 1px solid var(--border); }
-.ov-tab {
-  padding: 4px 13px; border: none; border-radius: 999px;
-  font-size: 12.5px; font-weight: 600; color: var(--ink-3); background: none; cursor: pointer;
+.ov-label { padding: 0 18px; font-size: var(--ov-small); letter-spacing: 0.08em; color: var(--ink-3); }
+.ov-ctl { display: flex; align-items: center; gap: 2px; -webkit-app-region: no-drag; }
+.ov-btn {
+  height: 22px; min-width: 22px; padding: 0 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; border-radius: 4px;
+  font-size: var(--ov-text); line-height: 1; color: var(--ink-3);
 }
-.ov-tab:hover { color: var(--ink); }
-.ov-tab[aria-selected="true"] { color: var(--ink); background: var(--bg-elevated); box-shadow: 0 1px 3px rgba(0,0,0,0.25); }
-.ov-signin {
-  margin-left: auto; padding: 5px 12px; border-radius: 999px; cursor: pointer;
-  font-size: 12.5px; font-weight: 600; color: var(--accent);
-  background: var(--accent-dim); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+.ov-btn:hover, .ov-btn[aria-expanded="true"] { color: var(--ink); border-color: var(--border-mid); }
+.ov-btn:focus-visible { outline: 1px solid var(--line); outline-offset: 0; border-radius: 4px; }
+.ov-btn[hidden], .ov-fmt { display: none; }
+body.format-mode .ov-fmt { display: inline-flex; color: var(--ink); }   /* Formats on: templates, done */
+.ov-signin { color: var(--ink); border-color: var(--border-mid); }
+.ov-more, .ov-min { font-size: 15px; }
+
+/* ⋯ */
+.ov-menu {
+  position: absolute; top: 34px; right: 10px; z-index: 5;
+  display: flex; flex-direction: column; min-width: 180px; padding: 4px;
+  background: var(--bg-solid); border: 1px solid var(--line); border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
 }
-.ov-signin[hidden] { display: none; }
-.ov-min {
-  margin-left: auto; width: 30px; height: 30px; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: 50%; border: 1px solid transparent; background: none; color: var(--ink-2); cursor: pointer;
+.ov-menu[hidden] { display: none; }
+.ov-menu button { padding: 5px 9px; text-align: left; font-size: var(--ov-text); color: var(--ink); border-radius: 4px; }
+.ov-menu button:hover, .ov-menu button:focus-visible { background: var(--bg-hover); outline: none; }
+.ov-menu [data-ov-do="browser"] { margin-top: 4px; position: relative; }
+.ov-menu [data-ov-do="browser"]::before { content: ''; position: absolute; left: 4px; right: 4px; top: -3px; border-top: 1px solid var(--border); }
+.ov-menu [data-ov-do="app"] { color: var(--ink-2); }
+
+.ov-cols { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--ov-left) minmax(0, 1fr); }
+.ov-col { min-height: 0; overflow-y: auto; padding: 6px 18px 16px; scrollbar-width: thin; }
+
+/* buttons and boxes in the columns: small, outlined */
+.ov-col .task-check { width: 12px; height: 12px; border-width: 1px; border-radius: 2px; }
+.ov-col .task-check svg { width: 8px; height: 8px; }
+.ov-col .task-check:hover { transform: none; border-color: var(--ink-2); }
+.ov-col .task-row { gap: 9px; padding: 1px 0; border-radius: 0; }
+.ov-col .task-text, .ov-col .home-task-text { height: 18px; line-height: 18px; padding: 0; }   /* a line each, the same in both lists */
+.ov-col .task-row:hover { background: none; }
+.ov-col .color-swatch { display: none; width: 9px; height: 9px; }
+body.format-mode .ov-col .color-swatch { display: block; }   /* colours are changed in Formats */
+.ov-col .fmt-add-timer, .ov-col .fmt-add-daily {
+  padding: 3px 8px; font-size: var(--ov-small); border-radius: 4px; border-color: var(--border-mid);
 }
-.ov-signin:not([hidden]) + .ov-min { margin-left: 4px; }
-.ov-min:hover { color: var(--ink); background: var(--bg-hover); border-color: var(--border-mid); }
-.ov-min svg { width: 16px; height: 16px; }
-.ov-cols { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); }
-.ov-col { min-height: 0; overflow-y: auto; padding: 14px; scrollbar-width: thin; }
-.ov-timers { border-right: 1px solid var(--border); }
-.ov[data-tab="today"] #defaultContainer-d, .ov[data-tab="daily"] #homeContainer-d { display: none; }
-/* Today: Home's progress bar, today's tasks and the starred Daily lists, no more */
-.ov #homeContainer-d { max-width: none; margin: 0; padding: 0; gap: 16px; }
-.ov #homeContainer-d > :not(.home-hero):not(.home-sec-today):not(.home-sec-daily) { display: none; }
-.ov #homeContainer-d .home-hero { margin: 0; }
-.ov #homeContainer-d .home-hero-top, .ov #homeContainer-d .home-digest-btn { display: none; }
-.ov #defaultContainer-d { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.ov-col .fmt-add-timer { margin-top: 8px; }
+.ov-col .fmt-add-daily { align-self: flex-start; margin: 0 0 8px; }
+.ov-col .fmt-add-timer:hover, .ov-col .fmt-add-daily:hover { border-color: var(--line); color: var(--ink); background: none; }
+.ov-col .fmt-remove-timer, .ov-col .fmt-remove-daily, .ov-col .list-sched-btn, .ov-col .task-del, .ov-col .list-star-btn { width: 18px; height: 18px; font-size: 13px; }
+.ov-col .drag-handle, .ov-col .list-drag-handle { width: 10px; }
+
+/* timers: a line each, the name and the time in the timer's colour, play and reset after */
+.ov .timer-stack { gap: 0; }
+.ov .timer-card {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 0; overflow: visible;
+  background: none; border: none; border-radius: 0; box-shadow: none;
+}
+.ov .timer-card::before, .ov .timer-progress, .ov .timer-sub { display: none; }
+.ov .timer-card:hover, .ov .timer-card.running { box-shadow: none; }
+.ov .timer-header { flex: 1; min-width: 0; margin: 0; gap: 7px; }
+.ov .timer-drag-handle { width: 10px; margin: 0 -3px 0 -14px; padding: 0; opacity: 0; }
+.ov .timer-card:hover .timer-drag-handle { opacity: 0.6; }
+.ov .timer-title-input { font-size: var(--ov-text); font-weight: 400; color: var(--tc); text-overflow: ellipsis; }
+.ov .timer-body { flex: none; gap: 5px; }
+.ov .timer-display { flex: none; font-size: var(--ov-text); font-weight: 400; letter-spacing: 0; line-height: inherit; color: var(--tc); }
+.ov .timer-card.running .timer-display { font-weight: 700; }
+.ov .timer-time-edit { flex: none; width: 72px; font-size: var(--ov-text); padding: 0 4px; border-radius: 3px; }
+.ov .play-btn, .ov .reset-btn {
+  width: 18px; height: 18px; border-radius: 4px;
+  border: 1px solid var(--border-mid); background: none; color: var(--ink-2); box-shadow: none;
+}
+.ov .play-btn svg, .ov .reset-btn svg { width: 7px; height: 8px; }
+.ov .play-btn:hover, .ov .reset-btn:hover, .ov .play-btn.running { border-color: var(--tc); color: var(--tc); background: none; box-shadow: none; }
+.ov .timer-card.timer-drop-before { box-shadow: 0 -1px 0 var(--line); }
+.ov .timer-card.timer-drop-after  { box-shadow: 0 1px 0 var(--line); }
+
+/* today: Home's progress and today's tasks (no title: "today" heads the column), the text in its list's colour */
+.ov #homeContainer-d { display: block; max-width: none; margin: 0; padding: 0; }
+.ov #homeContainer-d > :not(.home-hero):not(.home-sec-today) { display: none; }
+.ov #homeContainer-d .home-hero { margin: 0; padding: 0; background: none; border: none; box-shadow: none; }
+.ov #homeContainer-d .home-hero-top, .ov #homeContainer-d .home-digest-btn, .ov .home-sec-today .home-section-title { display: none; }
+.ov .home-progress { margin: 0 0 8px; max-width: none; }
+.ov .home-progress-meta { margin-bottom: 4px; }
+.ov .home-progress-label, .ov .home-progress-pct { font-size: var(--ov-small); font-weight: 400; color: var(--ink-3); }
+.ov .home-progress-track { height: 1px; border: none; border-radius: 0; background: var(--border); }
+.ov .home-progress-fill, .ov .home-progress.complete .home-progress-fill { border-radius: 0; background: var(--ink-2); box-shadow: none; }
+.ov .home-progress.complete .home-progress-label, .ov .home-progress.complete .home-progress-pct { color: var(--ink-2); }
+.ov .home-sec-today { margin: 0; }
+.ov .home-sec-today .home-card { padding: 0; background: none; border: none; box-shadow: none; }
+.ov .home-dbd-tag { display: none; }
+.ov .home-dbd-check { border-color: color-mix(in srgb, var(--lc, var(--ink-3)) 70%, transparent); }
+.ov .home-task-text { font-size: var(--ov-text); color: var(--lc, var(--ink)); }
+.ov .home-tone-overdue .home-task-text { color: var(--lc, var(--ink)); font-weight: 700; }
+.ov .home-tone-overdue .home-dbd-check { border-color: color-mix(in srgb, var(--lc, var(--ink-3)) 70%, transparent); }
+.ov .home-tone-future { opacity: 0.6; }
+.ov .home-tone-future .home-task-text { color: var(--lc, var(--ink)); }
+.ov .home-task-text.done { color: var(--ink-3); font-weight: 400; }
+.ov .home-dbd-date { padding: 0; font-size: var(--ov-small); font-weight: 400; color: var(--ink-3); background: none; }
+.ov .home-tone-overdue .home-dbd-date { color: var(--danger); background: none; }
+.ov .home-dbd-cal { font-size: var(--ov-small); color: var(--ink-3) !important; }
+.ov .home-muted-note { padding: 2px 0; font-size: var(--ov-small); }
+.ov-none { display: none; font-size: var(--ov-small); color: var(--ink-3); }
+.ov-tasks:not(:has(.home-sec-today)) .ov-none { display: block; }
+
+/* daily: each list's name in its colour, its tasks under it */
+.ov .ov-label-daily { padding: 16px 0 6px; }
+.ov #defaultContainer-d { display: flex; flex-direction: column; gap: 12px; }
+.ov .todo-card, .ov .todo-card.starred, .ov .todo-card:hover {
+  overflow: visible; background: none; border: none; border-radius: 0; box-shadow: none;
+}
+.ov .todo-accent-strip { display: none; }
+.ov .todo-card-header { padding: 0; gap: 6px; background: none; border: none; }
+.ov .todo-title-input { font-size: var(--ov-text); font-weight: 700; color: var(--lc); }
+.ov .list-star-btn:not(.starred) { opacity: 0; }
+.ov .todo-card:hover .list-star-btn { opacity: 1; }
+.ov .list-star-btn:hover { background: none; transform: none; }
+.ov .list-star-btn svg { width: 11px; height: 11px; }
+.ov .list-sched-row { padding: 0 0 2px; border: none; }
+.ov .list-sched-pill { padding: 0; font-size: var(--ov-small); font-weight: 400; color: var(--ink-3); background: none; }
+.ov .todo-tasks { padding: 2px 0 0; min-height: 0; }
+.ov .todo-card .task-text { font-size: var(--ov-text); }
+.ov .todo-card .task-text.done { color: var(--ink-3); }
+.ov .todo-card .task-del, .ov .todo-add-task { display: none; }
+body.format-mode .ov .todo-card .task-del { display: flex; }                 /* (a Daily list's tasks change in Formats) */
+body.format-mode .ov .todo-add-task { display: block; padding: 0; }
+.ov .add-task-btn { padding: 2px 0; font-size: var(--ov-small); }
+.ov .add-task-btn:hover { background: none; }
+.ov .daily-empty { padding: 0; border: none; text-align: left; font-size: var(--ov-small); }

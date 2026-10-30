@@ -57,6 +57,7 @@ function ambientSetMotion(on) {
 function ambientMoving() {
   if (!ambientCtx || !ambientMotionOn() || (ambientReduced && ambientReduced.matches) || document.hidden) return false;
   if (document.documentElement.classList.contains('overlay-app')) return false;   // the desktop app's button and panel cover none of it
+  if (document.documentElement.style.getPropertyValue('--ambient-alpha').trim() === '0') return false;   // a theme without them (a grey accent: theme.js)
 
   const bg = $('themeBg');
   if (bg && bg.classList.contains('on')) return false;      // a background image covers them

@@ -23,17 +23,18 @@ const THEME_BG_LS_KEY   = 'focus-theme-bg';
 const THEME_BG_MAX_EDGE = 1920;      // uploaded images are downscaled to this
 const THEME_BG_MAX_B64  = 2.5e6;     // and refused above ~2.5 MB encoded
 
+/* Four themes, each a background and the outlines drawn on it (line). Text and
+ * the accent are black, white or grey to match: the colour comes from the timers
+ * and lists themselves. */
 const THEME_PRESETS = [
-  { id: 'midnight', name: 'Midnight', bg: '#0d0f15', surface: '#151823', ink: '#eef0f4', ink2: '#9aa3b2', ink3: '#5f6878', accent: '#5dcaa5', danger: '#e05555', font: 'DM Sans',        radius: 12 },
-  { id: 'daylight', name: 'Daylight', bg: '#f3f4f8', surface: '#ffffff', ink: '#15171b', ink2: '#5a6070', ink3: '#9aa1ad', accent: '#2f6fe0', danger: '#cf3d3d', font: 'DM Sans',        radius: 12 },
-  { id: 'forest',   name: 'Forest',   bg: '#0c1611', surface: '#132019', ink: '#e4efe7', ink2: '#93a89b', ink3: '#54685c', accent: '#e0b84f', danger: '#e26a5a', font: 'Manrope',        radius: 14 },
-  { id: 'ocean',    name: 'Ocean',    bg: '#081020', surface: '#0f1a2e', ink: '#e2ebf7', ink2: '#93a3bd', ink3: '#54637d', accent: '#5aa9ff', danger: '#ef6262', font: 'Inter',          radius: 10 },
-  { id: 'ember',    name: 'Ember',    bg: '#16100d', surface: '#1e1712', ink: '#f3eae0', ink2: '#b39d8a', ink3: '#6f5f52', accent: '#f0894a', danger: '#e05555', font: 'Nunito',         radius: 16 },
-  { id: 'lavender', name: 'Lavender', bg: '#13111c', surface: '#1b1828', ink: '#ebe8f5', ink2: '#a29dbd', ink3: '#625d7c', accent: '#b49cff', danger: '#f0668a', font: 'Space Grotesk',  radius: 14 },
-  { id: 'sunset',   name: 'Sunset',   bg: '#170f14', surface: '#20151c', ink: '#f6e9ee', ink2: '#b8a0ab', ink3: '#725e68', accent: '#ff7a8a', danger: '#e05555', font: 'DM Sans',        radius: 16 },
-  { id: 'rose',     name: 'Rosé',     bg: '#fbf3f5', surface: '#ffffff', ink: '#2b1f25', ink2: '#6f5d65', ink3: '#a8979f', accent: '#c94d7a', danger: '#c8403a', font: 'Lora',           radius: 16 },
-  { id: 'sky',      name: 'Sky',      bg: '#eef4fb', surface: '#ffffff', ink: '#14202e', ink2: '#57677a', ink3: '#93a2b3', accent: '#1f8fd8', danger: '#d4463f', font: 'Manrope',        radius: 14 },
+  { id: 'black',     name: 'Black',      bg: '#000000', surface: '#000000', line: '#ffffff', ink: '#f2f2f2', ink2: '#a6a6a6', ink3: '#737373', accent: '#ffffff', danger: '#ff5c5c', font: 'DM Sans', radius: 12 },
+  { id: 'darkgrey',  name: 'Dark grey',  bg: '#2a2a2a', surface: '#2a2a2a', line: '#8c8c8c', ink: '#ededed', ink2: '#b3b3b3', ink3: '#858585', accent: '#e6e6e6', danger: '#ff6b6b', font: 'DM Sans', radius: 12 },
+  { id: 'lightgrey', name: 'Light grey', bg: '#d9d9d9', surface: '#d9d9d9', line: '#4d4d4d', ink: '#1a1a1a', ink2: '#454545', ink3: '#6b6b6b', accent: '#1f1f1f', danger: '#c62828', font: 'DM Sans', radius: 12 },
+  { id: 'white',     name: 'White',      bg: '#ffffff', surface: '#ffffff', line: '#000000', ink: '#111111', ink2: '#555555', ink3: '#8a8a8a', accent: '#000000', danger: '#d32f2f', font: 'DM Sans', radius: 12 },
 ];
+/* The themes there were before these: a light one is White now, a dark one
+ * (Midnight, the default, and the rest) Black, the first. */
+const THEME_LEGACY = { daylight: 'white', rose: 'white', sky: 'white' };
 
 /* Curated Google Fonts; anything else typed in is fetched by name. */
 const THEME_FONTS = [
@@ -55,6 +56,7 @@ const THEME_CUSTOM_FONT = '__custom';
 const THEME_COLOR_FIELDS = [
   { key: 'bg',      label: 'Background' },
   { key: 'surface', label: 'Panels' },
+  { key: 'line',    label: 'Outlines' },
   { key: 'ink',     label: 'Text' },
   { key: 'ink2',    label: 'Secondary text' },
   { key: 'ink3',    label: 'Muted text' },
@@ -62,7 +64,10 @@ const THEME_COLOR_FIELDS = [
   { key: 'danger',  label: 'Danger' },
 ];
 
-export function themePreset(id) { return THEME_PRESETS.find(p => p.id === id) || THEME_PRESETS[0]; }
+export function themePreset(id) {
+  const want = THEME_LEGACY[id] || id;
+  return THEME_PRESETS.find(p => p.id === want) || THEME_PRESETS[0];
+}
 
 export function themeIsHex(s) { return typeof s === 'string' && /^#[0-9a-f]{6}$/i.test(s); }
 function themeNum(v, min, max, dflt) {
@@ -76,14 +81,16 @@ export function normalizeTheme(v) {
   const base = themePreset(v && v.preset);
   const out = {
     preset:  base.id,
-    bg: base.bg, surface: base.surface,
+    bg: base.bg, surface: base.surface, line: base.line,
     ink: base.ink, ink2: base.ink2, ink3: base.ink3,
     accent: base.accent, danger: base.danger,
     font: base.font, fontSize: 14, radius: base.radius,
     bgMode: '', bgUrl: '', bgDim: 40, bgBlur: 0, bgGlass: 35,
   };
   if (!v || typeof v !== 'object') return out;
-  if (v.preset === 'custom') out.preset = 'custom';
+  /* a custom theme saved before outlines had a colour of their own has none
+   * (''): they're drawn from its text, as they were then */
+  if (v.preset === 'custom') { out.preset = 'custom'; out.line = ''; }
   THEME_COLOR_FIELDS.forEach(f => { if (themeIsHex(v[f.key])) out[f.key] = v[f.key].toLowerCase(); });
   if (typeof v.font === 'string' && v.font.trim()) out.font = v.font.trim().slice(0, 60);
   out.fontSize = themeNum(v.fontSize, 12, 18, 14);
@@ -109,6 +116,7 @@ export function compressTheme(t) {
   const n = normalizeTheme(t);
   const o = { p: n.preset, b: n.bg, s: n.surface, t: n.ink, t2: n.ink2, t3: n.ink3,
               a: n.accent, d: n.danger, f: n.font, fs: n.fontSize, r: n.radius };
+  if (n.line) o.l = n.line;
   if (n.bgMode) { o.im = n.bgMode; o.id = n.bgDim; o.ib = n.bgBlur; o.ig = n.bgGlass; }
   if (n.bgMode === 'url') o.iu = n.bgUrl;
   return o;
@@ -116,7 +124,7 @@ export function compressTheme(t) {
 export function decompressTheme(c) {
   if (!c || typeof c !== 'object') return normalizeTheme(null);
   return normalizeTheme({
-    preset: c.p, bg: c.b, surface: c.s, ink: c.t, ink2: c.t2, ink3: c.t3,
+    preset: c.p, bg: c.b, surface: c.s, line: c.l, ink: c.t, ink2: c.t2, ink3: c.t3,
     accent: c.a, danger: c.d, font: c.f, fontSize: c.fs, radius: c.r,
     bgMode: c.im, bgUrl: c.iu, bgDim: c.id, bgBlur: c.ib, bgGlass: c.ig,
   });
@@ -141,9 +149,12 @@ export function themeLuma(h) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 function themeRgbStr(h) { return themeHexToRgb(h).join(','); }
+function themeIsGrey(h) { const [r, g, b] = themeHexToRgb(h); return r === g && g === b; }
 /* Rotate a hex colour's hue by `deg` (keeps saturation/lightness) — used to
- * derive the two companion accents that colour the ambient wash. */
+ * derive the two companion accents that colour the ambient wash. A grey has no
+ * hue to turn: its companions are the same grey. */
 function themeRotate(hex, deg) {
+  if (themeIsGrey(hex)) return hex;
   let [r, g, b] = themeHexToRgb(hex).map(x => x / 255);
   const max = Math.max(r, g, b), min = Math.min(r, g, b);
   let h = 0, sat = 0; const l = (max + min) / 2;
@@ -222,10 +233,16 @@ export function applyTheme() {
   root.setProperty('--ink-2', t.ink2);
   root.setProperty('--ink-3', t.ink3);
   root.setProperty('--ink-rgb', themeRgbStr(t.ink));
-  const bAlpha = light ? [0.08, 0.14, 0.22] : [0.06, 0.11, 0.18];
-  root.setProperty('--border',        themeRgba(t.ink, bAlpha[0]));
-  root.setProperty('--border-mid',    themeRgba(t.ink, bAlpha[1]));
-  root.setProperty('--border-strong', themeRgba(t.ink, bAlpha[2]));
+  /* Outlines: in the theme's line colour, softer for the everyday borders
+   * around cards and between rows, whole for the strong ones and --line (the
+   * overlay's panel, overlay.js). A theme without a line colour draws them from
+   * its text, faintly. */
+  const line = t.line || t.ink;
+  const bAlpha = t.line ? [0.38, 0.6, 1] : (light ? [0.08, 0.14, 0.22] : [0.06, 0.11, 0.18]);
+  root.setProperty('--border',        themeRgba(line, bAlpha[0]));
+  root.setProperty('--border-mid',    themeRgba(line, bAlpha[1]));
+  root.setProperty('--border-strong', themeRgba(line, bAlpha[2]));
+  root.setProperty('--line',          t.line || themeRgba(line, bAlpha[2]));
   root.setProperty('--accent',     t.accent);
   root.setProperty('--accent-rgb', themeRgbStr(t.accent));
   root.setProperty('--accent-dim', themeRgba(t.accent, light ? 0.12 : 0.14));
@@ -235,7 +252,12 @@ export function applyTheme() {
   root.setProperty('--accent-3',     acc3);
   root.setProperty('--accent-3-rgb', themeRgbStr(acc3));
   root.setProperty('--on-accent',    themeLuma(t.accent) > 0.62 ? themeMix(t.bg, '#000000', light ? 0.85 : 0.9) : '#ffffff');
-  root.setProperty('--ambient-alpha', light ? '0.75' : '1');
+  /* the lights behind everything (ambient.js) are in the accent's colours; a
+   * grey accent (the four themes) has none, so the background stays plain */
+  const plain = themeIsGrey(t.accent);
+  root.setProperty('--ambient-alpha', plain ? '0' : light ? '0.75' : '1');
+  /* (nor does Settings offer to move what isn't there) */
+  document.querySelectorAll('.settings-motion-row, #themeMotionHint').forEach(el => { el.style.display = plain ? 'none' : ''; });
   root.setProperty('--star', light ? '#c8921a' : '#E8B341');
   root.setProperty('--danger',     t.danger);
   root.setProperty('--danger-rgb', themeRgbStr(t.danger));
@@ -271,7 +293,7 @@ export function applyTheme() {
 export function themeApplyPreset(id) {
   const p = themePreset(id);
   const t = themeGet();
-  Object.assign(t, { preset: p.id, bg: p.bg, surface: p.surface, ink: p.ink, ink2: p.ink2, ink3: p.ink3,
+  Object.assign(t, { preset: p.id, bg: p.bg, surface: p.surface, line: p.line, ink: p.ink, ink2: p.ink2, ink3: p.ink3,
                      accent: p.accent, danger: p.danger, font: p.font, radius: p.radius });
   themeCommit();
 }
@@ -349,9 +371,16 @@ export function renderThemePresets(containerId) {
   const cur = themeGet().preset;
   el.innerHTML = THEME_PRESETS.map(p => `
     <button class="theme-chip${p.id === cur ? ' active' : ''}" data-preset="${p.id}" title="${escAttr(p.name)}"
-      style="--c-bg:${p.bg};--c-sf:${p.surface};--c-ink:${p.ink};--c-ac:${p.accent};--c-font:${escAttr(themeFontStack(p.font))}">
+      style="--c-bg:${p.bg};--c-sf:${p.surface};--c-line:${p.line};--c-ink:${p.ink};--c-ac:${p.accent};--c-font:${escAttr(themeFontStack(p.font))}">
       <span class="theme-chip-ball"></span>${escAttr(p.name)}
     </button>`).join('');
+}
+
+/* What a colour row shows: the colour, or for outlines drawn from the text (a
+ * custom theme from before they had a colour) about what they look like. */
+function themeFieldColor(t, key) {
+  if (key === 'line' && !t.line) return themeMix(t.bg, t.ink, themeLuma(t.bg) > 0.5 ? 0.22 : 0.18);
+  return t[key];
 }
 
 export function renderThemeUI() {
@@ -362,10 +391,10 @@ export function renderThemeUI() {
   if (grid) {
     grid.innerHTML = THEME_COLOR_FIELDS.map(f => `
       <div class="theme-color-row">
-        <input type="color" class="theme-swatch" data-th="${f.key}" value="${t[f.key]}" aria-label="${escAttr(f.label)}">
+        <input type="color" class="theme-swatch" data-th="${f.key}" value="${themeFieldColor(t, f.key)}" aria-label="${escAttr(f.label)}">
         <div class="theme-color-meta">
           <span class="theme-color-name">${f.label}</span>
-          <input type="text" class="theme-hex" data-thhex="${f.key}" value="${t[f.key]}" maxlength="7" spellcheck="false" autocomplete="off">
+          <input type="text" class="theme-hex" data-thhex="${f.key}" value="${themeFieldColor(t, f.key)}" maxlength="7" spellcheck="false" autocomplete="off">
         </div>
       </div>`).join('');
   }
@@ -403,10 +432,10 @@ export function renderThemeUI() {
   themeRenderResetBtn();
 }
 
-/* The preset Reset returns to: the current one, or Midnight from a custom theme. */
+/* The preset Reset returns to: the current one, or Black (the first) from a custom theme. */
 function themeResetTarget() {
   const t = themeGet();
-  return themePreset(t.preset === 'custom' ? 'midnight' : t.preset);
+  return themePreset(t.preset === 'custom' ? THEME_PRESETS[0].id : t.preset);
 }
 function themeRenderResetBtn() {
   const r = $('thResetBtn');

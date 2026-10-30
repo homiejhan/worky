@@ -30,6 +30,10 @@ function withCanvas(state) {
   };
 }
 async function frames(state, ms) { const n = state.frames; await sleep(ms); return state.frames - n; }
+/* The lights are in the theme's accent colours, and the four themes' accents
+ * are grey, with none (theme.js): so a check of how they move first gives the
+ * theme a coloured accent, as a custom theme can have. */
+const colourful = (w, accent = '#5dcaa5') => w.themeSet('accent', accent);
 
 (async () => {
   console.log('\n── 1. Without a canvas: the still picture ──');
@@ -46,6 +50,7 @@ async function frames(state, ms) { const n = state.frames; await sleep(ms); retu
   {
     const S = {};
     const { w, d } = await loadApp({ storage: BOOT, before: withCanvas(S) });
+    colourful(w);
     const host = d.getElementById('ambient');
     const canvas = host.querySelector('canvas.ambient-canvas');
     ok(canvas && host.classList.contains('has-canvas'), 'a canvas takes the blobs\' place');
@@ -65,6 +70,7 @@ async function frames(state, ms) { const n = state.frames; await sleep(ms); retu
   {
     const S = {};
     const { w, d } = await loadApp({ storage: BOOT, before: withCanvas(S) });
+    colourful(w);
     await sleep(300);
     S.focused = false; w.dispatchEvent(new w.Event('blur'));
     await sleep(250);
@@ -113,6 +119,7 @@ async function frames(state, ms) { const n = state.frames; await sleep(ms); retu
   {
     const S = {};
     const { w, d } = await loadApp({ storage: BOOT, before: withCanvas(S) });
+    colourful(w);
     const toggle = d.getElementById('themeMotionToggle');
     ok(toggle.checked && d.body.classList.contains('bg-motion'), 'on unless turned off (Settings → Appearance)');
     toggle.checked = false; toggle.dispatchEvent(new w.Event('change', { bubbles: true }));
@@ -121,7 +128,7 @@ async function frames(state, ms) { const n = state.frames; await sleep(ms); retu
     eq(await frames(S, 800), 0, 'and it holds still');
     ok(!d.body.classList.contains('motion-live') && !d.body.classList.contains('bg-motion'), 'with the little motions off');
     const before = S.frames;
-    w.themeApplyPreset('daylight');
+    colourful(w, '#2f6fe0');
     ok(S.frames === before + 1, 'a new theme: one still frame in its colors');
     toggle.checked = true; toggle.dispatchEvent(new w.Event('change', { bubbles: true }));
     eq(w.localStorage.getItem('focus-bg-motion'), '1', 'on again');
@@ -132,14 +139,31 @@ async function frames(state, ms) { const n = state.frames; await sleep(ms); retu
       withCanvas(R)(win);
       win.matchMedia = q => ({ matches: /reduce/.test(q), addListener() {}, removeListener() {} });
     } });
+    colourful(reduced.w);
     await sleep(300);
     ok(R.frames >= 1 && await frames(R, 800) === 0 && !reduced.d.body.classList.contains('motion-live'),
       'Reduce motion on in the system: the still frame only');
 
     const O = {};
     const off = await loadApp({ storage: { ...BOOT, 'focus-bg-motion': '0' }, before: withCanvas(O) });
+    colourful(off.w);
     await sleep(300);
     ok(!off.d.getElementById('themeMotionToggle').checked && O.frames >= 1 && await frames(O, 800) === 0, 'turned off, Focus opens still');
+  }
+
+  console.log('\n── 5. The four themes: a plain background ──');
+  {
+    const S = {};
+    const { w, d } = await loadApp({ storage: BOOT, before: withCanvas(S) });
+    await sleep(300);
+    eq(d.documentElement.style.getPropertyValue('--ambient-alpha').trim(), '0', 'Black (the first, and the default): its grey accent has no colours, so no lights show');
+    eq(await frames(S, 800), 0, 'and none are drawn moving');
+    ok(!d.body.classList.contains('motion-live'), 'nor the little motions');
+    colourful(w);
+    ok(await frames(S, 800) >= 4, 'a custom theme with a coloured accent: they move');
+    w.themeApplyPreset('white');
+    await sleep(250);
+    ok(d.documentElement.style.getPropertyValue('--ambient-alpha').trim() === '0' && await frames(S, 800) === 0, 'White: plain again, nothing drawn');
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

@@ -91,7 +91,7 @@ console.log('\n── 5. Controls inside panes still work ──');
   ok(d.querySelector('.tab-btn[data-view="budget"]').style.display === 'none', 'view toggle still hides a tab');
   eq(activeSections(d).join(','), 'views', 'toggling re-renders without leaving the section');
   d.querySelector('[data-settings-nav="appearance"]').click();
-  d.querySelector('#themePresets-s [data-preset="daylight"]').click();
+  d.querySelector('#themePresets-s [data-preset="white"]').click();
   eq(w.document.documentElement.style.getPropertyValue('--scheme').trim(), 'light', 'preset chip still applies a theme');
   d.getElementById('themeOpenBtn').click();
   ok(d.getElementById('themeModal').classList.contains('show') && !d.getElementById('settingsModal').classList.contains('show'), 'Customize theme still hands off to the editor');

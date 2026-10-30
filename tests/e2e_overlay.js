@@ -52,10 +52,21 @@ const server = http.createServer((req, res) => {
     const b = await win(app);
     await page.mouse.move(Math.round(x - b.x), Math.round(y - b.y));
   }
+  /* pressed at `from`, moved through each point of `to` (one, or a list), let go */
   async function drag(app, page, from, to, steps = 14) {
+    const start = await win(app);
     await mouseTo(app, page, from.x, from.y);
     await page.mouse.down();
-    for (let i = 1; i <= steps; i++) await mouseTo(app, page, from.x + (to.x - from.x) * i / steps, from.y + (to.y - from.y) * i / steps);
+    let at = from;
+    for (const next of [].concat(to)) {
+      for (let i = 1; i <= steps; i++) {
+        const x = at.x + (next.x - at.x) * i / steps, y = at.y + (next.y - at.y) * i / steps;
+        await mouseTo(app, page, x, y);
+        /* the window follows a moment later: the next point is reckoned from where it is then */
+        await until(async () => { const n = await win(app); return Math.abs(n.x - (start.x + x - from.x)) <= 2 && Math.abs(n.y - (start.y + y - from.y)) <= 2; }, 600);
+      }
+      at = next;
+    }
     await page.mouse.up();
   }
   const middle = b => ({ x: b.x + b.width / 2, y: b.y + b.height / 2 });
@@ -82,7 +93,9 @@ const server = http.createServer((req, res) => {
   await drag(app, page, middle(b), { x: area.x + area.width * 0.7, y: area.y + area.height * 2 });
   ok(await until(async () => { const n = await win(app); return n.x === area.x + area.width - 64 - 12 && n.y === area.y + area.height - 64 - 12; }),
     'let go right of the middle, below the screen: against the right side, kept on the screen');
-  await drag(app, page, middle(await win(app)), { x: area.x + 150, y: area.y + 200 });
+  /* (round the middle of the screen: on a virtual one (xvfb) the real pointer rests there, and the
+   * window passing under it ends the drag, which no person's pointer would) */
+  await drag(app, page, middle(await win(app)), [{ x: area.x + 150, y: area.y + area.height - 60 }, { x: area.x + 150, y: area.y + 200 }]);
   await until(async () => (await win(app)).x === area.x + 12);
 
   console.log('\n── 3. Clicked: the panel ──');
@@ -92,7 +105,7 @@ const server = http.createServer((req, res) => {
   await page.mouse.up();
   await page.waitForSelector('#overlay[data-state="panel"]', { timeout: 4000 });
   const p = await win(app);
-  ok(p.width === 760 && p.height === 540 && p.x === area.x + 12 && p.y === b.y, `the panel opens against the left side, its top at the button's (${JSON.stringify(p)})`);
+  ok(p.width === 760 && p.height === 540 && p.x === area.x + 12 && p.y === b.y, `the panel opens against the left side, its top at the button's (${JSON.stringify(p)}, the button ${JSON.stringify(b)})`);
   const cols = await page.evaluate(() => {
     const box = el => el && el.getBoundingClientRect();
     const t = box(document.querySelector('.ov-timers .timer-card')), d = box(document.querySelector('.ov-tasks .home-sec-today'));
@@ -104,10 +117,103 @@ const server = http.createServer((req, res) => {
   await page.click(`.ov-timers .playbtn-${id}`);
   ok(await until(() => page.evaluate(i => !!document.querySelector(`.ov-timers .tcard-${i}.running`), id)), 'a timer started from it runs');
   await page.click(`.ov-timers .playbtn-${id}`);
-  await page.click('[data-ov-tab="daily"]');
-  ok(await page.evaluate(() => getComputedStyle(document.getElementById('defaultContainer-d')).display !== 'none' && getComputedStyle(document.getElementById('homeContainer-d')).display === 'none'),
-    'Daily: the Daily lists on the right');
-  await page.click('[data-ov-tab="today"]');
+  ok(await page.evaluate(() => {
+    const shown = el => el && getComputedStyle(el).display !== 'none' && el.getBoundingClientRect().height > 0;
+    return shown(document.querySelector('.ov-tasks .home-sec-today')) && shown(document.querySelector('.ov-tasks #defaultContainer-d .todo-card'))
+      && !shown(document.querySelector('.ov-tasks .home-sec-daily')) && !document.querySelector('.ov-head, [data-ov-tab]');
+  }), 'today\'s tasks and the Daily lists together on the right, no tabs, no bar (and not Home\'s starred Daily lists again)');
+
+  /* plain, in the theme: a late task in a list and one in none (put in the day Focus keeps, and Focus opened again) */
+  const listColor = await page.evaluate(() => {
+    const key = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+    const st = JSON.parse(localStorage.getItem('focus-app-state'));
+    const dl = st.todoLists.find(l => l.title === 'Deadlines');
+    dl.tasks.push({ id: 9901, text: 'Late essay', done: false, due: key(yesterday) });
+    st.dbdTasks.push({ id: 9902, text: 'Untagged today', due: key(new Date()), done: false });
+    st.taskIdCounter = Math.max(st.taskIdCounter, 9902); st.dbdIdCounter = Math.max(st.dbdIdCounter, 9903);
+    localStorage.setItem('focus-app-state', JSON.stringify(st));
+    return dl.color;
+  });
+  await page.reload();
+  await page.waitForSelector('#overlay[data-state="panel"] .home-dbd-row', { timeout: 15000 });
+  const look = await page.evaluate(lc => {
+    const css = el => el && getComputedStyle(el);
+    const row = t => [...document.querySelectorAll('.ov-tasks .home-dbd-row')].find(r => r.textContent.includes(t));
+    const rgb = hex => `rgb(${[1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
+    const late = row('Late essay'), plain = row('Untagged today'), upcoming = document.querySelector('.ov-tasks .home-tone-future');
+    const dl = { color: lc };
+    const timer = document.querySelector('.ov-timers .timer-card');
+    const t0 = timer && { color: timer.style.getPropertyValue('--tc').trim() };
+    const panel = css(document.querySelector('.ov-panel'));
+    return {
+      font: css(document.querySelector('.ov-tasks .home-task-text')).fontFamily,
+      menuFont: css(document.querySelector('.ov-menu button')).fontFamily,
+      late: late && { color: css(late.querySelector('.home-task-text')).color, weight: css(late.querySelector('.home-task-text')).fontWeight, date: css(late.querySelector('.home-dbd-date')).color, dot: css(late.querySelector('.home-dbd-tag')).display, list: dl && rgb(dl.color) },
+      plain: plain && { color: css(plain.querySelector('.home-task-text')).color, ink: css(document.querySelector('.ov-panel')).color },
+      upcoming: upcoming && css(upcoming.querySelector('.home-dbd-date')).color,
+      grey: css(document.querySelector('.ov-label')).color,
+      danger: rgb(getComputedStyle(document.documentElement).getPropertyValue('--danger').trim()),
+      timer: timer && { title: css(timer.querySelector('.timer-title-input')).color, time: css(timer.querySelector('.timer-display')).color, timeSize: css(timer.querySelector('.timer-display')).fontSize,
+        textSize: css(document.querySelector('.ov-tasks .home-task-text')).fontSize, play: timer.querySelector('.play-btn').getBoundingClientRect().width, own: t0 && rgb(t0.color) },
+      panel: { border: panel.borderTopColor, line: getComputedStyle(document.documentElement).getPropertyValue('--line').trim() },
+    };
+  }, listColor);
+  ok(/Courier/.test(look.font) && /Courier/.test(look.menuFont), `a typewriter's letters (${look.font.split(',')[0]})`);
+  ok(look.late && look.late.color === look.late.list && look.late.dot === 'none', `a task in a list: its text in the list's colour (${look.late && look.late.color}), no dot`);
+  ok(look.late && Number(look.late.weight) >= 700, 'bold when it is overdue');
+  ok(look.late && look.late.date === look.danger, `its due date red when overdue (${look.late && look.late.date})`);
+  ok(look.upcoming === look.grey, `an upcoming one's date grey (${look.upcoming})`);
+  ok(look.plain && look.plain.color === look.plain.ink, 'one in no list: the text colour');
+  ok(look.timer && look.timer.title === look.timer.own && look.timer.time === look.timer.own, `a timer's name and time in its colour (${look.timer && look.timer.own})`);
+  ok(look.timer && look.timer.timeSize === look.timer.textSize && parseFloat(look.timer.textSize) <= 12, `its time as small as a task's text (${look.timer && look.timer.timeSize})`);
+  ok(look.timer && look.timer.play <= 18, `small play and reset buttons (${look.timer && look.timer.play} px)`);
+  ok(look.panel.border === 'rgb(255, 255, 255)' && look.panel.line === '#ffffff', 'Black: the panel in a white outline');
+  await shot(page, 'panel-black');
+
+  /* ⋯ → settings, in the window: the four themes, chosen there */
+  await page.click('.ov-more');
+  await shot(page, 'menu');
+  await page.click('.ov-menu [data-ov-do="settings"]');
+  ok(await until(() => page.evaluate(() => document.getElementById('settingsModal').classList.contains('show'))), '⋯ → settings: Settings opens in the window');
+  await shot(page, 'settings');
+  await page.evaluate(() => document.querySelector('[data-settings-nav="appearance"]')?.click());
+  await sleep(150);
+  await shot(page, 'settings-appearance');
+  ok(await page.evaluate(() => [...document.querySelectorAll('#themePresets-s .theme-chip')].map(c => c.textContent.trim()).join() === 'Black,Dark grey,Light grey,White'),
+    'with the four themes to choose from');
+  const borders = {};
+  for (const id of ['darkgrey', 'lightgrey', 'white', 'black']) {
+    if (!(await page.evaluate(() => document.getElementById('settingsModal').classList.contains('show')))) {
+      await page.click('.ov-more');
+      await page.click('.ov-menu [data-ov-do="settings"]');
+      await page.evaluate(() => document.querySelector('[data-settings-nav="appearance"]')?.click());
+    }
+    await page.click(`#themePresets-s [data-preset="${id}"]`);
+    await page.click('#settingsModal [data-close="settingsModal"]');
+    await sleep(200);
+    borders[id] = await page.evaluate(() => getComputedStyle(document.querySelector('.ov-panel')).borderTopColor + ' on ' + getComputedStyle(document.querySelector('.ov-panel')).backgroundColor);
+    if (id !== 'black') await shot(page, `panel-${id}`);
+  }
+  ok(borders.darkgrey === 'rgb(140, 140, 140) on rgb(42, 42, 42)' && borders.lightgrey === 'rgb(77, 77, 77) on rgb(217, 217, 217)' && borders.white === 'rgb(0, 0, 0) on rgb(255, 255, 255)',
+    `and each its background and outline (${JSON.stringify(borders)})`);
+
+  /* ⋯ → formats: the timers and Daily lists to change, in the window, and done */
+  await page.click('.ov-more');
+  await page.click('.ov-menu [data-ov-do="formats"]');
+  const fmt = await page.evaluate(() => {
+    const seen = el => !!el && getComputedStyle(el).display !== 'none' && el.getBoundingClientRect().width > 0;
+    return { add: seen(document.querySelector('.ov-timers #addTimerBtn-d')), list: seen(document.querySelector('.ov-tasks #addDailyBtn')),
+      dot: seen(document.querySelector('.ov-timers .color-swatch')), done: seen(document.querySelector('.ov-fmt[data-ov-do="formats"]')),
+      timers: document.querySelectorAll('.ov-timers .timer-card').length };
+  });
+  ok(fmt.add && fmt.list && fmt.dot && fmt.done, `formats: Add timer, Add list, the colour dots and done all there (${JSON.stringify(fmt)})`);
+  await page.click('.ov-timers #addTimerBtn-d');
+  ok(await until(() => page.evaluate(n => document.querySelectorAll('.ov-timers .timer-card').length === n + 1, fmt.timers)), 'Add timer adds one');
+  await shot(page, 'formats');
+  await page.click('.ov-fmt[data-ov-do="formats"]');
+  ok(await until(() => page.evaluate(() => !document.body.classList.contains('format-mode') && getComputedStyle(document.querySelector('.ov-timers .color-swatch')).display === 'none')),
+    'done: back to the plain panel, the new timer kept');
 
   console.log('\n── 4. Minimized, and its place kept ──');
   await page.click('.ov-min');

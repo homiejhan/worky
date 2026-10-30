@@ -3,9 +3,10 @@
 Focus as a round button with its checkmark, above every window on your Mac.
 
 - **Drag it** anywhere. Let go and it glides to the nearer side of the screen.
-- **Click it** for a panel with your timers on the left and today's tasks on the
-  right (**Daily** switches the right side to your Daily lists).
-- **Minimize** (the – at the top right, or Escape) takes it back to the button.
+- **Click it** for a panel with your timers on the left, and today's tasks and
+  your Daily lists on the right.
+- **⋯** (top right) has Settings, Formats, Reset the day, Open in the browser and
+  the app's own menu; **–** (or Escape) minimizes it back to the button.
 - **Right-click** the button for **Start at login** and **Quit Focus Overlay**.
 
 It shows the live Focus site, so it is always the latest version, and it syncs

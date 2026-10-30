@@ -231,8 +231,9 @@ function homeDbdRow(entry, tone) {
     : '';
   const toggle = tagged ? `toggleTask(${entry.list.id},${t.id})` : `toggleDbdTask(${t.id})`;
   const checkStyle = tagged && t.done ? ` style="background:${entry.list.color};border-color:${entry.list.color}"` : '';
+  /* --lc: the list's colour, for the desktop overlay's text in it (style.css) */
   return `
-    <div class="task-row home-dbd-row home-tone-${tone}">
+    <div class="task-row home-dbd-row home-tone-${tone}"${tagged ? ` style="--lc:${entry.list.color}"` : ''}>
       <div class="task-check home-dbd-check ${tagged ? `task-checks-${t.id} ` : ''}${t.done ? 'done' : ''}"${checkStyle} onclick="${toggle}">
         ${CHECK_SVG}
       </div>

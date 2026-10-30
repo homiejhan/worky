@@ -25,7 +25,7 @@ import { themeApplyPreset, themeFontStack, themePreset } from './theme.js';
  * (see applyStarterProfile). */
 export const DEFAULT_TEMPLATE = 'working';
 export const FORMAT_TEMPLATES = [
-  { id: 'working', name: 'Working student', tagline: 'Classes, shifts and cash on one page. The default setup.', theme: 'midnight',
+  { id: 'working', name: 'Working student', tagline: 'Classes, shifts and cash on one page. The default setup.', theme: 'black',
     timers: [
       { label: 'Study', seconds: 3*3600, color: '#8B5CF6' },
       { label: 'Work',  seconds: 4*3600, color: '#22C55E' },
@@ -48,7 +48,7 @@ export const FORMAT_TEMPLATES = [
       { title: 'Lights out',    start: '23:30', end: '23:30', color: '#378ADD', repeatDays: [0,1,2,3,4,5,6], type: 'divider' },
     ] },
 
-  { id: 'classic', name: 'Classic', tagline: 'The original Focus setup — work, growth, faith, skills.', theme: 'midnight',
+  { id: 'classic', name: 'Classic', tagline: 'The original Focus setup — work, growth, faith, skills.', theme: 'black',
     timers: [
       { label: 'Productivity Timer',   seconds: 5*3600, color: '#378ADD' },
       { label: 'Personal Development', seconds: 3*3600, color: '#EC3636' },
@@ -70,7 +70,7 @@ export const FORMAT_TEMPLATES = [
       { title: 'Weekly review', start: '18:00', end: '18:45', color: '#8B5CF6', repeatDays: [0] },
     ] },
 
-  { id: 'deepwork', name: 'Deep Work', tagline: 'Long focus blocks with a startup and shutdown ritual.', theme: 'ocean',
+  { id: 'deepwork', name: 'Deep Work', tagline: 'Long focus blocks with a startup and shutdown ritual.', theme: 'darkgrey',
     timers: [
       { label: 'Deep Work',  seconds: 4*3600,       color: '#5AA9FF' },
       { label: 'Meetings',   seconds: 2*3600,       color: '#EAB308' },
@@ -93,7 +93,7 @@ export const FORMAT_TEMPLATES = [
       { title: 'Weekly review', start: '15:00', end: '16:00', color: '#F97316', repeatDays: [5] },
     ] },
 
-  { id: 'fitness', name: 'Fitness', tagline: 'Training, nutrition, and recovery all week.', theme: 'forest',
+  { id: 'fitness', name: 'Fitness', tagline: 'Training, nutrition, and recovery all week.', theme: 'black',
     timers: [
       { label: 'Training',            seconds: 90*60,  color: '#22C55E' },
       { label: 'Mobility & Recovery', seconds: 45*60,  color: '#5DCAA5' },
@@ -118,7 +118,7 @@ export const FORMAT_TEMPLATES = [
       { title: 'Wind-down',  start: '21:30', end: '21:30', color: '#8B5CF6', repeatDays: [0,1,2,3,4,5,6], type: 'divider' },
     ] },
 
-  { id: 'creative', name: 'Creative', tagline: 'Make first, consume later. Studio time every day.', theme: 'lavender',
+  { id: 'creative', name: 'Creative', tagline: 'Make first, consume later. Studio time every day.', theme: 'lightgrey',
     timers: [
       { label: 'Creating',    seconds: 3*3600, color: '#B49CFF' },
       { label: 'Practice',    seconds: 1*3600, color: '#D4537E' },
@@ -141,7 +141,7 @@ export const FORMAT_TEMPLATES = [
       { title: 'Open studio', start: '10:00', end: '14:00', color: '#B49CFF', repeatDays: [6] },
     ] },
 
-  { id: 'faith', name: 'Faith & Family', tagline: 'Devotion in the morning, family at the table.', theme: 'ember',
+  { id: 'faith', name: 'Faith & Family', tagline: 'Devotion in the morning, family at the table.', theme: 'darkgrey',
     timers: [
       { label: 'Time with God', seconds: 1*3600, color: '#8B5CF6' },
       { label: 'Family Time',   seconds: 2*3600, color: '#F0894A' },
@@ -164,7 +164,7 @@ export const FORMAT_TEMPLATES = [
       { title: 'Church',        start: '10:00', end: '12:00', color: '#8B5CF6', repeatDays: [0] },
     ] },
 
-  { id: 'minimal', name: 'Minimal', tagline: 'Two timers, one list. Nothing extra.', theme: 'sky',
+  { id: 'minimal', name: 'Minimal', tagline: 'Two timers, one list. Nothing extra.', theme: 'white',
     timers: [
       { label: 'Focus', seconds: 4*3600, color: '#1F8FD8' },
       { label: 'Rest',  seconds: 1*3600, color: '#22C55E' },

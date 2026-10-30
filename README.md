@@ -50,7 +50,7 @@ On macOS 14 and earlier you can instead right-click Focus Overlay, choose
 ### 4. Sign in
 
 1. The checkmark button appears against the right side of your screen. Click it,
-   then **Sign in to sync**.
+   then **sign in** at the panel's top right (or **⋯ → settings → Cloud sync**).
 2. Google's sign-in opens in your browser. Pick your account, and when the
    browser asks to open Focus Overlay, allow it.
 
@@ -60,10 +60,14 @@ other devices.
 ### 5. Use it
 
 - **Drag the button** anywhere. Let go and it glides to the nearer side of the screen.
-- **Click it** for the panel: your timers on the left, today's tasks on the right.
-  **Daily** at the top switches the right side to your Daily lists.
+- **Click it** for the panel: your timers on the left; today's tasks and your
+  Daily lists on the right. It's plain on purpose: a typewriter's letters, a task
+  in its list's color (bold when overdue), due dates in gray (red when passed).
+- **⋯** at the top right: **settings**, **formats** (add or change timers and
+  Daily lists), **reset the day**, **open in the browser** (all of Focus), and
+  **more…** (Start at login, Quit).
 - **Minimize** with the **–** at the top right (or Escape) to go back to the button.
-  Drag the panel by its top bar to move it.
+  Drag the panel by the words along its top (*timers*, *today*) to move it.
 - **Right-click the button** for **Start at login** and **Quit Focus Overlay**.
   It has no Dock icon.
 

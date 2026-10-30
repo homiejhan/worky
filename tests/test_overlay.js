@@ -40,9 +40,19 @@ function stand(startState = 'icon') {
 }
 const inApp = (app, storage, more = {}) => loadApp({
   storage,
-  before: w => { w.focusOverlay = app.api; w.HTMLElement.prototype.scrollIntoView = function () {}; if (more.before) more.before(w); },
+  before: w => {
+    w.focusOverlay = app.api; w.HTMLElement.prototype.scrollIntoView = function () {};
+    w.open = (url, target) => { app.calls.push(`open ${url} ${target}`); return null; };   // (the app sends it to the browser)
+    if (more.before) more.before(w);
+  },
   transform: more.transform,
 });
+const CSS = require('fs').readFileSync(path.join(ROOT, 'style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+const overlayCss = CSS.slice(CSS.indexOf('.ov { display: none; }'));
+/* the declarations a selector has in the overlay's part of style.css (every rule naming it) */
+const rule = sel => [...overlayCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+  .filter(r => r[1].split(',').map(x => x.trim()).includes(sel))
+  .map(r => r[2].replace(/\s+/g, ' ').trim()).join(' ');
 const press = (w, el, moves, { button = 0 } = {}) => {
   const ev = (type, x, y) => new w.PointerEvent(type, { bubbles: true, cancelable: true, button, pointerId: 1, screenX: x, screenY: y, clientX: 20, clientY: 20 });
   el.dispatchEvent(ev('pointerdown', 1000, 400));
@@ -91,16 +101,19 @@ const press = (w, el, moves, { button = 0 } = {}) => {
     ok(ov.querySelector('.ov-icon svg path'), 'with the checkmark on it');
     ok(ov.querySelector('.ov-timers #timerStack-d .timer-card') && ov.querySelector('.ov-tasks #homeContainer-d .home-sec-today') && ov.querySelector('.ov-tasks #defaultContainer-d .todo-card'),
       'the panel has the timers on the left; today\'s tasks and the Daily lists on the right');
+    const right = [...ov.querySelector('.ov-tasks').children].map(el => el.id || el.className);
+    ok(right.indexOf('homeContainer-d') < right.indexOf('ov-label ov-label-daily') && right.indexOf('ov-label ov-label-daily') < right.indexOf('defaultContainer-d'),
+      `both at once, no tabs: today's tasks, then "daily" and the Daily lists (${right.join(' · ')})`);
+    ok(!ov.querySelector('.ov-head, .ov-tabs, [data-ov-tab], .ov-brand'), 'no bar along the top: no name, no tabs');
+    eq([...ov.querySelectorAll('.ov-top .ov-label')].map(l => l.textContent).join(), 'timers,today', 'only the columns\' names there');
+    ok(ov.querySelector('.ov-top .ov-more') && ov.querySelector('.ov-top .ov-min'), 'and ⋯ and – in the corner');
+    ok(/-webkit-app-region: drag/.test(rule('.ov-top')) && /-webkit-app-region: no-drag/.test(rule('.ov-ctl')), 'the panel is dragged by its top (the names), its buttons still pressed');
     ok(!d.querySelector('#tourWelcomeModal.show'), 'no welcome tour (nothing it shows is here)');
     eq(errors.length, 0, 'without an error');
 
     press(w, ov.querySelector('.ov-icon'), []);
     await until(() => ov.dataset.state === 'panel');
     ok(app.calls.includes('expand') && ov.dataset.state === 'panel', 'clicked: the app makes the window the panel\'s size, then the panel shows');
-    eq(ov.dataset.tab, 'today', 'Today on the right to begin with');
-    ov.querySelector('[data-ov-tab="daily"]').click();
-    ok(ov.dataset.tab === 'daily' && w.localStorage.getItem('focus-overlay-tab') === 'daily', 'Daily: the Daily lists instead (kept on this device)');
-    ov.querySelector('[data-ov-tab="today"]').click();
 
     const id = w.eval('timers[0].id');
     ov.querySelector(`.ov-timers .playbtn-${id}`).click();
@@ -159,6 +172,88 @@ const press = (w, el, moves, { button = 0 } = {}) => {
     ok(b.calls.includes('expand'), 'a dialog opening while it is the button: the panel opens, so the dialog has room');
   }
 
+  console.log('\n── 5b. ⋯: Settings, Formats, Reset the day, the browser, the app ──');
+  {
+    const app = stand('panel');
+    const { w, d, errors } = await inApp(app, { 'focus-tour-done': '1' });
+    const ov = d.getElementById('overlay');
+    await until(() => ov.dataset.state === 'panel');
+    const more = ov.querySelector('.ov-more'), menu = ov.querySelector('.ov-menu');
+    const item = what => menu.querySelector(`[data-ov-do="${what}"]`);
+    ok(menu.hidden, 'closed to begin with');
+    more.click();
+    ok(!menu.hidden && more.getAttribute('aria-expanded') === 'true' && d.activeElement === item('settings'), '⋯ opens it, on its first item');
+    eq([...menu.querySelectorAll('[role="menuitem"]')].map(b => b.textContent).join(' | '), 'settings | formats | reset the day | open in the browser | more…', 'what is in it');
+    item('settings').click();
+    ok(menu.hidden && d.getElementById('settingsModal').classList.contains('show'), 'settings: Settings opens (the panel stays)');
+    d.getElementById('settingsModal').classList.remove('show');
+
+    more.click();
+    item('formats').click();
+    ok(d.body.classList.contains('format-mode') && w.eval('formatMode'), 'formats: Formats on');
+    ok(ov.querySelector('.ov-timers #addTimerBtn-d') && ov.querySelector('.ov-tasks #addDailyBtn'), 'its Add timer under the timers, its Add list over the Daily lists');
+    const n = w.eval('timers.length');
+    ov.querySelector('#addTimerBtn-d').click();
+    eq(w.eval('timers.length'), n + 1, 'Add timer adds one');
+    ok(ov.querySelector('.ov-timers .timer-card:last-child .fmt-remove-timer'), 'and each can be removed');
+    ov.querySelector('.ov-fmt[data-ov-do="templates"]').click();
+    ok(d.getElementById('fmtTemplateModal').classList.contains('show'), 'templates (in the corner while Formats is on): the template picker');
+    d.getElementById('fmtTemplateModal').classList.remove('show');
+    ok(/display: inline-flex/.test(rule('body.format-mode .ov-fmt')) && /display: none/.test(rule('.ov-fmt')), 'templates and done show in the corner only while Formats is on');
+    ov.querySelector('.ov-fmt[data-ov-do="formats"]').click();
+    ok(!d.body.classList.contains('format-mode') && w.eval('timers.length') === n + 1, 'done: Formats off, the new timer kept');
+
+    more.click();
+    item('reset').click();
+    ok(d.getElementById('confirmOverlay').classList.contains('show'), 'reset the day: asks first, as everywhere');
+    d.getElementById('confirmOverlay').classList.remove('show');
+    app.calls.length = 0;
+    more.click();
+    item('browser').click();
+    eq(app.calls.join(), `open ${w.location.origin + w.location.pathname} _blank`, 'open in the browser: Focus, whole, in the browser');
+    more.click();
+    item('app').click();
+    ok(app.calls.includes('menu') && menu.hidden, 'more…: the app\'s own menu (Start at login, Quit)');
+
+    more.click();
+    d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    ok(menu.hidden && ov.dataset.state === 'panel', 'Escape closes it first, and the panel stays');
+    ov.querySelector('.ov-top').dispatchEvent(new w.MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    ok(!menu.hidden, 'right-clicking along the top opens it too');
+    ov.querySelector('.ov-timers').dispatchEvent(new w.PointerEvent('pointerdown', { bubbles: true }));
+    ok(menu.hidden, 'pressing anywhere else closes it');
+    eq(errors.length, 0, 'without an error');
+  }
+
+  console.log('\n── 5c. Plain: the typewriter, colour where it says something ──');
+  {
+    const app = stand('panel');
+    const { w, d } = await inApp(app, { 'focus-tour-done': '1' });
+    w.eval(`(() => {
+      const dl = todoLists.find(l => l.title === 'Deadlines');
+      dl.tasks.push({ id: 9901, text: 'Late essay', done: false, due: addDays(dbdTodayKey(), -1) });
+      dbdTasks.push({ id: 9902, text: 'Untagged today', due: dbdTodayKey(), done: false });
+      renderTodos(); renderDbd(); renderHome();
+    })()`);
+    const ov = d.getElementById('overlay');
+    const dl = w.eval('todoLists.find(l => l.title === "Deadlines")');
+    const late = [...ov.querySelectorAll('.home-sec-today .home-dbd-row')].find(r => r.textContent.includes('Late essay'));
+    ok(late && late.classList.contains('home-tone-overdue') && late.style.getPropertyValue('--lc') === dl.color, 'a task in a list carries its list\'s colour (--lc) on its row');
+    const plain = [...ov.querySelectorAll('.home-sec-today .home-dbd-row')].find(r => r.textContent.includes('Untagged today'));
+    ok(plain && !plain.getAttribute('style'), 'one in no list, none');
+    ok(/color: var\(--lc, var\(--ink\)\)/.test(rule('.ov .home-task-text')) && /display: none/.test(rule('.ov .home-dbd-tag')), 'its text in that colour, instead of the dot beside it');
+    ok(/font-weight: 700/.test(rule('.ov .home-tone-overdue .home-task-text')), 'bold when it is overdue');
+    ok(/color: var\(--ink-3\)/.test(rule('.ov .home-dbd-date')) && /color: var\(--danger\)/.test(rule('.ov .home-tone-overdue .home-dbd-date')), 'its due date grey, red when overdue');
+    ok(/Courier Prime/.test(rule('html.overlay-app')) && /!important/.test(rule('html.overlay-app')) && d.querySelector('link[href*="Courier+Prime"]'), 'a typewriter\'s letters, all through the window (over the theme\'s font)');
+    const text = rule('.ov .home-task-text').match(/font-size: var\((--[\w-]+)\)/), time = rule('.ov .timer-display').match(/font-size: var\((--[\w-]+)\)/);
+    ok(text && time && text[1] === time[1] && /--ov-text: 12px/.test(rule('html.overlay-app')), 'small: the timers\' time the size of a task\'s text (12 px)');
+    ok(/color: var\(--tc\)/.test(rule('.ov .timer-title-input')) && /color: var\(--tc\)/.test(rule('.ov .timer-display')), 'a timer\'s name and time in its colour');
+    ok(/width: 18px; height: 18px/.test(rule('.ov .play-btn')) && /display: none/.test(rule('.ov .timer-progress')), 'small play and reset buttons, no progress bar');
+    ok(/display: none/.test(rule('.ov .todo-accent-strip')) && /color: var\(--lc\)/.test(rule('.ov .todo-title-input')), 'a Daily list: its name in its colour, no stripe');
+    ok(/border: 1px solid var\(--line\)/.test(rule('.ov-panel')), 'the panel in the theme\'s outline');
+    ok(/display: none/.test(rule('.ov-col .color-swatch')) && /display: block/.test(rule('body.format-mode .ov-col .color-swatch')), 'colour dots only in Formats, where colours are changed');
+  }
+
   console.log('\n── 6. Signing in, through the browser ──');
   {
     const { install, cloud } = createFakeFirebase();
@@ -190,6 +285,18 @@ const press = (w, el, moves, { button = 0 } = {}) => {
     ok(cloud.val.state.includes('From the laptop'), 'so the cloud keeps the account\'s day');
     await until(() => signIn.hidden);
     ok(signIn.hidden, 'and the panel no longer offers to sign in');
+
+    /* Settings → Cloud sync → Sign in, in the app: through the browser too, never in its own window */
+    const app2 = stand('panel');
+    let other = null;
+    const two = await inApp(app2, { 'focus-tour-done': '1' }, { before: win => { other = install(win); } });
+    other.signOut();
+    await sleep(50);
+    two.w.openSettings('sync');
+    two.d.getElementById('syncConnectBtn').click();
+    const via = app2.calls.find(c => c.startsWith('signIn '));
+    ok(via && new URL(via.slice(7)).searchParams.get('state') === 'worky-sync-app' && /\/worky\/$/.test(two.w.location.href.split('#')[0]),
+      'Settings → Cloud sync → Sign in: the same, through the browser (the window stays on Focus)');
 
     /* the browser, where Google sends the sign-in back */
     const hook = 'function syncHandToApp(url) { window.location.href = url; }';
