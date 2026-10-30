@@ -281,8 +281,13 @@ const press = (w, el, moves, { button = 0 } = {}) => {
     ok(late && late.classList.contains('home-tone-overdue') && late.style.getPropertyValue('--lc') === dl.color, 'a task in a list carries its list\'s colour (--lc) on its row');
     const plain = [...ov.querySelectorAll('.home-sec-today .home-dbd-row')].find(r => r.textContent.includes('Untagged today'));
     ok(plain && !plain.getAttribute('style'), 'one in no list, none');
-    ok(/color: var\(--lc, var\(--ink\)\)/.test(rule('.ov .home-dbd-row .home-task-text')) && /display: none/.test(rule('.ov .home-dbd-tag')), 'its text in that colour, instead of the dot beside it');
+    ok(/var\(--lc/.test(rule('.ov .home-dbd-check')) && /display: none/.test(rule('.ov .home-dbd-tag')), 'its checkbox in that colour, instead of the dot beside it');
+    ok(/color: var\(--ink\)/.test(rule('.ov .home-dbd-row .home-task-text')) && !/--lc/.test(rule('.ov .home-dbd-row .home-task-text') + rule('.ov .home-tone-overdue .home-task-text') + rule('.ov .home-tone-future .home-task-text')),
+      'its text in black, white or grey, whatever its list');
     ok(/font-weight: 700/.test(rule('.ov .home-tone-overdue .home-task-text')), 'bold when it is overdue');
+    const line = rule('.ov .home-tone-overdue + .home-tone-today');
+    ok(/border-top: 1px solid var\(--border\)/.test(line) && /background: var\(--border\)/.test(rule('.ov .home-progress-track')) && line === rule('.ov .home-tone-today + .home-tone-future') && line === rule('.ov .home-tone-overdue + .home-tone-future'),
+      'a grey line between the overdue ones, today\'s and the coming ones, as under the progress');
     ok(/color: var\(--ink-3\)/.test(rule('.ov .home-dbd-date')) && /color: var\(--danger\)/.test(rule('.ov .home-tone-overdue .home-dbd-date')), 'its due date grey, red when overdue');
     ok(/Courier Prime/.test(rule('html.overlay-app')) && /!important/.test(rule('html.overlay-app')) && d.querySelector('link[href*="Courier+Prime"]'), 'a typewriter\'s letters, all through the window (over the theme\'s font)');
     const text = rule('.ov-col .home-task-text').match(/font-size: var\((--[\w-]+)\)/), time = rule('.ov .timer-display').match(/font-size: var\((--[\w-]+)\)/);

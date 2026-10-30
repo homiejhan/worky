@@ -174,8 +174,16 @@ const server = http.createServer((req, res) => {
     return {
       font: css(document.querySelector('.ov-main .home-task-text')).fontFamily,
       menuFont: css(document.querySelector('.ov-menu button')).fontFamily,
-      late: late && { color: css(late.querySelector('.home-task-text')).color, weight: css(late.querySelector('.home-task-text')).fontWeight, date: css(late.querySelector('.home-dbd-date')).color, dot: css(late.querySelector('.home-dbd-tag')).display, list: dl && rgb(dl.color) },
-      plain: plain && { color: css(plain.querySelector('.home-task-text')).color, ink: css(document.querySelector('.ov-panel')).color },
+      late: late && { color: css(late.querySelector('.home-task-text')).color, weight: css(late.querySelector('.home-task-text')).fontWeight, date: css(late.querySelector('.home-dbd-date')).color, dot: css(late.querySelector('.home-dbd-tag')).display, list: dl && rgb(dl.color),
+        box: css(late.querySelector('.home-dbd-check')).borderTopColor },
+      plain: plain && { color: css(plain.querySelector('.home-task-text')).color, ink: css(document.querySelector('.ov-panel')).color, box: css(plain.querySelector('.home-dbd-check')).borderTopColor },
+      lines: (() => {
+        const rows = [...document.querySelectorAll('.ov-main .home-sec-today .home-card > *')];
+        const track = css(document.querySelector('.ov-main .home-progress-track'));
+        const firsts = rows.filter((r, i) => i && r.className.match(/home-tone-\w+/)?.[0] !== rows[i - 1].className.match(/home-tone-\w+/)?.[0]);
+        return { n: firsts.length, same: firsts.every(r => css(r).borderTopWidth === '1px' && css(r).borderTopColor === track.backgroundColor && track.height === '1px'),
+          inside: rows.filter((r, i) => i && !firsts.includes(r)).every(r => css(r).borderTopWidth === '0px') };
+      })(),
       upcoming: upcoming && css(upcoming.querySelector('.home-dbd-date')).color,
       grey: css(document.querySelector('.ov-label')).color,
       danger: rgb(getComputedStyle(document.documentElement).getPropertyValue('--danger').trim()),
@@ -187,7 +195,9 @@ const server = http.createServer((req, res) => {
     };
   }, listColor);
   ok(/Courier/.test(look.font) && /Courier/.test(look.menuFont), `a typewriter's letters (${look.font.split(',')[0]})`);
-  ok(look.late && look.late.color === look.late.list && look.late.dot === 'none', `a task in a list: its text in the list's colour (${look.late && look.late.color}), no dot`);
+  ok(look.late && look.late.color === look.plain.ink && look.late.dot === 'none', `a task in a list: its text white, as in no list (${look.late && look.late.color}), no dot`);
+  ok(look.late && /236, 54, 54|0\.92\d* 0\.21\d* 0\.21/.test(look.late.box) && look.late.box !== look.plain.box, `its checkbox in the list's colour (${look.late && look.late.box})`);
+  ok(look.lines.n === 2 && look.lines.same && look.lines.inside, `a grey line, as under the progress, between the overdue ones, today's and the coming ones, and none within them (${JSON.stringify(look.lines)})`);
   ok(look.late && Number(look.late.weight) >= 700, 'bold when it is overdue');
   ok(look.late && look.late.date === look.danger, `its due date red when overdue (${look.late && look.late.date})`);
   ok(look.upcoming === look.grey, `an upcoming one's date grey (${look.upcoming})`);
@@ -200,7 +210,7 @@ const server = http.createServer((req, res) => {
   ok(look.panel.border === 'rgb(255, 255, 255)' && look.panel.line === '#ffffff', 'Black: the panel in a white outline');
   await shot(page, 'panel-black');
 
-  /* ⋯ → settings, in the window: the four themes, chosen there */
+  /* ⋯ → settings, in the window: the themes, chosen there */
   await page.click('.ov-more');
   await shot(page, 'menu');
   await page.click('.ov-menu [data-ov-do="settings"]');
@@ -209,10 +219,10 @@ const server = http.createServer((req, res) => {
   await page.evaluate(() => document.querySelector('[data-settings-nav="appearance"]')?.click());
   await sleep(150);
   await shot(page, 'settings-appearance');
-  ok(await page.evaluate(() => [...document.querySelectorAll('#themePresets-s .theme-chip')].map(c => c.textContent.trim()).join() === 'Black,Dark grey,Light grey,White'),
-    'with the four themes to choose from');
+  ok(await page.evaluate(() => [...document.querySelectorAll('#themePresets-s .theme-chip')].map(c => c.textContent.trim()).join() === 'Black,Dark grey,Grey,Light grey,White'),
+    'with the five themes to choose from');
   const borders = {};
-  for (const id of ['darkgrey', 'lightgrey', 'white', 'black']) {
+  for (const id of ['darkgrey', 'grey', 'lightgrey', 'white', 'black']) {
     if (!(await page.evaluate(() => document.getElementById('settingsModal').classList.contains('show')))) {
       await page.click('.ov-more');
       await page.click('.ov-menu [data-ov-do="settings"]');
@@ -224,7 +234,7 @@ const server = http.createServer((req, res) => {
     borders[id] = await page.evaluate(() => getComputedStyle(document.querySelector('.ov-panel')).borderTopColor + ' on ' + getComputedStyle(document.querySelector('.ov-panel')).backgroundColor);
     if (id !== 'black') await shot(page, `panel-${id}`);
   }
-  ok(borders.darkgrey === 'rgb(140, 140, 140) on rgb(42, 42, 42)' && borders.lightgrey === 'rgb(77, 77, 77) on rgb(217, 217, 217)' && borders.white === 'rgb(0, 0, 0) on rgb(255, 255, 255)',
+  ok(borders.darkgrey === 'rgb(140, 140, 140) on rgb(42, 42, 42)' && borders.grey === 'rgb(230, 230, 230) on rgb(107, 107, 107)' && borders.lightgrey === 'rgb(77, 77, 77) on rgb(217, 217, 217)' && borders.white === 'rgb(0, 0, 0) on rgb(255, 255, 255)',
     `and each its background and outline (${JSON.stringify(borders)})`);
 
   /* ⋯ → formats: the timers and Daily lists to change, in the window, and done */
@@ -273,8 +283,7 @@ const server = http.createServer((req, res) => {
   ok(await until(async () => (await win(app)).width === 148), `switched on, a timer running, closed: room for its clock beside the button (${JSON.stringify(await win(app))})`);
   const clock = await page.evaluate(() => { const c = document.querySelector('.ov-clock'); return c && { text: c.textContent.trim(), color: getComputedStyle(c).color, shown: getComputedStyle(c).display !== 'none', x: c.getBoundingClientRect().right, icon: document.querySelector('.ov-icon').getBoundingClientRect().left }; });
   ok(clock && clock.shown && /^\d+:\d\d:\d\d$/.test(clock.text) && clock.x <= clock.icon, `its time left, left of the button (${clock && clock.text})`);
-  await sleep(1300);
-  ok(await page.evaluate(t => document.querySelector('.ov-clock').textContent.trim() !== t, clock && clock.text), 'counting down');
+  ok(await until(() => page.evaluate(t => document.querySelector('.ov-clock').textContent.trim() !== t, clock && clock.text), 3500), 'counting down');
   await shot(page, 'clocks');
   /* (toggleTimer is the play button's own: the page's, as on a phone that synced, or a timer running out) */
   await page.evaluate(i => toggleTimer(Number(i)), id);

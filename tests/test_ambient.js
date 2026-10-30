@@ -30,7 +30,7 @@ function withCanvas(state) {
   };
 }
 async function frames(state, ms) { const n = state.frames; await sleep(ms); return state.frames - n; }
-/* The lights are in the theme's accent colours, and the four themes' accents
+/* The lights are in the theme's accent colours, and the themes' own accents
  * are grey, with none (theme.js): so a check of how they move first gives the
  * theme a coloured accent, as a custom theme can have. */
 const colourful = (w, accent = '#5dcaa5') => w.themeSet('accent', accent);
@@ -151,7 +151,7 @@ const colourful = (w, accent = '#5dcaa5') => w.themeSet('accent', accent);
     ok(!off.d.getElementById('themeMotionToggle').checked && O.frames >= 1 && await frames(O, 800) === 0, 'turned off, Focus opens still');
   }
 
-  console.log('\n── 5. The four themes: a plain background ──');
+  console.log('\n── 5. The themes: a plain background ──');
   {
     const S = {};
     const { w, d } = await loadApp({ storage: BOOT, before: withCanvas(S) });

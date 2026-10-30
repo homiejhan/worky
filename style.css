@@ -1932,7 +1932,7 @@ body.motion-live .home-cal-badge.now::after { animation: nowRing 2.4s ease-out i
 .modal-danger {
   background: var(--danger);
   border: 1px solid var(--danger);
-  color: #fff;
+  color: var(--on-danger, #fff);   /* (dark on a light red: the Grey theme's) */
 }
 .modal-danger:hover { filter: brightness(1.08); }
 
@@ -2942,7 +2942,7 @@ body.motion-live .home-cal-badge.now::after { animation: nowRing 2.4s ease-out i
 
 /* preset chips */
 .theme-presets { display: flex; flex-wrap: wrap; gap: 10px 6px; }
-/* the four presets on one line */
+/* the presets on one line */
 .settings-section .theme-presets { column-gap: 12px; }
 .theme-chip {
   display: flex; flex-direction: column; align-items: center; gap: 5px;
@@ -3680,7 +3680,7 @@ body.format-mode .ov-fmt { display: inline-flex; color: var(--ink); }   /* Forma
 .ov-page[hidden] { display: none; }
 
 /* buttons and boxes in the columns: small, outlined */
-.ov-col .task-check { width: 12px; height: 12px; border-width: 1px; border-radius: 2px; }
+.ov-col .task-check { width: 12px; height: 12px; border-width: 1px; border-radius: 2px; border-color: var(--lc, var(--ink-3)); }   /* in its list's colour, whole */
 .ov-col .task-check svg { width: 8px; height: 8px; }
 .ov-col .task-check:hover { transform: none; border-color: var(--ink-2); }
 .ov-col .task-row { gap: 9px; padding: 1px 0; border-radius: 0; }
@@ -3762,12 +3762,17 @@ body.format-mode .ov-col .color-swatch { display: block; }   /* colours are chan
 .ov .home-progress.complete .home-progress-label, .ov .home-progress.complete .home-progress-pct { color: var(--ink-2); }
 /* today's tasks: the text in its list's colour (no dot), bold when overdue; due dates grey, red when overdue */
 .ov .home-dbd-tag { display: none; }
-.ov .home-dbd-check { border-color: color-mix(in srgb, var(--lc, var(--ink-3)) 70%, transparent); }
-.ov .home-dbd-row .home-task-text { color: var(--lc, var(--ink)); }
-.ov .home-tone-overdue .home-task-text { color: var(--lc, var(--ink)); font-weight: 700; }
-.ov .home-tone-overdue .home-dbd-check { border-color: color-mix(in srgb, var(--lc, var(--ink-3)) 70%, transparent); }
-.ov .home-tone-future { opacity: 0.6; }
-.ov .home-tone-future .home-task-text { color: var(--lc, var(--ink)); }
+.ov .home-dbd-check { border-color: var(--lc, var(--ink-3)); }
+.ov .home-dbd-row .home-task-text { color: var(--ink); }
+.ov .home-tone-overdue .home-task-text { color: var(--ink); font-weight: 700; }
+.ov .home-tone-overdue .home-dbd-check { border-color: var(--lc, var(--ink-3)); }
+.ov .home-tone-future { opacity: 1; }
+.ov .home-tone-future .home-task-text { color: var(--ink-3); }
+/* a grey line between the overdue ones, today's and the coming ones, as under the progress */
+.ov .home-tone-overdue + .home-tone-today, .ov .home-tone-overdue + .home-tone-future,
+.ov .home-tone-today + .home-tone-future, .ov .home-muted-note + .home-tone-future {
+  margin-top: 7px; padding-top: 8px; border-top: 1px solid var(--border);
+}
 .ov .home-task-text.done { color: var(--ink-3); font-weight: 400; }
 .ov .home-dbd-date { padding: 0; font-size: var(--ov-small); font-weight: 400; color: var(--ink-3); background: none; }
 .ov .home-tone-overdue .home-dbd-date { color: var(--danger); background: none; }

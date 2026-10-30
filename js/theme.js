@@ -23,12 +23,13 @@ const THEME_BG_LS_KEY   = 'focus-theme-bg';
 const THEME_BG_MAX_EDGE = 1920;      // uploaded images are downscaled to this
 const THEME_BG_MAX_B64  = 2.5e6;     // and refused above ~2.5 MB encoded
 
-/* Four themes, each a background and the outlines drawn on it (line). Text and
- * the accent are black, white or grey to match: the colour comes from the timers
- * and lists themselves. */
+/* Five themes, each a background and the outlines drawn on it (line), from
+ * black to white. Text and the accent are black, white or grey to match: the
+ * colour comes from the timers and lists themselves. */
 const THEME_PRESETS = [
   { id: 'black',     name: 'Black',      bg: '#000000', surface: '#000000', line: '#ffffff', ink: '#f2f2f2', ink2: '#a6a6a6', ink3: '#737373', accent: '#ffffff', danger: '#ff5c5c', font: 'DM Sans', radius: 12 },
   { id: 'darkgrey',  name: 'Dark grey',  bg: '#2a2a2a', surface: '#2a2a2a', line: '#8c8c8c', ink: '#ededed', ink2: '#b3b3b3', ink3: '#858585', accent: '#e6e6e6', danger: '#ff6b6b', font: 'DM Sans', radius: 12 },
+  { id: 'grey',      name: 'Grey',       bg: '#6b6b6b', surface: '#6b6b6b', line: '#e6e6e6', ink: '#ffffff', ink2: '#e3e3e3', ink3: '#c8c8c8', accent: '#ffffff', danger: '#ffb0a8', font: 'DM Sans', radius: 12 },
   { id: 'lightgrey', name: 'Light grey', bg: '#d9d9d9', surface: '#d9d9d9', line: '#4d4d4d', ink: '#1a1a1a', ink2: '#454545', ink3: '#6b6b6b', accent: '#1f1f1f', danger: '#c62828', font: 'DM Sans', radius: 12 },
   { id: 'white',     name: 'White',      bg: '#ffffff', surface: '#ffffff', line: '#000000', ink: '#111111', ink2: '#555555', ink3: '#8a8a8a', accent: '#000000', danger: '#d32f2f', font: 'DM Sans', radius: 12 },
 ];
@@ -253,13 +254,14 @@ export function applyTheme() {
   root.setProperty('--accent-3-rgb', themeRgbStr(acc3));
   root.setProperty('--on-accent',    themeLuma(t.accent) > 0.62 ? themeMix(t.bg, '#000000', light ? 0.85 : 0.9) : '#ffffff');
   /* the lights behind everything (ambient.js) are in the accent's colours; a
-   * grey accent (the four themes) has none, so the background stays plain */
+   * grey accent (the themes here) has none, so the background stays plain */
   const plain = themeIsGrey(t.accent);
   root.setProperty('--ambient-alpha', plain ? '0' : light ? '0.75' : '1');
   /* (nor does Settings offer to move what isn't there) */
   document.querySelectorAll('.settings-motion-row, #themeMotionHint').forEach(el => { el.style.display = plain ? 'none' : ''; });
   root.setProperty('--star', light ? '#c8921a' : '#E8B341');
   root.setProperty('--danger',     t.danger);
+  root.setProperty('--on-danger',  themeLuma(t.danger) > 0.62 ? '#2b0a07' : '#ffffff');   // (as --on-accent: dark only on a light red)
   root.setProperty('--danger-rgb', themeRgbStr(t.danger));
   root.setProperty('--danger-dim', themeRgba(t.danger, 0.12));
   root.setProperty('--shadow-pop',   light ? '0 18px 48px rgba(0,0,0,0.16), 0 2px 8px rgba(0,0,0,0.06)' : '0 18px 48px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3)');

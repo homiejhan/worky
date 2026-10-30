@@ -19,10 +19,11 @@ const rgb = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)).join(',
 console.log('\n── 1. Default boot applies Black ──');
 {
   const { w, d } = await boot();
-  eq(w.eval('THEME_PRESETS.map(p => p.name).join(", ")'), 'Black, Dark grey, Light grey, White', 'four themes, no others');
+  eq(w.eval('THEME_PRESETS.map(p => p.name).join(", ")'), 'Black, Dark grey, Grey, Light grey, White', 'five themes, black to white, no others');
   const blk = preset(w, 'black');
   eq(blk.bg + ' ' + blk.line, '#000000 #ffffff', 'Black: a black background with white outlines');
   eq(preset(w, 'darkgrey').bg + ' ' + preset(w, 'darkgrey').line, '#2a2a2a #8c8c8c', 'Dark grey: dark grey with grey outlines');
+  eq(preset(w, 'grey').bg + ' ' + preset(w, 'grey').line + ' ' + preset(w, 'grey').ink, '#6b6b6b #e6e6e6 #ffffff', 'Grey: grey with light outlines, white text');
   eq(preset(w, 'lightgrey').bg + ' ' + preset(w, 'lightgrey').line, '#d9d9d9 #4d4d4d', 'Light grey: light grey with dark grey outlines');
   eq(preset(w, 'white').bg + ' ' + preset(w, 'white').line, '#ffffff #000000', 'White: white with black outlines');
   eq(rootVar(w, '--bg-solid'), blk.bg, 'bg-solid is black');
@@ -50,10 +51,10 @@ console.log('\n── 2. Settings → preset chip switches theme ──');
   d.getElementById('settingsBtn').click();
   ok(d.getElementById('settingsModal').classList.contains('show'), 'settings opens');
   const chips = d.querySelectorAll('#themePresets-s .theme-chip');
-  eq(chips.length, 4, 'one chip per theme: four');
-  eq([...chips].map(c => c.dataset.preset).join(), 'black,darkgrey,lightgrey,white', 'in order');
+  eq(chips.length, 5, 'one chip per theme: five');
+  eq([...chips].map(c => c.dataset.preset).join(), 'black,darkgrey,grey,lightgrey,white', 'in order');
   ok(d.querySelector('#themePresets-s .theme-chip.active').dataset.preset === 'black', 'black chip active');
-  ok(chips[3].getAttribute('style').includes('--c-line:#000000'), 'a chip shows its theme\'s outlines');
+  ok(chips[4].getAttribute('style').includes('--c-line:#000000'), 'a chip shows its theme\'s outlines');
   d.querySelector('#themePresets-s [data-preset="white"]').click();
   const wht = preset(w, 'white');
   eq(rootVar(w, '--bg-solid'), wht.bg, 'white bg applied');
@@ -68,6 +69,11 @@ console.log('\n── 2. Settings → preset chip switches theme ──');
   d.querySelector('#themePresets-s [data-preset="darkgrey"]').click();
   eq(rootVar(w, '--bg-solid') + ' ' + rootVar(w, '--line') + ' ' + rootVar(w, '--scheme'), '#2a2a2a #8c8c8c dark', 'dark grey, grey outlines');
   eq(rootVar(w, '--on-accent'), '#040404', 'dark text on its light grey accent');
+  d.querySelector('#themePresets-s [data-preset="grey"]').click();
+  eq(rootVar(w, '--bg-solid') + ' ' + rootVar(w, '--line') + ' ' + rootVar(w, '--scheme'), '#6b6b6b #e6e6e6 dark', 'grey, light outlines');
+  eq(rootVar(w, '--on-danger'), '#2b0a07', 'its light red (readable on grey) has dark text on it, in a red button');
+  d.querySelector('#themePresets-s [data-preset="black"]').click();
+  eq(rootVar(w, '--on-danger'), '#ffffff', 'the others\' reds keep white');
 }
 
 console.log('\n── 3. Editor: live color edit detaches preset; hex + swatch stay in sync ──');
