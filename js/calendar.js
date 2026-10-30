@@ -562,7 +562,8 @@ export function calToggleWeekMode() {
 export function calRefresh() {
   if (taskLinkSyncTitles()) calSave();
   if (calDesktopOpen) calRenderDesktop();
-  if (isMobileLayout()) calRenderMobile();
+  /* the phone's day view, also in the desktop overlay's Calendar tab (overlay.js) */
+  if (isMobileLayout() || document.documentElement.classList.contains('overlay-app')) calRenderMobile();
 }
 
 export function calTickNow() {

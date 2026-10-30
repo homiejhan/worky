@@ -54,20 +54,27 @@ On macOS 14 and earlier you can instead right-click Focus Overlay, choose
 2. Google's sign-in opens in your browser. Pick your account, and when the
    browser asks to open Focus Overlay, allow it.
 
-The panel then shows your own timers and today's tasks, kept in step with your
-other devices.
+The panel then shows your own timers and Focus, kept in step with your other
+devices.
 
 ### 5. Use it
 
 - **Drag the button** anywhere. Let go and it glides to the nearer side of the screen.
-- **Click it** for the panel: your timers on the left; today's tasks and your
-  Daily lists on the right. It's plain on purpose: a typewriter's letters, a task
-  in its list's color (bold when overdue), due dates in gray (red when passed).
+- **Click it** to open the panel beside it, and again to close it. The button
+  stays; drag it while the panel is open and the panel goes with it.
+- **The panel:** your timers on the left (each one's name in gray over its time,
+  then **est. finish**: when they'd all be done, one after another from now),
+  and a tab of Focus on the right: **Home** when it opens, and **Lists**,
+  **Daily**, **Calendar**, **Budget** (and **Digest**, while it's on) on the
+  small round buttons under the checkmark. It's plain on purpose: a typewriter's
+  letters, a task in its list's color (bold when overdue), due dates in gray (red
+  when passed).
+- **Clocks when minimized** (the switch under the timers): while the panel is
+  closed, each running timer's time left shows beside the button.
 - **⋯** at the top right: **settings**, **formats** (add or change timers and
   Daily lists), **reset the day**, **open in the browser** (all of Focus), and
-  **more…** (Start at login, Quit).
-- **Minimize** with the **–** at the top right (or Escape) to go back to the button.
-  Drag the panel by the words along its top (*timers*, *today*) to move it.
+  **more…** (Start at login, Quit). The **–** next to it (or Escape) closes the
+  panel too.
 - **Right-click the button** for **Start at login** and **Quit Focus Overlay**.
   It has no Dock icon.
 

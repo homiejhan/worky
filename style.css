@@ -3545,12 +3545,15 @@ body.motion-live .home-cal-badge.now::after { animation: nowRing 2.4s ease-out i
 
 /* ═══════════════════════════════════════════════════════
    DESKTOP OVERLAY (overlay.js, in the desktop app: desktop/)
-   The window is see-through and sized by the app: the round button
-   alone, or the panel with the timers, today's tasks and the Daily
-   lists. The rest of Focus is hidden; dialogs and toasts still show.
+   The window is see-through, and laid out by the app round the
+   button: the button against a side of the screen (data-side), as
+   far down the window as --ov-btn-top says, and beside it, toward
+   the middle, the panel while it's open (with the round tab buttons
+   under the button) or the running timers' clocks while it's not.
+   The rest of Focus is hidden; dialogs and toasts still show.
    Plain on purpose: a typewriter's letters, small; no bar and no
    cards, the theme's outline round the panel; colour only where it
-   says something (a timer's, a list's, red for overdue).
+   says something (a timer's time, a list's, red for overdue).
    ═══════════════════════════════════════════════════════ */
 .ov { display: none; }
 html.overlay-app {
@@ -3560,20 +3563,22 @@ html.overlay-app {
   --font-display: 'Courier Prime', 'Courier New', Courier, monospace;
   --ov-text: 12px;
   --ov-small: 11px;
-  --ov-left: minmax(210px, 250px);               /* the timers' column */
+  --ov-left: minmax(200px, 230px);               /* the timers' column */
+  --ov-btn: 64px;                                /* the button's square (the round, and room for its shadow) */
 }
 html.overlay-app, html.overlay-app body { height: 100%; background: transparent !important; overflow: hidden; }
 html.overlay-app body > :not(#overlay):not(.modal-overlay):not(#toast) { display: none !important; }
 html.overlay-app .ov { display: block; position: fixed; inset: 0; font-family: var(--font-sans); }
-.ov-icon, .ov-panel { display: none; }
-.ov[data-state="icon"] .ov-icon { display: flex; }
+.ov-panel, .ov-tabs, .ov-clocks { display: none; }
 .ov[data-state="panel"] .ov-panel { display: flex; }
+.ov[data-state="panel"] .ov-tabs, .ov[data-state="icon"] .ov-clocks { display: flex; }
 html.overlay-app:not([data-ov="panel"]) #toast { display: none; }   /* no room for it beside the button */
 
-/* the button: the checkmark, on the theme's background in its outline (room for its shadow around it) */
+/* the button: the checkmark, on the theme's background in its outline; filled in while the panel is open */
 .ov-icon {
-  position: absolute; inset: 7px;
-  align-items: center; justify-content: center;
+  position: absolute; top: calc(var(--ov-btn-top, 0px) + 7px);
+  width: calc(var(--ov-btn) - 14px); height: calc(var(--ov-btn) - 14px);
+  display: flex; align-items: center; justify-content: center;
   border-radius: 50%;
   color: var(--ink);
   background: var(--bg-solid);
@@ -3582,14 +3587,46 @@ html.overlay-app:not([data-ov="panel"]) #toast { display: none; }   /* no room f
   cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
   transition: transform 0.15s var(--ease);
 }
+.ov[data-side="right"] .ov-icon { right: 7px; }
+.ov[data-side="left"] .ov-icon { left: 7px; }
+.ov[data-state="panel"] .ov-icon { color: var(--bg-solid); background: var(--ink); border-color: var(--ink); }
 .ov-icon:hover { transform: scale(1.06); }
 .ov-icon:active { cursor: grabbing; transform: scale(0.96); }
 .ov-icon:focus-visible { outline: 2px solid var(--line); outline-offset: 2px; }
 .ov-icon svg { width: 24px; height: 24px; }
 
-/* the panel: timers on the left, today's tasks and the Daily lists on the right */
+/* the tabs: small round buttons under the button (over it, near the screen's bottom) */
+.ov-tabs { position: absolute; width: var(--ov-btn); flex-direction: column; align-items: center; gap: 6px; padding: 2px 0; }
+.ov[data-side="right"] .ov-tabs { right: 0; }
+.ov[data-side="left"] .ov-tabs { left: 0; }
+.ov-tab {
+  width: 30px; height: 30px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; border: 1px solid var(--border-mid);
+  color: var(--ink-3); background: var(--bg-solid);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+.ov-tab[hidden] { display: none; }
+.ov-tab svg { width: 14px; height: 14px; }
+.ov-tab:hover, .ov-tab[aria-selected="true"] { color: var(--ink); border-color: var(--line); }
+.ov-tab[aria-selected="true"] { box-shadow: 0 0 0 1px var(--line), 0 2px 6px rgba(0,0,0,0.3); }
+
+/* the clocks: each running timer's time left, beside the closed button */
+.ov-clocks { position: absolute; width: calc(100% - var(--ov-btn)); flex-direction: column; gap: 4px; }
+.ov[data-side="right"] .ov-clocks { right: var(--ov-btn); align-items: flex-end; }
+.ov[data-side="left"] .ov-clocks { left: var(--ov-btn); align-items: flex-start; }
+.ov-clock {
+  height: 22px; padding: 0 8px;
+  display: inline-flex; align-items: center;
+  border-radius: 11px; border: 1px solid var(--border-mid);
+  background: var(--bg-solid); color: var(--tc);
+  font-size: var(--ov-text); font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+
+/* the panel: beside the button, the timers on the left and a tab of Focus on the right */
 .ov-panel {
-  position: absolute; inset: 8px;
+  position: absolute; top: 8px; bottom: 8px;
   flex-direction: column;
   background: var(--bg-solid);
   border: 1px solid var(--line);
@@ -3600,6 +3637,8 @@ html.overlay-app:not([data-ov="panel"]) #toast { display: none; }   /* no room f
   font-size: var(--ov-text);
   line-height: 1.5;
 }
+.ov[data-side="right"] .ov-panel { left: 8px; right: calc(var(--ov-btn) + 4px); }
+.ov[data-side="left"] .ov-panel { left: calc(var(--ov-btn) + 4px); right: 8px; }
 /* along the top, no bar: the columns' names, which the panel is dragged by, and the corner */
 .ov-top {
   display: grid; grid-template-columns: var(--ov-left) minmax(0, 1fr) auto; align-items: center;
@@ -3638,67 +3677,93 @@ body.format-mode .ov-fmt { display: inline-flex; color: var(--ink); }   /* Forma
 
 .ov-cols { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--ov-left) minmax(0, 1fr); }
 .ov-col { min-height: 0; overflow-y: auto; padding: 6px 18px 16px; scrollbar-width: thin; }
+.ov-page[hidden] { display: none; }
 
 /* buttons and boxes in the columns: small, outlined */
 .ov-col .task-check { width: 12px; height: 12px; border-width: 1px; border-radius: 2px; }
 .ov-col .task-check svg { width: 8px; height: 8px; }
 .ov-col .task-check:hover { transform: none; border-color: var(--ink-2); }
 .ov-col .task-row { gap: 9px; padding: 1px 0; border-radius: 0; }
-.ov-col .task-text, .ov-col .home-task-text { height: 18px; line-height: 18px; padding: 0; }   /* a line each, the same in both lists */
 .ov-col .task-row:hover { background: none; }
+.ov-col .task-text, .ov-col .home-task-text { height: 18px; line-height: 18px; padding: 0; font-size: var(--ov-text); }   /* a line each, the same in every list */
 .ov-col .color-swatch { display: none; width: 9px; height: 9px; }
 body.format-mode .ov-col .color-swatch { display: block; }   /* colours are changed in Formats */
 .ov-col .fmt-add-timer, .ov-col .fmt-add-daily {
   padding: 3px 8px; font-size: var(--ov-small); border-radius: 4px; border-color: var(--border-mid);
 }
 .ov-col .fmt-add-timer { margin-top: 8px; }
-.ov-col .fmt-add-daily { align-self: flex-start; margin: 0 0 8px; }
+.ov-col .fmt-add-daily { align-self: flex-start; }
 .ov-col .fmt-add-timer:hover, .ov-col .fmt-add-daily:hover { border-color: var(--line); color: var(--ink); background: none; }
-.ov-col .fmt-remove-timer, .ov-col .fmt-remove-daily, .ov-col .list-sched-btn, .ov-col .task-del, .ov-col .list-star-btn { width: 18px; height: 18px; font-size: 13px; }
+.ov-col .fmt-remove-timer, .ov-col .fmt-remove-daily, .ov-col .list-sched-btn, .ov-col .task-del, .ov-col .list-star-btn, .ov-col .todo-delete-btn { width: 18px; height: 18px; font-size: 13px; }
 .ov-col .drag-handle, .ov-col .list-drag-handle { width: 10px; }
+.ov-col .add-btn { padding: 2px 8px; font-size: var(--ov-small); font-weight: 400; color: var(--ink-2); border-color: var(--border-mid); border-radius: 4px; }
+.ov-col .add-btn:hover { color: var(--ink); border-color: var(--line); background: none; }
+.ov-col .empty-state { padding: 6px 0; border: none; text-align: left; font-size: var(--ov-small); }
 
-/* timers: a line each, the name and the time in the timer's colour, play and reset after */
-.ov .timer-stack { gap: 0; }
+/* timers: two lines each, the name in grey over the time in the timer's colour and its buttons, which aren't */
+.ov .timer-stack { gap: 6px; }
 .ov .timer-card {
-  display: flex; align-items: center; gap: 8px;
-  padding: 3px 0; overflow: visible;
+  display: block; padding: 2px 0; overflow: visible;
   background: none; border: none; border-radius: 0; box-shadow: none;
 }
 .ov .timer-card::before, .ov .timer-progress, .ov .timer-sub { display: none; }
 .ov .timer-card:hover, .ov .timer-card.running { box-shadow: none; }
-.ov .timer-header { flex: 1; min-width: 0; margin: 0; gap: 7px; }
-.ov .timer-drag-handle { width: 10px; margin: 0 -3px 0 -14px; padding: 0; opacity: 0; }
+.ov .timer-header { margin: 0; gap: 6px; }
+.ov .timer-drag-handle { width: 10px; margin: 0 -2px 0 -14px; padding: 0; opacity: 0; }
 .ov .timer-card:hover .timer-drag-handle { opacity: 0.6; }
-.ov .timer-title-input { font-size: var(--ov-text); font-weight: 400; color: var(--tc); text-overflow: ellipsis; }
-.ov .timer-body { flex: none; gap: 5px; }
-.ov .timer-display { flex: none; font-size: var(--ov-text); font-weight: 400; letter-spacing: 0; line-height: inherit; color: var(--tc); }
-.ov .timer-card.running .timer-display { font-weight: 700; }
-.ov .timer-time-edit { flex: none; width: 72px; font-size: var(--ov-text); padding: 0 4px; border-radius: 3px; }
+.ov .timer-title-input { font-size: var(--ov-text); font-weight: 400; color: var(--ink-2); text-overflow: ellipsis; }
+.ov .timer-body { gap: 5px; margin-top: 1px; }
+.ov .timer-display { flex: 1; font-size: var(--ov-text); font-weight: 400; letter-spacing: 0; line-height: 18px; color: var(--tc); }
+.ov .timer-card.running .timer-display { font-weight: 700; color: var(--tc); }
+.ov .timer-time-edit { flex: 1; font-size: var(--ov-text); padding: 0 4px; border-radius: 3px; }
 .ov .play-btn, .ov .reset-btn {
   width: 18px; height: 18px; border-radius: 4px;
   border: 1px solid var(--border-mid); background: none; color: var(--ink-2); box-shadow: none;
 }
 .ov .play-btn svg, .ov .reset-btn svg { width: 7px; height: 8px; }
-.ov .play-btn:hover, .ov .reset-btn:hover, .ov .play-btn.running { border-color: var(--tc); color: var(--tc); background: none; box-shadow: none; }
-.ov .timer-card.timer-drop-before { box-shadow: 0 -1px 0 var(--line); }
-.ov .timer-card.timer-drop-after  { box-shadow: 0 1px 0 var(--line); }
+.ov .play-btn:hover, .ov .reset-btn:hover, .ov .play-btn.running { border-color: var(--line); color: var(--ink); background: none; box-shadow: none; }
+.ov .timer-card.timer-drop-before { box-shadow: 0 -3px 0 -2px var(--line); }
+.ov .timer-card.timer-drop-after  { box-shadow: 0 3px 0 -2px var(--line); }
 
-/* today: Home's progress and today's tasks (no title: "today" heads the column), the text in its list's colour */
-.ov #homeContainer-d { display: block; max-width: none; margin: 0; padding: 0; }
-.ov #homeContainer-d > :not(.home-hero):not(.home-sec-today) { display: none; }
-.ov #homeContainer-d .home-hero { margin: 0; padding: 0; background: none; border: none; box-shadow: none; }
-.ov #homeContainer-d .home-hero-top, .ov #homeContainer-d .home-digest-btn, .ov .home-sec-today .home-section-title { display: none; }
-.ov .home-progress { margin: 0 0 8px; max-width: none; }
+/* under the timers: est. finish, and the clocks' switch */
+.ov-finish { display: flex; justify-content: space-between; gap: 8px; margin-top: 14px; padding-top: 8px; border-top: 1px solid var(--border); font-size: var(--ov-small); color: var(--ink-3); }
+.ov-finish-time { color: var(--ink); }
+.ov-switch-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: var(--ov-small); color: var(--ink-3); cursor: pointer; }
+.ov-switch-input { position: absolute; opacity: 0; width: 0; height: 0; }
+.ov-switch { position: relative; width: 26px; height: 14px; flex-shrink: 0; border-radius: 7px; border: 1px solid var(--border-mid); transition: background 0.15s, border-color 0.15s; }
+.ov-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); transition: transform 0.15s, background 0.15s; }
+.ov-switch-input:checked + .ov-switch { background: var(--ink); border-color: var(--ink); }
+.ov-switch-input:checked + .ov-switch::after { transform: translateX(12px); background: var(--bg-solid); }
+.ov-switch-input:focus-visible + .ov-switch { outline: 1px solid var(--line); outline-offset: 2px; }
+.ov-switch-input:disabled + .ov-switch { opacity: 0.4; }
+.ov-switch-hint { margin-top: 4px; font-size: 10.5px; color: var(--ink-3); }
+.ov-switch-hint[hidden] { display: none; }
+
+/* every tab: a section's name in small grey, no cards */
+.ov-main .home-section-title, .ov-main .dbd-section-header .section-sublabel, .ov-main .dbd-group-header {
+  margin: 0 0 4px; padding: 0; font-size: var(--ov-small); font-weight: 400; letter-spacing: 0.08em; text-transform: lowercase; color: var(--ink-3);
+}
+.ov-main .home-section-title::before { display: none; }
+.ov-main .home-card, .ov-main .dbd-group, .ov-main .dbd-group-overdue, .ov-main .home-list-card, .ov-main .dbd-add-row {
+  padding: 0; background: none; border: none; border-radius: 0; box-shadow: none;
+}
+
+/* home: Home's own, without the greeting and the balance (and the timers, which are on the left) */
+.ov #homeContainer-d { display: flex; flex-direction: column; align-items: stretch; gap: 16px; max-width: none; margin: 0; padding: 0; }
+.ov #homeContainer-d > .home-sec-timers, .ov #homeContainer-d .home-hero-top, .ov #homeContainer-d .home-digest-btn { display: none; }
+.ov #homeContainer-d .home-hero { display: block; margin: 0; padding: 0; background: none; border: none; box-shadow: none; }
+.ov #homeContainer-d .home-hero:not(:has(.home-progress)) { display: none; }
+.ov #homeContainer-d .home-section { margin: 0; }
+.ov .home-progress { width: 100%; margin: 0; max-width: none; }
 .ov .home-progress-meta { margin-bottom: 4px; }
 .ov .home-progress-label, .ov .home-progress-pct { font-size: var(--ov-small); font-weight: 400; color: var(--ink-3); }
 .ov .home-progress-track { height: 1px; border: none; border-radius: 0; background: var(--border); }
 .ov .home-progress-fill, .ov .home-progress.complete .home-progress-fill { border-radius: 0; background: var(--ink-2); box-shadow: none; }
 .ov .home-progress.complete .home-progress-label, .ov .home-progress.complete .home-progress-pct { color: var(--ink-2); }
-.ov .home-sec-today { margin: 0; }
-.ov .home-sec-today .home-card { padding: 0; background: none; border: none; box-shadow: none; }
+/* today's tasks: the text in its list's colour (no dot), bold when overdue; due dates grey, red when overdue */
 .ov .home-dbd-tag { display: none; }
 .ov .home-dbd-check { border-color: color-mix(in srgb, var(--lc, var(--ink-3)) 70%, transparent); }
-.ov .home-task-text { font-size: var(--ov-text); color: var(--lc, var(--ink)); }
+.ov .home-dbd-row .home-task-text { color: var(--lc, var(--ink)); }
 .ov .home-tone-overdue .home-task-text { color: var(--lc, var(--ink)); font-weight: 700; }
 .ov .home-tone-overdue .home-dbd-check { border-color: color-mix(in srgb, var(--lc, var(--ink-3)) 70%, transparent); }
 .ov .home-tone-future { opacity: 0.6; }
@@ -3708,12 +3773,38 @@ body.format-mode .ov-col .color-swatch { display: block; }   /* colours are chan
 .ov .home-tone-overdue .home-dbd-date { color: var(--danger); background: none; }
 .ov .home-dbd-cal { font-size: var(--ov-small); color: var(--ink-3) !important; }
 .ov .home-muted-note { padding: 2px 0; font-size: var(--ov-small); }
-.ov-none { display: none; font-size: var(--ov-small); color: var(--ink-3); }
-.ov-tasks:not(:has(.home-sec-today)) .ov-none { display: block; }
+/* starred lists: each one's name in its colour over its tasks */
+.ov .home-lists-grid { display: flex; flex-direction: column; gap: 10px; }
+.ov .home-list-strip, .ov .home-list-star { display: none; }
+.ov .home-list-title { padding: 0; font-size: var(--ov-text); font-weight: 700; color: var(--lc, var(--ink)); background: none; border: none; }
+.ov .home-list-tasks { padding: 0; }
+/* heads up, and the next 4 hours */
+.ov .home-insights { gap: 6px; }
+.ov .home-insight { padding: 6px 8px; gap: 8px; background: none; border: 1px solid var(--border); border-radius: 6px; box-shadow: none; }
+.ov .hi-title { font-size: var(--ov-text); }
+.ov .hi-text { font-size: var(--ov-small); color: var(--ink-2); }
+.ov .hi-go { padding: 2px 8px; font-size: var(--ov-small); border-radius: 4px; }
+.ov .home-cal-card { display: flex; flex-direction: column; gap: 4px; }
+.ov .home-cal-event { padding: 2px 0 2px 8px; border-width: 0 0 0 2px; border-radius: 0; background: none !important; box-shadow: none; }
+.ov .home-cal-event-title { font-size: var(--ov-text); font-weight: 400; }
+.ov .home-cal-event-time { font-size: var(--ov-small); color: var(--ink-3); }
+.ov .home-cal-badge { padding: 0; font-size: var(--ov-small); color: var(--ink-3); background: none; }
+.ov .home-cal-badge.now { color: var(--ink); }
 
-/* daily: each list's name in its colour, its tasks under it */
-.ov .ov-label-daily { padding: 16px 0 6px; }
-.ov #defaultContainer-d { display: flex; flex-direction: column; gap: 12px; }
+/* lists and daily: a list's name in its colour over its tasks; Day by Day's days in grey */
+.ov #listsSection-d, .ov #dailySection-d { display: flex; flex-direction: column; gap: 10px; }
+.ov .dbd-section-header { margin: 6px 0 0; }
+.ov .dbd-add-row { gap: 6px; border-bottom: 1px solid var(--border-mid); padding-bottom: 4px; }
+.ov .dbd-new-text { padding: 2px 0; font-size: var(--ov-text); }
+.ov .dbd-new-date, .ov .dbd-tag-select, .ov .dbd-date-btn, .ov .task-date-chip { padding: 1px 6px; font-size: var(--ov-small); background: none; border: 1px solid var(--border); border-radius: 4px; }
+.ov .dbd-stack { gap: 10px; }
+.ov .dbd-tagged { border-left: none; padding-left: 0; }
+.ov .dbd-tagged .task-text { color: var(--tagc); }
+.ov .dbd-overdue-row .task-text { font-weight: 700; }
+.ov .dbd-overdue-row .dbd-date-btn { color: var(--danger); background: none; }
+.ov .dbd-header-overdue { color: var(--danger); }
+.ov .dbd-count { padding: 0 4px; font-size: 10px; background: none; }
+.ov #todoContainer-d, .ov #defaultContainer-d { display: flex; flex-direction: column; gap: 12px; }
 .ov .todo-card, .ov .todo-card.starred, .ov .todo-card:hover {
   overflow: visible; background: none; border: none; border-radius: 0; box-shadow: none;
 }
@@ -3728,10 +3819,34 @@ body.format-mode .ov-col .color-swatch { display: block; }   /* colours are chan
 .ov .list-sched-pill { padding: 0; font-size: var(--ov-small); font-weight: 400; color: var(--ink-3); background: none; }
 .ov .todo-tasks { padding: 2px 0 0; min-height: 0; }
 .ov .todo-card .task-text { font-size: var(--ov-text); }
-.ov .todo-card .task-text.done { color: var(--ink-3); }
-.ov .todo-card .task-del, .ov .todo-add-task { display: none; }
-body.format-mode .ov .todo-card .task-del { display: flex; }                 /* (a Daily list's tasks change in Formats) */
-body.format-mode .ov .todo-add-task { display: block; padding: 0; }
+.ov .todo-card .task-text.done, .ov .dbd-row .task-text.done { color: var(--ink-3); }
+.ov .todo-card[data-is-default="1"] .task-del, .ov .todo-card[data-is-default="1"] .todo-add-task { display: none; }
+body.format-mode .ov .todo-card[data-is-default="1"] .task-del { display: flex; }   /* (a Daily list's tasks change in Formats) */
+body.format-mode .ov .todo-card[data-is-default="1"] .todo-add-task { display: block; }
+.ov .todo-add-task { padding: 0; }
 .ov .add-task-btn { padding: 2px 0; font-size: var(--ov-small); }
 .ov .add-task-btn:hover { background: none; }
 .ov .daily-empty { padding: 0; border: none; text-align: left; font-size: var(--ov-small); }
+
+/* calendar: the phone's day, its hours scrolling in the column's height */
+.ov-main:has(.ov-page-calendar:not([hidden])) { overflow: hidden; display: flex; flex-direction: column; padding-bottom: 8px; }
+.ov .ov-page-calendar:not([hidden]) { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.ov .cal-mobile-header { padding: 0 0 6px; border-bottom: 1px solid var(--border); }
+.ov .cal-day-title { font-size: var(--ov-text); font-weight: 700; letter-spacing: 0; }
+.ov .cal-nav-btn { width: 22px; height: 22px; background: none; border-color: var(--border-mid); }
+.ov .cal-grid-wrap { flex: 1; min-height: 0; overflow-y: auto; }
+.ov .cal-color-filter { padding: 6px 0; gap: 6px; }
+.ov .cal-color-filter-chip { width: 14px; height: 14px; }
+
+/* budget and digest: their own pages in the column's width, their names already heading it, their figures small */
+.ov #budgetContainer-d, .ov #digestContainer-d { max-width: none; margin: 0; padding: 0; }
+.ov .budget-wrap { gap: 12px; }
+.ov .budget-wrap > .page-head, .ov #digestContainer-d .page-title { display: none; }
+.ov .budget-figure, .ov .budget-figure.over { padding: 10px 12px; background: none; border: 1px solid var(--border); border-radius: 6px; box-shadow: none; }
+.ov .budget-figure.over { border-color: var(--danger); }
+.ov .budget-figure::after { display: none; }
+.ov .budget-figure-label, .ov .budget-figure-note, .ov .budget-figure-sub { font-size: var(--ov-small); font-weight: 400; }
+.ov .budget-figures { gap: 24px; }
+.ov .budget-figures .budget-figure-value, .ov .budget-figures.long .budget-figure-value { font-size: 20px; letter-spacing: 0; }
+.ov .budget-settings, .ov .budget-add-row, .ov .budget-purchase-row, .ov .runway { background: none; box-shadow: none; border-radius: 6px; }
+.ov .budget-section-header .section-sublabel, .ov .budget-spent { font-size: var(--ov-small); font-weight: 400; color: var(--ink-3); }

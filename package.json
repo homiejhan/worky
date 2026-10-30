@@ -5,7 +5,7 @@
     "bank:cases": "node --experimental-vm-modules --disable-warning=ExperimentalWarning tests/bank_cases.js",
     "bank": "node backend/bank/dev-server.mjs",
     "bank:check": "node backend/bank/check.mjs",
-    "overlay:e2e": "xvfb-run -a node tests/e2e_overlay.js"
+    "overlay:e2e": "xvfb-run -a -s \"-screen 0 2560x1440x24\" node tests/e2e_overlay.js"
   },
   "devDependencies": {
     "jsdom": "^30.1.0"

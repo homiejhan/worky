@@ -72,7 +72,7 @@ jobs:
           gh release create desktop-latest Focus-Overlay-mac.zip \
             --target "$GITHUB_SHA" \
             --title "Focus Overlay for Mac" \
-            --notes "Focus as a round button above every window: click it for your timers and today's tasks. One app for Apple Silicon and Intel Macs.
+            --notes "Focus as a round button above every window: click it for your timers and Focus's tabs beside it, and switch on clocks when minimized to keep the running timers in sight. One app for Apple Silicon and Intel Macs.
 
           Install: open Focus-Overlay-mac.zip, move Focus Overlay to Applications, and open it. When macOS says \"Focus Overlay\" Not Opened, click Done, then System Settings → Privacy & Security → Open Anyway (or run: xattr -dr com.apple.quarantine \"/Applications/Focus Overlay.app\").
 

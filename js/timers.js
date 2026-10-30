@@ -282,13 +282,21 @@ export function toggleWakeup() {
   saveToLocal();
 }
 
-export function updateTimerSummary() {
-  const totalSecs = timers.reduce((sum, t) => sum + Math.round(getRemaining(t)), 0);
+/* The timers' time left, all of it, and when it would be over if they ran one
+ * after another from now ("9:42 pm"): the summary here, and the desktop
+ * overlay's est. finish (overlay.js). */
+export function timersRemaining() {
+  return timers.reduce((sum, t) => sum + Math.round(getRemaining(t)), 0);
+}
+export function timerFinishText(totalSecs = timersRemaining()) {
   const finishTime = new Date(Date.now() + totalSecs * 1000);
   const hh = finishTime.getHours();
   const mm = String(finishTime.getMinutes()).padStart(2, '0');
-  const ampm = hh >= 12 ? 'pm' : 'am';
-  const h12 = hh % 12 || 12;
+  return `${hh % 12 || 12}:${mm} ${hh >= 12 ? 'pm' : 'am'}`;
+}
+
+export function updateTimerSummary() {
+  const totalSecs = timersRemaining();
 
   const html = wokenUp ? `
     <div class="timer-summary-row">
@@ -297,7 +305,7 @@ export function updateTimerSummary() {
     </div>
     <div class="timer-summary-row">
       <span class="timer-summary-label">Est. finish</span>
-      <span class="timer-summary-value">${h12}:${mm} ${ampm}</span>
+      <span class="timer-summary-value">${timerFinishText(totalSecs)}</span>
     </div>` : '';
 
   ['d','m'].forEach(p => {

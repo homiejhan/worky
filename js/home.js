@@ -15,6 +15,7 @@ import {
   budgetDesktopOpen, budgetToggleDesktop, money, runwayResult, todayBalance, totalBalance,
 } from './budget.js';
 import { digestDesktopOpen, digestToggleDesktop, homeDigestButtonHtml } from './digest.js';
+import { overlayApp, overlayTab } from './overlay.js';
 import { shiftsOnDays } from './shifts.js';
 import { addDays } from './runway.js';
 import { deadlineClashes, runwayWarning } from './insights.js';
@@ -215,6 +216,7 @@ function homeInsightsHtml() {
 }
 /* The button on an insight card: to the calendar or the budget. */
 export function homeInsightGo(where) {
+  if (overlayApp()) { overlayTab(where === 'budget' ? 'budget' : 'calendar'); return; }   // the desktop overlay: its own tab
   if (where === 'budget') { openBudgetTab(); return; }
   if (isMobileLayout()) goTab('calendar', true);
   else if (!calDesktopOpen) calToggleDesktop();
@@ -279,7 +281,7 @@ function homeListCard(list) {
       </div>`;
   }).join('');
   return `
-    <div class="home-list-card">
+    <div class="home-list-card" style="--lc:${list.color}">
       <div class="home-list-strip" style="background:${list.color}"></div>
       <div class="home-list-title">
         <span class="home-list-star">${STAR_SVG}</span>

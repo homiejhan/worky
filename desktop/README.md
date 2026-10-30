@@ -3,10 +3,14 @@
 Focus as a round button with its checkmark, above every window on your Mac.
 
 - **Drag it** anywhere. Let go and it glides to the nearer side of the screen.
-- **Click it** for a panel with your timers on the left, and today's tasks and
-  your Daily lists on the right.
+- **Click it** for a panel beside it with your timers on the left and a tab of
+  Focus on the right (Home first; the others on the round buttons under the
+  checkmark). Click it again to close it; drag it while it's open and the panel
+  goes along.
+- **Clocks when minimized** (under the timers): the running timers' time left
+  beside the button while the panel is closed.
 - **⋯** (top right) has Settings, Formats, Reset the day, Open in the browser and
-  the app's own menu; **–** (or Escape) minimizes it back to the button.
+  the app's own menu; **–** (or Escape) closes the panel too.
 - **Right-click** the button for **Start at login** and **Quit Focus Overlay**.
 
 It shows the live Focus site, so it is always the latest version, and it syncs
@@ -38,14 +42,15 @@ instead of the live site.
 ## How it is made
 
 - `main.js`: the window (no frame, see-through, above the others, on every
-  desktop), moving it while the button is dragged, sizing it for the panel, the
-  sign-in hand-off (`focus-overlay://` links), the right-click menu, and where the
-  button was.
+  desktop), laid out round the button: the panel or the clocks beside it, moving
+  it while the button is dragged, the sign-in hand-off (`focus-overlay://`
+  links), the right-click menu, and where the button was.
 - `preload.js`: what the Focus page in the window may ask of the app
   (`window.focusOverlay`).
-- `snap.js`: where the window goes: the nearer side, kept on the screen.
-- `../js/overlay.js`: the button and the panel, drawn by the Focus page itself
-  when it finds itself in this app.
+- `snap.js`: where the window goes: the button against the nearer side, what
+  is beside it toward the middle, all of it on the screen.
+- `../js/overlay.js`: the button, the panel, its tabs and the clocks, drawn by
+  the Focus page itself when it finds itself in this app.
 
 Tests: `npm test -- overlay` (the page and `snap.js`) and `npm run overlay:e2e`
 from the repository's root (the app itself, driven with the mouse; needs
