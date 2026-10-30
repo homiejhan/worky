@@ -3535,3 +3535,87 @@ body.motion-live .home-cal-badge.now::after { animation: nowRing 2.4s ease-out i
 /* Status / hint copy: give it a real line-height so wrapped hints don't
    look cramped. */
 .theme-bg-status, .modal-sub, .dg-empty-text, .home-muted-note, .budget-field-hint { line-height: 1.5; }
+
+/* ═══════════════════════════════════════════════════════
+   DESKTOP OVERLAY (overlay.js, in the desktop app: desktop/)
+   The window is see-through and sized by the app: the round button
+   alone, or the panel with the timers and today's tasks. The rest of
+   Focus is hidden; dialogs and toasts still show.
+   ═══════════════════════════════════════════════════════ */
+.ov { display: none; }
+html.overlay-app, html.overlay-app body { height: 100%; background: transparent !important; overflow: hidden; }
+html.overlay-app body > :not(#overlay):not(.modal-overlay):not(#toast) { display: none !important; }
+html.overlay-app .ov { display: block; position: fixed; inset: 0; }
+.ov-icon, .ov-panel { display: none; }
+.ov[data-state="icon"] .ov-icon { display: flex; }
+.ov[data-state="panel"] .ov-panel { display: flex; }
+
+/* the button: the checkmark, in a round of the theme (room for its shadow around it) */
+.ov-icon {
+  position: absolute; inset: 7px;
+  align-items: center; justify-content: center;
+  border-radius: 50%;
+  color: var(--accent);
+  background: radial-gradient(circle at 32% 26%, color-mix(in srgb, var(--accent) 24%, var(--bg-elevated)), var(--bg-elevated) 72%);
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border-mid));
+  box-shadow: 0 3px 10px rgba(0,0,0,0.45);
+  cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
+  transition: transform 0.15s var(--ease);
+}
+.ov-icon:hover { transform: scale(1.06); }
+.ov-icon:active { cursor: grabbing; transform: scale(0.96); }
+.ov-icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ov-icon svg { width: 26px; height: 26px; }
+
+/* the panel: timers on the left, today's tasks (or the Daily lists) on the right */
+.ov-panel {
+  position: absolute; inset: 8px;
+  flex-direction: column;
+  background: var(--bg-solid);
+  border: 1px solid var(--border-mid);
+  border-radius: 18px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  overflow: hidden;
+}
+.ov-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px 9px 16px;
+  border-bottom: 1px solid var(--border);
+  user-select: none; -webkit-user-select: none;
+  -webkit-app-region: drag;                      /* the header moves the panel */
+}
+.ov-head button { -webkit-app-region: no-drag; }
+.ov-brand { display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--ink); }
+.ov-brand b { font-weight: 650; }
+.ov-brand svg { width: 18px; height: 18px; color: var(--accent); }
+.ov-tabs { display: flex; gap: 2px; padding: 3px; margin-left: 6px; border-radius: 999px; background: var(--bg-surface); border: 1px solid var(--border); }
+.ov-tab {
+  padding: 4px 13px; border: none; border-radius: 999px;
+  font-size: 12.5px; font-weight: 600; color: var(--ink-3); background: none; cursor: pointer;
+}
+.ov-tab:hover { color: var(--ink); }
+.ov-tab[aria-selected="true"] { color: var(--ink); background: var(--bg-elevated); box-shadow: 0 1px 3px rgba(0,0,0,0.25); }
+.ov-signin {
+  margin-left: auto; padding: 5px 12px; border-radius: 999px; cursor: pointer;
+  font-size: 12.5px; font-weight: 600; color: var(--accent);
+  background: var(--accent-dim); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.ov-signin[hidden] { display: none; }
+.ov-min {
+  margin-left: auto; width: 30px; height: 30px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; border: 1px solid transparent; background: none; color: var(--ink-2); cursor: pointer;
+}
+.ov-signin:not([hidden]) + .ov-min { margin-left: 4px; }
+.ov-min:hover { color: var(--ink); background: var(--bg-hover); border-color: var(--border-mid); }
+.ov-min svg { width: 16px; height: 16px; }
+.ov-cols { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); }
+.ov-col { min-height: 0; overflow-y: auto; padding: 14px; scrollbar-width: thin; }
+.ov-timers { border-right: 1px solid var(--border); }
+.ov[data-tab="today"] #defaultContainer-d, .ov[data-tab="daily"] #homeContainer-d { display: none; }
+/* Today: Home's progress bar, today's tasks and the starred Daily lists, no more */
+.ov #homeContainer-d { max-width: none; margin: 0; padding: 0; gap: 16px; }
+.ov #homeContainer-d > :not(.home-hero):not(.home-sec-today):not(.home-sec-daily) { display: none; }
+.ov #homeContainer-d .home-hero { margin: 0; }
+.ov #homeContainer-d .home-hero-top, .ov #homeContainer-d .home-digest-btn { display: none; }
+.ov #defaultContainer-d { grid-template-columns: minmax(0, 1fr); gap: 12px; }

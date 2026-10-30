@@ -121,16 +121,19 @@ function createFakeFirebase({ uid = 'u1', email = 'me@example.com' } = {}) {
     });
     const auth = {
       onAuthStateChanged(cb) { authCb = cb; },
+      /* a Google sign-in's token, as the app hands it over: kept in `credentials`, and signed in */
+      signInWithCredential(cred) { device.credentials.push(cred); device.signIn(); return Promise.resolve({ user: device.user }); },
       signOut() { device.user = null; setTimeout(() => authCb && authCb(null), 0); return Promise.resolve(); },
       get currentUser() { return device.user || null; },
     };
     w.firebase = {
       initializeApp() {},
-      auth: Object.assign(() => auth, { GoogleAuthProvider: { credential: () => ({}) } }),
+      auth: Object.assign(() => auth, { GoogleAuthProvider: { credential: (idToken, accessToken) => ({ idToken, accessToken }) } }),
       database: () => ({ ref: path => ref(split(path)) }),
     };
     return Object.assign(device, {
       user: null,
+      credentials: [],
       /* The sign-in the app would restore or make: fields override the default account. */
       signIn(fields = {}) {
         device.user = { uid, email, getIdToken: async () => 'fake-id-token', ...fields };

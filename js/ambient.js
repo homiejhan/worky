@@ -56,6 +56,8 @@ function ambientSetMotion(on) {
 /* The lights may move now. */
 function ambientMoving() {
   if (!ambientCtx || !ambientMotionOn() || (ambientReduced && ambientReduced.matches) || document.hidden) return false;
+  if (document.documentElement.classList.contains('overlay-app')) return false;   // the desktop app's button and panel cover none of it
+
   const bg = $('themeBg');
   if (bg && bg.classList.contains('on')) return false;      // a background image covers them
   const focused = typeof document.hasFocus === 'function' ? document.hasFocus() : true;

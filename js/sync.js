@@ -17,6 +17,7 @@ import {
 } from './digest-prompts.js';
 import { setTourReoffer, tourMarkSeen, tourOffer, tourReoffer } from './onboarding.js';
 import { bankCloudForget, bankCloudSeen } from './bank.js';
+import { overlayApp, overlaySyncChanged } from './overlay.js';
 import { syncMerge } from './syncmerge.js';
 import {
   copiesIndex, copiesKeep, copiesList, copiesRecent, copiesRefresh, copiesSave, copiesStart, copiesState,
@@ -769,7 +770,10 @@ function syncReconcileRemote(v, { doneWins = false } = {}) {
     syncJustSignedIn = false;
     syncPendingRemote = { state: v.state, updatedAt: v.updatedAt || 0, client: v.client };
     clearTimeout(syncPushTimer);
-    syncOpenChoiceModal();
+    /* the desktop app shows what the account has: it takes the cloud's copy (its
+     * own starter day is kept in Earlier copies), never asks to send its own */
+    if (overlayApp()) setTimeout(syncChooseImport, 0);
+    else syncOpenChoiceModal();
     syncUpdateUI();
     return true;
   }
@@ -1116,25 +1120,44 @@ export async function syncRestoreCopy(id) {
 }
 
 /* ── Sign-in flow ── */
-function syncConnect() {
+const SYNC_APP_STATE = `${SYNC_STATE_TAG}-app`;   // the desktop app's sign-in, done in the browser (overlay.js)
+function syncAuthUrl(state) {
   const params = new URLSearchParams({
     client_id:     GCAL_CLIENT_ID,
     redirect_uri:  GCAL_REDIRECT,
     response_type: 'token',
     scope:         'openid email profile',
     prompt:        'select_account',
-    state:         SYNC_STATE_TAG,
+    state,
   });
-  window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
+  return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
 }
+function syncConnect() {
+  window.location.href = syncAuthUrl(SYNC_STATE_TAG);
+}
+/* The desktop app signs in through the browser (Google turns sign-in away in an
+ * app's own window): this page, opened there, hands the token to the app. */
+export function syncAppSignInUrl() { return syncAuthUrl(SYNC_APP_STATE); }
+function syncHandToApp(url) { window.location.href = url; }
 
 export function syncHandleRedirect() {
   const hash = window.location.hash.slice(1);
   if (!hash.includes('access_token')) return;
   const params = new URLSearchParams(hash);
-  if (params.get('state') !== SYNC_STATE_TAG) return;   // gcal redirect — not ours
+  const state = params.get('state');
+  if (state !== SYNC_STATE_TAG && state !== SYNC_APP_STATE) return;   // gcal redirect — not ours
   const token = params.get('access_token');
   history.replaceState(null, '', window.location.pathname);
+  if (state === SYNC_APP_STATE) {             // for the desktop app, not this browser
+    if (token) syncHandToApp(`focus-overlay://signin#access_token=${encodeURIComponent(token)}`);
+    showToast('Signed in: back to Focus Overlay');
+    return;
+  }
+  syncSignInWithToken(token);
+}
+/* A Google access token from the sign-in (here, or handed over by the browser to
+ * the desktop app) signs this device in to cloud sync. */
+export function syncSignInWithToken(token) {
   if (!token || !syncConfigured()) return;
   syncJustSignedIn = true;
   const cred = firebase.auth.GoogleAuthProvider.credential(null, token);
@@ -1155,6 +1178,7 @@ function syncSignOut() {
 /* ── Settings UI ── */
 export function syncUpdateUI() {
   digestRenderSettings();                      // its "receives digests as …" line follows sign-in state
+  overlaySyncChanged(syncConfigured() && !syncUser);   // the desktop app's own Sign in button
   const line = $('syncStatusLine');
   const btn  = $('syncConnectBtn');
   if (!line || !btn) return;
