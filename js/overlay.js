@@ -31,9 +31,14 @@ function overlayTab(tab) {
  * so the panel never shows squeezed into the button's window, nor the button in
  * the panel's: in between, nothing shows. */
 async function overlayShow(state) {
-  overlayEl.dataset.state = 'moving';
+  overlayState('moving');
   try { await (state === 'panel' ? window.focusOverlay.expand() : window.focusOverlay.collapse()); } catch (e) {}
+  overlayState(state);
+}
+/* (on the page too: a toast has no room while it's the button, style.css) */
+function overlayState(state) {
   overlayEl.dataset.state = state;
+  document.documentElement.dataset.ov = state;
 }
 
 export function overlayInit() {
@@ -43,7 +48,6 @@ export function overlayInit() {
   overlayEl = document.createElement('div');
   overlayEl.id = 'overlay';
   overlayEl.className = 'ov';
-  overlayEl.dataset.state = 'icon';
   overlayEl.innerHTML = `
     <button class="ov-icon" type="button" aria-label="Open Focus" title="Focus: click to open, drag to move">${OVERLAY_CHECK}</button>
     <section class="ov-panel" aria-label="Focus">
@@ -64,6 +68,7 @@ export function overlayInit() {
       </div>
     </section>`;
   document.body.appendChild(overlayEl);
+  overlayState('icon');
   const timers = overlayEl.querySelector('.ov-timers'), tasks = overlayEl.querySelector('.ov-tasks');
   [$('timerStack-d')].forEach(el => el && timers.appendChild(el));
   [$('homeContainer-d'), $('defaultContainer-d')].forEach(el => el && tasks.appendChild(el));
@@ -110,7 +115,7 @@ export function overlayInit() {
 
   if (app.onSignIn) app.onSignIn(token => syncSignInWithToken(token));   // handed over by the browser (sync.js)
   overlaySyncChanged(overlaySignIn);
-  Promise.resolve(app.state ? app.state() : 'icon').then(s => { overlayEl.dataset.state = s === 'panel' ? 'panel' : 'icon'; }, () => {});
+  Promise.resolve(app.state ? app.state() : 'icon').then(s => overlayState(s === 'panel' ? 'panel' : 'icon'), () => {});
   return true;
 }
 

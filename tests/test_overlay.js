@@ -115,6 +115,7 @@ const press = (w, el, moves, { button = 0 } = {}) => {
     ov.querySelector('.ov-min').click();
     await until(() => ov.dataset.state === 'icon');
     ok(app.calls.slice(-1)[0] === 'collapse' && ov.dataset.state === 'icon', 'minimize: back to the button');
+    eq(d.documentElement.dataset.ov, 'icon', 'the page knows (a toast doesn\'t show beside the button)');
     press(w, ov.querySelector('.ov-icon'), []);
     await until(() => ov.dataset.state === 'panel');
     d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));

@@ -3549,6 +3549,7 @@ html.overlay-app .ov { display: block; position: fixed; inset: 0; }
 .ov-icon, .ov-panel { display: none; }
 .ov[data-state="icon"] .ov-icon { display: flex; }
 .ov[data-state="panel"] .ov-panel { display: flex; }
+html.overlay-app:not([data-ov="panel"]) #toast { display: none; }   /* no room for it beside the button */
 
 /* the button: the checkmark, in a round of the theme (room for its shadow around it) */
 .ov-icon {
