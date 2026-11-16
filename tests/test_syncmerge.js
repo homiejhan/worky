@@ -24,7 +24,7 @@ const BASE = {
 };
 
 (async () => {
-  const { syncMerge, syncRecordsIn } = await import(path.join(ROOT, 'js', 'syncmerge.js'));
+  const { syncMerge, syncRecordsIn, calWithoutTwins } = await import(path.join(ROOT, 'js', 'syncmerge.js'));
   const run = (edit, editRemote, opts) => {
     const local = clone(BASE), remote = clone(BASE);
     edit(local); editRemote(remote);
@@ -230,6 +230,55 @@ const BASE = {
     const mr = clone(inList); mr.todoLists[0].tasks[0].done = true; mr.todoLists[0].tasks.splice(2, 0, { id: 3, text: 'Quiz', done: false });
     eq(syncMerge(clone(inList), ml, mr).todoLists[0].tasks.map(x => `${x.text}${x.done ? ' ✓' : ''}`).join(', '), 'Read, Essay ✓, Lab, Quiz',
       'tasks too: dragged here, checked and added there; the one added goes after what comes before it there');
+  }
+
+  console.log('\n── 9. A weekly block two devices filled into the same new day ──');
+  {
+    /* the blocks as each device fills a day it shows for the first time (calendar.js calEnsureDay) */
+    const tpl = [{ id: 1, title: 'Study block', start: '14:00', end: '16:00', color: '#8B5CF6', repeatDays: [1, 3, 5] },
+                 { id: 2, title: 'Lunch', start: '12:15', end: '12:15', color: '#505050', repeatDays: [1, 2, 3, 4, 5], type: 'divider' }];
+    const fill = (day, id) => tpl.map((t, i) => ({ ...t, id: id(t, i), fromTemplate: true, templateId: t.id }));
+    const DAY = '2026-11-23';
+    const base = clone(BASE); base.calendar.calTemplates = clone(tpl); base.calendar.calEventIdCtr = 20;
+    const here = clone(base), there = clone(base);
+    here.calendar.calEvents[DAY] = fill(DAY, (t, i) => `tpl:${t.id}:${DAY}`);
+    there.calendar.calEvents[DAY] = fill(DAY, (t, i) => `tpl:${t.id}:${DAY}`);
+    there.calendar.calEvents[DAY].push({ id: 20, title: 'Placed on the laptop', start: '09:00', end: '10:00', color: '#EC3636' });
+    let m = syncMerge(clone(base), here, there);
+    eq(m.calendar.calEvents[DAY].map(e => e.title).join(', '), 'Study block, Lunch, Placed on the laptop',
+      'both filled it (the same ids for a day\'s blocks on every device): each block once, and the event placed there');
+    /* an older version numbers the blocks from its own counter */
+    const old = clone(base); old.calendar.calEvents[DAY] = fill(DAY, (t, i) => 30 + i);
+    m = syncMerge(clone(base), old, there);
+    eq(m.calendar.calEvents[DAY].map(e => e.title).sort().join(', '), 'Lunch, Placed on the laptop, Study block',
+      'one filled by an older version (its own numbers): still once each');
+    const twice = clone(base); twice.calendar.calEvents[DAY] = [...fill(DAY, (t, i) => 30 + i), ...fill(DAY, (t, i) => 40 + i)];
+    const both = clone(base); both.calendar.calEvents[DAY] = [...fill(DAY, (t, i) => 30 + i), ...fill(DAY, (t, i) => 40 + i)];
+    m = syncMerge(clone(base), twice, both);
+    eq(m.calendar.calEvents[DAY].map(e => `${e.id}:${e.title}`).join(', '), '30:Study block, 31:Lunch', 'a copy that has them twice already (from before this): once again');
+    eq(m.calendar.calEventIdCtr, 32, 'and the counter past what is left');
+    /* what is not a twin stays */
+    const moved = fill(DAY, (t, i) => 50 + i); moved[0].start = '15:00'; moved[0].end = '17:00';
+    const placedTwice = [{ id: 60, title: 'Gym', start: '07:00', end: '08:00', color: '#22C55E' }, { id: 61, title: 'Gym', start: '07:00', end: '08:00', color: '#22C55E' }];
+    const r = calWithoutTwins({ [DAY]: [...fill(DAY, (t, i) => 30 + i), ...moved, ...placedTwice] });
+    eq(r.calEvents[DAY].map(e => `${e.id}:${e.title}@${e.start}`).join(', '), '30:Study block@14:00, 31:Lunch@12:15, 50:Study block@15:00, 60:Gym@07:00, 61:Gym@07:00',
+      'a block moved on that day is not the same as the other copy: it stays; events placed by hand are never taken for twins');
+    eq(r.removed, 1, '(one removed: the second Lunch)');
+
+    /* a block changed on the new day on one side, while the other filled the day as it opened */
+    const edited = clone(base); edited.calendar.calEvents[DAY] = fill(DAY, (t, i) => `tpl:${t.id}:${DAY}`);
+    Object.assign(edited.calendar.calEvents[DAY][0], { start: '15:00', end: '17:00' });
+    const fresh = clone(base); fresh.calendar.calEvents[DAY] = fill(DAY, (t, i) => `tpl:${t.id}:${DAY}`);
+    for (const preferLocal of [true, false]) {
+      m = syncMerge(clone(base), fresh, edited, { preferLocal });
+      eq(m.calendar.calEvents[DAY].map(e => `${e.title}@${e.start}`).join(', '), 'Study block@15:00, Lunch@12:15',
+        `moved to 3pm there, just filled here: 3pm (${preferLocal ? 'this side\'s copy the newer' : 'that side\'s the newer'})`);
+      m = syncMerge(clone(base), edited, fresh, { preferLocal });
+      eq(m.calendar.calEvents[DAY].map(e => `${e.title}@${e.start}`).join(', '), 'Study block@15:00, Lunch@12:15', '…and the other way round');
+    }
+    const onlyHere = clone(base); onlyHere.calendar.calEvents[DAY] = fill(DAY, (t, i) => `tpl:${t.id}:${DAY}`);
+    m = syncMerge(clone(base), onlyHere, clone(base));
+    eq((m.calendar.calEvents[DAY] || []).map(e => e.title).join(', '), 'Study block, Lunch', 'a day only this side has filled yet: kept as it is');
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

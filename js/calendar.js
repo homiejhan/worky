@@ -22,6 +22,7 @@ import {
   gcalReconcileDay, gcalShiftCalendars, gcalSyncAll, gcalUpdateEvent,
 } from './gcal.js';
 import { budgetDesktopOpen, budgetToggleDesktop, money } from './budget.js';
+import { calBlockId, calBlocksFor, calWithoutTwins } from './syncmerge.js';
 import { digestDesktopOpen, digestToggleDesktop } from './digest.js';
 import {
   isShift, normalizeWage, shiftAppIn, shiftMinutes, shiftPay, shiftReason, shiftsOnDays, sumShifts,
@@ -88,18 +89,22 @@ export function calLoad() {
 }
 
 /* ───────────────────────── CALENDAR ───────────────────────── */
+/* A day shown for the first time is filled from the weekly blocks, under ids
+ * that are the same on every device (syncmerge.js calBlocksFor): two devices
+ * that fill it before hearing of each other fill it with the same blocks,
+ * which sync keeps once. */
 export function calEnsureDay(key) {
-  if (!calEvents[key]) {
-    const dow = calKeyToDate(key).getDay();
-    calEvents[key] = calTemplates
-      .filter(t => t.repeatDays && t.repeatDays.includes(dow))
-      .map(t => ({ ...t, id: calEventIdCtr++, fromTemplate: true, templateId: t.id }));
-  }
+  if (!calEvents[key]) calEvents[key] = calBlocksFor(calTemplates, key);
 }
 
+/* The week shown and no more; and a weekly block that two devices filled into a
+ * day each on its own (before calBlockId, or on an older version) once, the
+ * copies gone everywhere as this saves (syncmerge.js calWithoutTwins). */
 export function calPruneDays() {
   const keys = new Set(calDisplayDays().map(calDateKey));
   Object.keys(calEvents).forEach(k => { if (!keys.has(k)) delete calEvents[k]; });
+  const { calEvents: once, removed } = calWithoutTwins(calEvents);
+  if (removed) { calEvents = once; calSave(); saveToLocal(); }
 }
 
 function calBuildTimeCol(el) {
@@ -308,7 +313,7 @@ export function reseedTemplate(tmpl) {
     const linkedOld = calEvents[key].find(e => e.templateId === tmpl.id && taskLinkRefOfEvent(e));
     calEvents[key] = calEvents[key].filter(e => e.templateId !== tmpl.id);
     if (tmpl.repeatDays && tmpl.repeatDays.includes(dow)) {
-      const inst = { ...tmpl, id: calEventIdCtr++, fromTemplate: true, templateId: tmpl.id };
+      const inst = { ...tmpl, id: calBlockId(tmpl.id, key), fromTemplate: true, templateId: tmpl.id };
       if (linkedOld) { taskLinkSetOnEvent(inst, taskLinkRefOfEvent(linkedOld)); inst.title = linkedOld.title; }
       calEvents[key].push(inst);
     } else if (linkedOld) {

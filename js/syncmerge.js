@@ -24,8 +24,9 @@
  * Budget's balance and the bank transactions it counted go together: when both
  * sides changed the balance, the counted transactions come from the same side
  * as the balance (see keepBankWithBalance).
- * Afterwards every id counter is moved past the ids in use, and a purchase that
- * both devices logged from the bank is kept once. */
+ * Afterwards every id counter is moved past the ids in use, a purchase that
+ * both devices logged from the bank is kept once, and so is a weekly block that
+ * two devices filled into the same day (see calWithoutTwins). */
 
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isCounter = key => /(Counter|Ctr)$/.test(String(key || ''));
@@ -209,12 +210,69 @@ function settle(st) {
     st.purchaseIdCounter = past(st.purchaseIdCounter, st.budget.purchases);
   }
   if (isObj(st.calendar)) {
+    st.calendar.calEvents = calWithoutTwins(st.calendar.calEvents).calEvents;
     const events = [...Object.values(isObj(st.calendar.calEvents) ? st.calendar.calEvents : {}).flat(),
       ...(Array.isArray(st.calendar.calTemplates) ? st.calendar.calTemplates : [])];
     st.calendar.calEventIdCtr = past(st.calendar.calEventIdCtr, events);
   }
   if (isObj(st.digest) && Array.isArray(st.digest.suggestions)) st.digest.sugIdCounter = past(st.digest.sugIdCounter, st.digest.suggestions);
   return st;
+}
+
+/* The weekly blocks a day is filled with when a device first shows it
+ * (calendar.js calEnsureDay): each block that repeats on that day of the week,
+ * under the day's own id for it, the same on every device. Numbered from each
+ * one's counter instead, two devices that filled the same day before hearing of
+ * each other gave it two sets of blocks, and the merge kept both. */
+export const calBlockId = (templateId, dateKey) => `tpl:${templateId}:${dateKey}`;
+export function calBlocksFor(templates, dateKey) {
+  const [y, m, d] = String(dateKey).split('-').map(Number);
+  const dow = new Date(y, m - 1, d).getDay();
+  return (Array.isArray(templates) ? templates : [])
+    .filter(t => isObj(t) && Array.isArray(t.repeatDays) && t.repeatDays.includes(dow))
+    .map(t => ({ ...t, id: calBlockId(t.id, dateKey), fromTemplate: true, templateId: t.id }));
+}
+/* A day both sides filled since they last agreed (it came into the calendar's
+ * week on both): both started from the day as filled from the weekly blocks
+ * they agreed on, so that is the base it merges against. A block changed there
+ * on one side is then a change, which the other side's untouched block doesn't
+ * undo, whichever copy is the newer. */
+function withFilledDays(base, local, remote) {
+  const evs = st => (isObj(st) && isObj(st.calendar) && isObj(st.calendar.calEvents) ? st.calendar.calEvents : null);
+  const b = evs(base), l = evs(local), r = evs(remote);
+  if (!b || !l || !r) return base;
+  const days = Object.keys(l).filter(k => k in r && !(k in b) && /^\d{4}-\d\d-\d\d$/.test(k));
+  if (!days.length) return base;
+  const filled = { ...b };
+  days.forEach(k => { filled[k] = calBlocksFor(base.calendar.calTemplates, k); });
+  return { ...base, calendar: { ...base.calendar, calEvents: filled } };
+}
+
+/* A weekly block twice on one day, the same both times but for its id, is there
+ * once. Each device fills a day from the weekly blocks as it comes into the
+ * calendar's week; two devices that did it each on their own, before they heard
+ * of the other's, numbered the blocks each from its own counter (an older
+ * version of Focus still does; this one gives a day's block the same id on every
+ * device: calBlockId), and the merge kept both sets. The copy kept
+ * is the one with the day's own id for it, else the first. A block changed on
+ * that day (moved, renamed) differs from the other copy and stays. */
+export function calWithoutTwins(calEvents) {
+  if (!isObj(calEvents)) return { calEvents, removed: 0 };
+  const out = {};
+  let removed = 0;
+  for (const [day, list] of Object.entries(calEvents)) {
+    if (!Array.isArray(list)) { out[day] = list; continue; }
+    const keep = [], at = new Map();                 // a block's content (without its id) → where it is in keep
+    for (const ev of list) {
+      if (!(isObj(ev) && ev.fromTemplate && ev.templateId != null)) { keep.push(ev); continue; }
+      const c = content(ev);
+      if (!at.has(c)) { at.set(c, keep.length); keep.push(ev); continue; }
+      removed++;
+      if (typeof ev.id === 'string' && typeof keep[at.get(c)].id !== 'string') keep[at.get(c)] = ev;
+    }
+    out[day] = keep;
+  }
+  return { calEvents: out, removed };
 }
 
 /* When both sides changed Budget's balance (a new day rolled over on the phone
@@ -246,7 +304,7 @@ function keepBankWithBalance(out, base, local, remote, preferLocal) {
  * saves; between devices, the remote side is the cloud's). */
 export function syncMerge(base, local, remote, { preferLocal = false, settled = null } = {}) {
   const inCloud = settled && (rec => settled(isObj(rec) && TIMER_DEFAULT in rec ? withoutDefault(rec) : rec));   // (a timer is in the cloud without its default in it)
-  const merged = merge(withTimerDefaults(base), withTimerDefaults(local), withTimerDefaults(remote), { preferLocal, settled: inCloud });
+  const merged = merge(withTimerDefaults(withFilledDays(base, local, remote)), withTimerDefaults(local), withTimerDefaults(remote), { preferLocal, settled: inCloud });
   return settle(keepBankWithBalance(withoutTimerDefaults(merged), base, local, remote, preferLocal));
 }
 /* Each timer's default (timerDefaults, side by side with timers: the first

@@ -235,6 +235,66 @@ function ok(cond, msg) { if (cond) { pass++; console.log('  ✓', msg); } else {
     ok(apps.every(a => W.fp(a) === cloudFp), `seed ${seed}: and every device has the cloud's copy`);
   }
 
+  console.log('\n── 9. The calendar\'s weekly blocks: a new day filled on two devices ──');
+  {
+    /* a device's clock a day on (its localStorage 'test-day-offset'), from before Focus starts */
+    const SHIFT = `(() => { const off = Number(localStorage.getItem('test-day-offset')) || 0; if (!off) return;
+      const R = Date; class D extends R { constructor(...a) { if (a.length) super(...a); else super(R.now() + off); } static now() { return R.now() + off; } }
+      window.Date = D; })();\n`;
+    const W = world({ transform: (src, file) => (file === 'js/main.js' ? SHIFT + src : src) });
+    const [O, P] = await W.devicesOnline(['overlay', 'phone']);           // the overlay: the desktop app, always on
+    const blocks = (st, day) => (st.calendar.calEvents[day] || []).filter(e => e.fromTemplate).map(e => e.title).sort().join(', ');
+    const stOf = app => JSON.parse(app.w.eval('JSON.stringify(gatherState())'));
+    W.close(P);                                                             // the phone, put away for the night
+    O.w.eval(`calEvents[calDateKey(calToday())].push({ id: nextCalEventId(), title: 'Placed tonight', start: '21:00', end: '22:00', color: '#EC3636', type: 'event' }); calSave(); saveToLocal();`);
+    await sleep(1500); await W.net.idle();
+    /* midnight: the overlay goes on into the next day; a new day comes into the week, and it fills it */
+    O.w.localStorage.setItem('test-day-offset', String(864e5));
+    O.w.eval(`(() => { const R = Date; class D extends R { constructor(...a) { if (a.length) super(...a); else super(R.now() + 864e5); } static now() { return R.now() + 864e5; } } window.Date = D; })(); calRefresh();`);
+    const day = O.w.eval('calDateKey(calDisplayDays()[6])');
+    const want = blocks(stOf(O), day);
+    O.w.eval(`calEvents[${JSON.stringify(day)}].push({ id: nextCalEventId(), title: 'Placed in the overlay', start: '08:00', end: '09:00', color: '#378ADD', type: 'event' });
+      Object.assign(calEvents[${JSON.stringify(day)}].find(e => e.fromTemplate && e.type !== 'divider'), { start: '06:00', end: '06:45' }); calSave(); saveToLocal();`);
+    const movedBlock = O.w.eval(`calEvents[${JSON.stringify(day)}].find(e => e.fromTemplate && e.start === '06:00').title`);
+    await sleep(1500); await W.net.idle();
+    ok(want && blocks(W.cloud(), day) === want, `the overlay fills the new day (${day}) with its weekly blocks (${want}); an event is placed there and ${movedBlock} moved to 6am`);
+    /* morning: the phone opens with what it saved last night, shows the week (and so fills that day too) before the cloud's copy is in */
+    const saved = { 'test-day-offset': String(864e5) };
+    for (let i = 0; i < P.w.localStorage.length; i++) { const k = P.w.localStorage.key(i); if (k !== 'test-day-offset') saved[k] = P.w.localStorage.getItem(k); }
+    const P2 = await W.boot('phone', saved, { idb: P.idb });
+    ok(blocks(stOf(P2), day) === want, '(the phone has filled it too, on its own)');
+    P2.dev.signIn();
+    await sleep(3000); await W.net.idle(); await sleep(1500); await W.net.idle();
+    const placed = st => (st.calendar.calEvents[day] || []).filter(e => e.title === 'Placed in the overlay').length;
+    ok(blocks(stOf(P2), day) === want && blocks(stOf(O), day) === want && blocks(W.cloud(), day) === want,
+      'synced: each block once, on both and in the cloud (they used to be there twice, a set from each)');
+    ok(placed(stOf(P2)) === 1 && placed(stOf(O)) === 1 && placed(W.cloud()) === 1, 'and the event placed in the overlay once');
+    const at = st => (st.calendar.calEvents[day] || []).filter(e => e.title === movedBlock).map(e => e.start).join();
+    ok(at(stOf(P2)) === '06:00' && at(stOf(O)) === '06:00' && at(W.cloud()) === '06:00', `and ${movedBlock} still at 6am, though the phone filled the day fresh after`);
+    const P3 = await W.reload(P2);
+    await sleep(3000); await W.net.idle();
+    ok(blocks(stOf(P3), day) === want && blocks(W.cloud(), day) === want, 'and opened again: still once');
+
+    /* a copy from before this, with a day's blocks twice in it (as an older version writes it): taken in, they're once again everywhere */
+    const w = {};
+    const raw = W.net.install(w); raw.signIn();
+    const ref = w.firebase.database().ref('users/u1');
+    let heard = null;
+    ref.on('value', snap => { const v = snap.val(); if (v && typeof v.state === 'string') heard = v.state; });
+    await until(() => heard, 3000);
+    const st = JSON.parse(heard);
+    const today = O.w.eval('calDateKey(calToday())');
+    const dupes = st.calendar.calEvents[today].filter(e => e.fromTemplate).map((e, i) => ({ ...e, id: 900 + i }));
+    st.calendar.calEvents[today].push(...dupes);
+    st.build = 7;
+    await ref.update({ state: JSON.stringify(st), updatedAt: Date.now(), client: 'older-phone' });
+    const twice = blocks(st, today);
+    await sleep(3500); await W.net.idle(); await sleep(1500); await W.net.idle();
+    const once = blocks(stOf(O), today);
+    ok(dupes.length && twice !== once && blocks(stOf(P3), today) === once && blocks(W.cloud(), today) === once && once.split(', ').length === dupes.length,
+      `blocks twice on a day in a copy from before (${twice}): once again on both devices and in the cloud (${once})`);
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
