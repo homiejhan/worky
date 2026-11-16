@@ -4,10 +4,19 @@ name: Email digest
 # cache (downloads them once), starts llama-server locally, runs
 # backend/digest.py against it, and delivers the result to Firebase.
 # Nothing here calls a paid API. The only recurring cost is $0.
+#
+# Who starts it: every morning at 5:00 am Central, a Cloudflare Worker
+# (backend/digest-trigger) starts it through workflow_dispatch, as Run now in
+# the app does. GitHub's own schedule below is only the backup: GitHub starts
+# scheduled runs hours late (5½ typically here, up to 10), so that run builds a
+# digest only if none has come in that day.
 
 on:
   schedule:
-    - cron: "30 11 * * *"     # 11:30 UTC = 6:30 am Austin (CDT) / 5:30 am (CST). Cron is UTC-only.
+    # the backup: 11:30 UTC = 5:30 am Central (CST) / 6:30 am (CDT), then hours of GitHub's delay. At least
+    # half an hour after the morning start, so it never runs ahead of it: it waits for that run to
+    # finish (the concurrency group below), then finds its digest and stops.
+    - cron: "30 11 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -25,7 +34,40 @@ env:
   CTX: "16384"                                  # tokens of context; the largest chunk is ~5k tokens
 
 jobs:
+  # Only for a scheduled (backup) run: has today's digest already come in?
+  due:
+    if: github.event_name == 'schedule'
+    continue-on-error: true      # a check that breaks doesn't fail the run: the digest job builds anyway
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      skip: ${{ steps.today.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - run: pip install -r backend/requirements.txt
+
+      - name: Has today's digest come in?
+        id: today
+        env:
+          TZ: America/Chicago
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          WORKY_UID: ${{ secrets.WORKY_UID }}
+        run: python backend/digest.py --delivered-today
+
   digest:
+    needs: due
+    # Run now and the morning start skip `due` and always build. A backup run
+    # builds unless `due` found today's digest; if it couldn't tell, it builds.
+    if: ${{ !cancelled() && needs.due.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:

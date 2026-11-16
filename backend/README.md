@@ -14,8 +14,9 @@ backend/
 ├── prompts.json      the original prompts and sections (the app's editor reads it too)
 ├── requirements.txt  requests + google-auth
 ├── bank/             the Plaid relay for bank connections (see bank/README.md)
+├── digest-trigger/   the Cloudflare Worker that starts the digest at 5:00 am Central (see its README.md)
 └── README.md
-.github/workflows/digest.yml   the daily cron
+.github/workflows/digest.yml   the workflow; its own GitHub schedule is only the backup
 ```
 
 ## How the two halves meet
@@ -80,6 +81,10 @@ The first run downloads the model (a few minutes); later runs restore it from
 cache in seconds. When the dry run goes green, run it again without the tick
 and the digest appears in the app.
 
+**6. The morning start.** GitHub's own schedule starts the digest hours late, so
+a small Cloudflare Worker starts it at 5:00 am Central instead: a GitHub token
+and two commands, in [`digest-trigger/README.md`](digest-trigger/README.md).
+
 ## Running locally
 
 Any OpenAI-compatible server works. With Ollama on the laptop:
@@ -91,8 +96,13 @@ python backend/digest.py --dry-run     # writes digest.md, no Firebase
 
 ## Things to know
 
-- Cron is best-effort. GitHub often starts scheduled jobs 10–30 minutes late,
-  and disables schedules after 60 days without a commit to the repo.
+- GitHub's cron is best-effort, and here it has been hours late every day: 57 of
+  57 scheduled runs from September 20 to November 15, 2026 started 2¾ to 10 hours
+  late (5½ typically). So the morning start comes from `digest-trigger/`, and the
+  scheduled run is the backup: its first job (`due`, `digest.py --delivered-today`)
+  ends the run when a digest already came in that day, Central time. GitHub also
+  disables a scheduled workflow after 60 days without a commit to the repo, and
+  then the morning start can't run it either (Actions → Email digest → Enable).
 - Logs print only counts and timings, never email content — Actions logs on a
   public repo are public. The dry run deliberately does not upload the digest
   as an artifact for the same reason.

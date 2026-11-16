@@ -3,7 +3,7 @@
 The digest is built **off-device** and delivered to the app.
 
 ```
-GitHub Actions (daily 6:30 am CT, or "Run now")
+GitHub Actions (5:00 am CT, started by backend/digest-trigger, or "Run now")
   └─ backend/digest.py
        ├─ Gmail API  ← refresh token (GitHub secret)
        ├─ llama-server + Qwen3.5-4B (GGUF, cached on the runner)

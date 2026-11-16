@@ -29,6 +29,9 @@ Usage:
   python backend/digest.py             # full run → Firebase
   python backend/digest.py --dry-run   # everything except the Firebase write; saves digest.md
                                        # (still reads your saved prompts when the Firebase secrets are set)
+  python backend/digest.py --delivered-today
+                                       # only says skip=true|false: has a digest come in today (TZ)?
+                                       # (the scheduled backup run's first step; needs the Firebase secrets)
 """
 
 import argparse
@@ -620,6 +623,51 @@ def load_prompts(token=None, project=None):
     return prompts
 
 
+def delivered_today(token, project):
+    """When today's digest came in (local time, from TZ), or None if none has yet.
+    users/<uid>/digestInbox/at is the newest delivery, whichever run made it.
+    Errors name only the status or the kind of failure: a request's own message
+    carries the URL, access token and all, and Actions logs here are public."""
+    uid = os.environ["WORKY_UID"]
+    try:
+        r = requests.get(f"{firebase_db(project)}/users/{uid}/digestInbox/at.json",
+                         params={"access_token": token}, timeout=30)
+    except requests.RequestException as e:
+        raise DigestError(f"Firebase not reachable ({type(e).__name__})") from None
+    if not r.ok:
+        raise DigestError(f"Firebase read failed ({r.status_code})")
+    at = r.json()
+    if isinstance(at, bool) or not isinstance(at, (int, float)) or at <= 0:
+        return None
+    when = dt.datetime.fromtimestamp(at / 1000)
+    return when if when.date() == dt.date.today() else None
+
+
+def report_delivered_today():
+    """--delivered-today: the scheduled backup run's first step. GitHub starts that
+    run hours late, when the morning start (backend/digest-trigger) has usually
+    delivered already, so this writes skip=true to $GITHUB_OUTPUT when a digest
+    came in today and the workflow ends there. When it can't tell, skip=false:
+    a second digest beats none."""
+    skip = False
+    try:
+        token, project = firebase_token()
+        when = delivered_today(token, project)
+        skip = when is not None
+        log(f"today's digest came in at {when:%-I:%M %p}; this backup run stops here" if skip
+            else "no digest has come in today; this backup run builds one")
+    except DigestError as e:
+        log(f"could not tell whether today's digest came in ({e}); building one")
+    except Exception as e:
+        log(f"could not tell whether today's digest came in ({type(e).__name__}); building one")
+    line = f"skip={'true' if skip else 'false'}"
+    out = os.environ.get("GITHUB_OUTPUT")
+    if out:
+        with open(out, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    print(line, flush=True)
+
+
 def firebase_deliver(payload):
     """Write the digest. A service-account access token lives for one hour and
     the model step can take longer than that on a slow runner, so always mint a
@@ -643,7 +691,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="skip the Firebase write; save digest.md locally")
     ap.add_argument("--out", default="digest.md")
+    ap.add_argument("--delivered-today", action="store_true",
+                    help="only report skip=true|false: has a digest come in today? (the scheduled backup's check)")
     args = ap.parse_args()
+    if args.delivered_today:
+        report_delivered_today()
+        return
 
     # Check everything that can be checked cheaply BEFORE spending 30 minutes on the model.
     missing = [k for k in ("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN") if not os.environ.get(k)]

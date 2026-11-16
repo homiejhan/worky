@@ -1,0 +1,25 @@
+# Cloudflare Workers settings for the email digest's morning start (worker.mjs).
+# Deploy from this folder:  npx wrangler deploy
+# Then, once, the GitHub token it starts the workflow with (fine-grained, this
+# repository only, Actions: Read and write). It's a secret, never written here:
+#   npx wrangler secret put GITHUB_TOKEN
+name = "focus-digest-trigger"
+main = "worker.mjs"
+compatibility_date = "2026-09-01"
+
+# Keeps its logs (a few lines a day), so the dashboard shows why a morning failed.
+[observability]
+enabled = true
+
+[triggers]
+# Every hour on the hour (cron is UTC); the Worker acts only when it's
+# START_HOUR in TIME_ZONE, so daylight saving time needs no change here.
+crons = ["0 * * * *"]
+
+[vars]
+REPO = "homiejhan/worky"
+WORKFLOW = "digest.yml"
+TIME_ZONE = "America/Chicago"
+# 5:00 am. A quiet day's digest is in within minutes, a busy weekday's in about an hour.
+# Keep it at 5 or earlier: GitHub's backup is due at 5:30 (6:30 in summer) and must come after it.
+START_HOUR = "5"
