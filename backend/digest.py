@@ -557,6 +557,11 @@ def build(llm, emails, prompts):
 
 
 # ── Firebase ─────────────────────────────────────────────────────────────────
+# Every database request carries the access token (admin access to the whole
+# database for an hour) in its URL, and a request's own error message quotes
+# the URL, token and all. Actions logs here are public, so each request is
+# wrapped to raise only the kind of failure, and errors name the status but
+# never the response body, which an error page could fill with the URL.
 
 def firebase_service_account():
     """The secret is the downloaded key file pasted whole; also accept it base64-encoded."""
@@ -599,10 +604,13 @@ def firebase_db(project):
 def firebase_prompts(token, project):
     """users/<uid>/digestPrompts, written by the app's Settings editor. Returns None if unset."""
     uid = os.environ["WORKY_UID"]
-    r = requests.get(f"{firebase_db(project)}/users/{uid}/digestPrompts.json",
-                     params={"access_token": token}, timeout=30)
+    try:
+        r = requests.get(f"{firebase_db(project)}/users/{uid}/digestPrompts.json",
+                         params={"access_token": token}, timeout=30)
+    except requests.RequestException as e:
+        raise DigestError(f"Firebase not reachable ({type(e).__name__})") from None
     if not r.ok:
-        raise DigestError(f"Firebase read failed ({r.status_code}): {r.text[:200]}")
+        raise DigestError(f"Firebase read failed ({r.status_code})")
     return r.json()
 
 
@@ -615,8 +623,11 @@ def load_prompts(token=None, project=None):
         return defaults
     try:
         prompts, edited = merge_prompts(defaults, firebase_prompts(token, project))
-    except Exception as e:
+    except DigestError as e:
         log(f"prompts: could not read saved edits ({e}); using the originals")
+        return defaults
+    except Exception as e:   # only a DigestError's text is known to be safe to print
+        log(f"prompts: could not read saved edits ({type(e).__name__}); using the originals")
         return defaults
     log(f"prompts: saved edits for {', '.join(edited)}" if edited else "prompts: originals")
     log("sections: " + ", ".join(f"{strip_emoji(s['title'])} ({s['id']})" for s in prompts["sections"]))
@@ -676,13 +687,20 @@ def firebase_deliver(payload):
     token, project = firebase_token()
     uid = os.environ["WORKY_UID"]
     url = f"{firebase_db(project)}/users/{uid}/digestInbox.json"
-    r = requests.put(url, params={"access_token": token}, json=payload, timeout=30)
+
+    def put(token):
+        try:
+            return requests.put(url, params={"access_token": token}, json=payload, timeout=30)
+        except requests.RequestException as e:
+            raise DigestError(f"Firebase not reachable ({type(e).__name__})") from None
+
+    r = put(token)
     if r.status_code == 401:
         log("firebase: token rejected, minting a fresh one and retrying")
         token, _ = firebase_token()
-        r = requests.put(url, params={"access_token": token}, json=payload, timeout=30)
+        r = put(token)
     if not r.ok:
-        raise DigestError(f"Firebase write failed ({r.status_code}): {r.text[:200]}")
+        raise DigestError(f"Firebase write failed ({r.status_code})")
 
 
 # ── main ─────────────────────────────────────────────────────────────────────
