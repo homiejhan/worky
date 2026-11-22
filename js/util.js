@@ -158,12 +158,14 @@ export function closeModal(id) { $(id).classList.remove('show'); }
 
 /* ── Hold the page still across a delete ──
  * Deleting a task, list or event rebuilds whole sections (renderTodos,
- * renderDbd, renderHome). Chrome keeps the page where it was through that,
- * but Safari — on the Mac and on iPhone — can snap a panel back to the top,
- * sometimes a moment later as the tap and the keyboard settle. So note how far
- * each page panel is scrolled, run the change, and put them back: right away,
- * then a few more times over the next ~400ms — unless the user starts
- * scrolling or tapping in the meantime, in which case they are left alone. */
+ * renderDbd, renderHome). Chrome moves the page too when the rebuild takes
+ * away the button just pressed, which has the focus (see toggleStarList in
+ * lists.js), and Safari — on the Mac and on iPhone — can snap a panel back
+ * to the top, sometimes a moment later as the tap and the keyboard settle.
+ * So note how far each page panel is scrolled, run the change, and put them
+ * back: right away, then a few more times over the next ~400ms — unless the
+ * user starts scrolling or tapping in the meantime, in which case they are
+ * left alone. */
 const PAGE_SCROLLERS = '.right-panel, .swipe-panel, .home-desktop-panel, .left-panel';
 const USER_MOVES = ['wheel', 'touchstart', 'pointerdown', 'keydown'];
 export function keepScroll(fn) {

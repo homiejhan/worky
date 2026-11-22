@@ -51,7 +51,7 @@ function buildCard(list, pfx) {
     : `<button class="todo-delete-btn" onclick="removeTodoList(${list.id})" title="Delete list">×</button>`;
   const starBtn =
     `<button class="list-star-btn ${list.starred ? 'starred' : ''}" onclick="toggleStarList(${list.id})"
-       title="${list.starred ? 'Unstar list' : 'Star list as more important'}">${STAR_SVG}</button>`;
+       title="${starTitle(list.starred)}">${STAR_SVG}</button>`;
   const scheduleBtn = list.isDefault
     ? `<button class="list-sched-btn" onclick="openScheduleModal(${list.id})" title="Set active days">${DOTS_SVG}</button>`
     : '';
@@ -311,11 +311,25 @@ export function setListTitle(id, value) {
   if (l) { l.title = value; saveToLocal(); }
 }
 
+function starTitle(starred) { return starred ? 'Unstar list' : 'Star list as more important'; }
+
+/* Starring and recolouring a list repaint it where it is drawn, and never
+ * rebuild the cards: the click that stars a list has just focused its star,
+ * and a rebuild destroys that button half-way through, at which point the
+ * browser lays out the half-built page and the panel is pulled up toward the
+ * top of the lists. A rebuild also replays the pop of every checked box. */
 export function toggleStarList(id) {
   const l = listById(id);
   if (!l) return;
   l.starred = !l.starred;
-  renderTodos();
+  document.querySelectorAll(`.todo-card[data-list-id="${id}"]`).forEach(card => {
+    card.classList.toggle('starred', !!l.starred);
+    const btn = card.querySelector('.list-star-btn');
+    if (!btn) return;
+    btn.classList.toggle('starred', !!l.starred);
+    btn.title = starTitle(l.starred);
+  });
+  renderHome();   // Home shows the starred lists
   saveToLocal();
 }
 
@@ -352,8 +366,13 @@ export function changeTodoColor(id, color) {
       c.style.background = color; c.style.borderColor = color;
     });
   });
-  // Tagged rows in Day by Day carry the list color (accent bar, select tint).
-  if (!list.isDefault && list.tasks.some(t => t.due)) renderDbd();
+  // A dated task's chip on the card, and its row in Day by Day (accent bar,
+  // select tint), wear the list colour too. Repainted, not redrawn: this runs
+  // on every step of the colour picker (see toggleStarList).
+  document.querySelectorAll(`.todo-card[data-list-id="${id}"] .task-date-chip.has-date:not(.overdue)`)
+    .forEach(c => { c.style.color = color; });
+  document.querySelectorAll(`.dbd-row[data-list-id="${id}"]`).forEach(r => r.style.setProperty('--tagc', color));
+  renderHome();   // Home shows the colour too (starred lists, today's tasks)
   saveToLocal();
 }
 
